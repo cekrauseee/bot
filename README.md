@@ -10,17 +10,24 @@ myBOT is a portfolio project for a modern AI agent. The current foundation inclu
 
 ## Development
 
-Install the workspace dependencies, then run either application:
+Discover the available workflows at any time:
 
 ```bash
-npm install
-uv sync --project apps/api
-npm run dev:infra
-npm run db:migrate
-npm run dev:web
-npm run dev:api
+npm run help
 ```
 
-Run all automated checks with `npm run check`.
+Prepare the complete local environment once:
+
+```bash
+npm run setup
+```
+
+Then start PostgreSQL, Redis, migrations, FastAPI, and Vite with:
+
+```bash
+npm run dev
+```
+
+Run the complete unit, integration, lint, migration, and build verification with `npm run verify`.
 
 See the [developer documentation](docs/index.md) for architecture, setup, and project boundaries.

@@ -7,7 +7,7 @@
 From the repository root:
 
 ```sh
-npm run dev:emails
+npm run emails:dev
 npm run render --workspace @my-bot/emails
 npm run export --workspace @my-bot/emails
 ```
