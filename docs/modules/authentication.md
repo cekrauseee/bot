@@ -36,4 +36,4 @@ OTP request responses are identical for new and existing email addresses. Errors
 
 ## Production Topology
 
-Configure the web and API as sibling HTTPS subdomains. Register the exact API callback URI in the Google OAuth client. Configure the serving proxy to pass only trusted forwarded client addresses so IP rate limits use the original client rather than a shared proxy address.
+Configure the web and API as sibling HTTPS subdomains. Register the exact API callback URI in the Google OAuth client. Set the web build's `VITE_API_BASE_URL` to the API sibling origin. If a serving proxy is present, list its immediate IP address in `TRUSTED_PROXY_HOSTS`; the API then accepts only a single valid `X-Forwarded-For` address from that peer, and ignores forwarded headers from direct or untrusted peers.

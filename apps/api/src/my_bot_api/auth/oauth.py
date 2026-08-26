@@ -10,6 +10,8 @@ from starlette.responses import RedirectResponse
 from my_bot_api.auth.errors import AuthError
 from my_bot_api.config import Settings
 
+GOOGLE_ISSUER = "https://accounts.google.com"
+
 
 class RedisOAuthCache:
     def __init__(self, redis: Redis, *, prefix: str = "auth:oauth:state:") -> None:
@@ -81,6 +83,11 @@ class GoogleOAuthService:
             token = await self._google.authorize_access_token(
                 request,
                 claims_options={
+                    "iss": {"essential": True, "values": [GOOGLE_ISSUER]},
+                    "aud": {
+                        "essential": True,
+                        "values": [self._settings.google_client_id],
+                    },
                     "email": {"essential": True},
                     "email_verified": {"essential": True},
                     "sub": {"essential": True},

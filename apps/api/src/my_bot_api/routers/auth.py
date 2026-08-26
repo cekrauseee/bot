@@ -1,4 +1,6 @@
+import ipaddress
 import logging
+from collections.abc import Collection
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -43,8 +45,25 @@ def require_browser_origin(
     )
 
 
-def client_ip(request: Request) -> str:
-    return request.client.host if request.client is not None else "unknown"
+def client_ip(request: Request, trusted_proxy_hosts: Collection[str] = ()) -> str:
+    peer = request.client.host if request.client is not None else "unknown"
+    if peer not in trusted_proxy_hosts:
+        return peer
+
+    # The deployment contract is one trusted hop: accept XFF only when it is
+    # exactly one valid address. This prevents an untrusted caller from
+    # smuggling a second address into a proxy chain.
+    forwarded_values = request.headers.getlist("x-forwarded-for")
+    if len(forwarded_values) != 1:
+        return peer
+    forwarded = forwarded_values[0].strip()
+    if not forwarded or "," in forwarded:
+        return peer
+    try:
+        ipaddress.ip_address(forwarded)
+    except ValueError:
+        return peer
+    return forwarded
 
 
 def user_response(user: object) -> UserResponse:
@@ -64,7 +83,7 @@ async def request_otp(
 ) -> OtpChallengeResponse:
     challenge = await container.otp.issue(
         email=normalize_email(str(payload.email)),
-        ip_address=client_ip(request),
+        ip_address=client_ip(request, container.settings.trusted_proxy_hosts),
     )
     return OtpChallengeResponse(
         challenge_id=challenge.challenge_id,
@@ -84,18 +103,34 @@ async def verify_otp(
     response: Response,
     container: Container,
 ) -> AuthResponse:
-    email = await container.otp.verify(
+    reservation = await container.otp.reserve(
         challenge_id=payload.challenge_id,
         code=payload.code,
-        ip_address=client_ip(request),
+        ip_address=client_ip(request, container.settings.trusted_proxy_hosts),
     )
-    async with container.database.transaction() as database_session:
-        repository = AuthRepository(database_session)
-        user = await repository.get_or_create_email_user(
-            email,
-            email_verified_at=datetime.now(UTC),
-        )
-        issued_session = await container.sessions.issue(repository, user)
+    try:
+        async with container.database.transaction() as database_session:
+            repository = AuthRepository(database_session)
+            user = await repository.get_or_create_email_user(
+                reservation.email,
+                email_verified_at=datetime.now(UTC),
+            )
+            issued_session = await container.sessions.issue(repository, user)
+    except Exception:
+        await container.otp.release(reservation)
+        raise
+    try:
+        if not await container.otp.finalize(reservation):
+            raise AuthError(
+                code="invalid_code",
+                message="That code is invalid or has expired. Request a new code.",
+                status_code=400,
+            )
+    except Exception:
+        # A transient Redis failure must not leave a successful DB write with
+        # an indefinitely reserved challenge.
+        await container.otp.release(reservation)
+        raise
     container.sessions.set_cookie(response, issued_session.token)
     return AuthResponse(user=user_response(user))
 

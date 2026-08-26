@@ -23,6 +23,8 @@ npm run db:migrate
 
 Replace every placeholder secret in `.env`. Register the local Google callback as `http://localhost:8000/auth/google/callback`. The Resend template must be published before email login can deliver codes.
 
+`TRUSTED_PROXY_HOSTS` is an optional comma-separated allowlist of immediate proxy IP addresses. Only a request whose direct peer is in this list may supply exactly one valid address in `X-Forwarded-For`; all other forwarded headers are ignored. In production, set `VITE_API_BASE_URL` in `apps/web/.env` to the API sibling origin.
+
 The frontend lockfile lives at the repository root. The API lockfile lives at `apps/api/uv.lock`.
 
 ## Commands

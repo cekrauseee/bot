@@ -33,7 +33,15 @@ export class AuthApiError extends Error {
   }
 }
 
-const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.trim()
+
+if (import.meta.env.PROD && !configuredApiBase) {
+  throw new Error(
+    'VITE_API_BASE_URL must be configured for production (the API is served on a sibling origin).',
+  )
+}
+
+const apiBase = (configuredApiBase || '').replace(/\/$/, '')
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const isJsonRequest = Boolean(init?.body)

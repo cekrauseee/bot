@@ -1,5 +1,4 @@
 import asyncio
-import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -8,14 +7,20 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from my_bot_api import models  # noqa: F401 - register all tables with metadata
+from my_bot_api.config import get_settings
 from my_bot_api.database.base import Base
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
-config.set_main_option(
-    "sqlalchemy.url", os.getenv("DATABASE_URL", config.get_main_option("sqlalchemy.url"))
-)
+
+
+def escape_alembic_url(url: str) -> str:
+    """Escape percent-encoded credentials for ConfigParser interpolation."""
+    return url.replace("%", "%%")
+
+
+config.set_main_option("sqlalchemy.url", escape_alembic_url(get_settings().database_url))
 target_metadata = Base.metadata
 
 

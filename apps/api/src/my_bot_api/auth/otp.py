@@ -32,19 +32,31 @@ redis.call('DEL', KEYS[3])
 return 1
 """
 
-_VERIFY_SCRIPT = """
-if redis.call('EXISTS', KEYS[1]) == 0 then
-  return {'missing'}
+_INSTALL_ISSUE_SCRIPT = """
+local current = redis.call('GET', KEYS[1])
+if ARGV[1] == '__none__' then
+  if current then return {'stale'} end
+elseif current ~= ARGV[1] then
+  return {'stale'}
 end
-if redis.call('GET', KEYS[2]) ~= ARGV[1] then
-  redis.call('DEL', KEYS[1])
-  return {'missing'}
-end
+if current then redis.call('DEL', KEYS[3]) end
+redis.call(
+  'HSET', KEYS[2], 'code_hash', ARGV[3], 'email', ARGV[4],
+  'attempts', '0', 'status', 'active'
+)
+redis.call('EXPIRE', KEYS[2], ARGV[5])
+redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[5])
+return {'installed'}
+"""
+
+_RESERVE_SCRIPT = """
+if redis.call('EXISTS', KEYS[1]) == 0 then return {'missing'} end
+if redis.call('GET', KEYS[2]) ~= ARGV[1] then return {'missing'} end
+if redis.call('HGET', KEYS[1], 'status') == 'reserved' then return {'already_reserved'} end
 local expected = redis.call('HGET', KEYS[1], 'code_hash')
 if expected == ARGV[2] then
   local email = redis.call('HGET', KEYS[1], 'email')
-  redis.call('DEL', KEYS[1])
-  redis.call('DEL', KEYS[2])
+  redis.call('HSET', KEYS[1], 'status', 'reserved', 'reservation', ARGV[4])
   return {'verified', email}
 end
 local attempts = redis.call('HINCRBY', KEYS[1], 'attempts', 1)
@@ -56,12 +68,37 @@ end
 return {'invalid', tostring(attempts)}
 """
 
+_FINALIZE_SCRIPT = """
+if redis.call('HGET', KEYS[1], 'reservation') ~= ARGV[1] then return 0 end
+redis.call('DEL', KEYS[1])
+if redis.call('GET', KEYS[2]) == ARGV[2] then redis.call('DEL', KEYS[2]) end
+return 1
+"""
+
+_RELEASE_SCRIPT = """
+if redis.call('HGET', KEYS[1], 'reservation') ~= ARGV[1] then return 0 end
+if redis.call('GET', KEYS[2]) == ARGV[2] then
+  redis.call('HSET', KEYS[1], 'status', 'active')
+  redis.call('HDEL', KEYS[1], 'reservation')
+else
+  redis.call('DEL', KEYS[1])
+end
+return 1
+"""
+
 
 @dataclass(frozen=True, slots=True)
 class IssuedOtp:
     challenge_id: str
     expires_in_seconds: int
     resend_after_seconds: int
+
+
+@dataclass(frozen=True, slots=True)
+class OtpReservation:
+    challenge_id: str
+    email: str
+    reservation_id: str
 
 
 class OtpService:
@@ -139,17 +176,32 @@ class OtpService:
         challenge_key = f"auth:otp:challenge:{challenge_id}"
         active_key = f"auth:otp:active:{email_key}"
         previous_challenge = await self._redis.get(active_key)
-
-        async with self._redis.pipeline(transaction=True) as pipeline:
-            if previous_challenge:
-                pipeline.delete(f"auth:otp:challenge:{previous_challenge}")
-            pipeline.hset(
-                challenge_key,
-                mapping={"code_hash": code_hash, "email": email, "attempts": "0"},
+        expected_active = previous_challenge or "__none__"
+        previous_key = (
+            f"auth:otp:challenge:{previous_challenge}"
+            if previous_challenge
+            else "auth:otp:challenge:unused"
+        )
+        installed = await self._redis.eval(
+            _INSTALL_ISSUE_SCRIPT,
+            3,
+            active_key,
+            challenge_key,
+            previous_key,
+            expected_active,
+            challenge_id,
+            code_hash,
+            email,
+            self._settings.otp_ttl_seconds,
+        )
+        if installed[0] != "installed":
+            await self._delete_if_value(cooldown_key, challenge_id)
+            raise AuthError(
+                code="rate_limited",
+                message="A newer code is already active. Wait before trying again.",
+                status_code=429,
+                retry_after_seconds=self._settings.otp_resend_cooldown_seconds,
             )
-            pipeline.expire(challenge_key, self._settings.otp_ttl_seconds)
-            pipeline.set(active_key, challenge_id, ex=self._settings.otp_ttl_seconds)
-            await pipeline.execute()
 
         try:
             await self._email_sender.send_otp(
@@ -179,7 +231,7 @@ class OtpService:
             resend_after_seconds=self._settings.otp_resend_cooldown_seconds,
         )
 
-    async def verify(self, *, challenge_id: str, code: str, ip_address: str) -> str:
+    async def reserve(self, *, challenge_id: str, code: str, ip_address: str) -> OtpReservation:
         await self._take_limit(
             f"auth:otp:verify:ip:{self._ip_key(ip_address)}",
             self._settings.otp_verify_attempts_per_ip_window,
@@ -190,22 +242,28 @@ class OtpService:
             pepper=self._settings.otp_pepper.get_secret_value(),
         )
         challenge_key = f"auth:otp:challenge:{challenge_id}"
-        email = await self._redis.hget(challenge_key, "email")
-        if not email:
+        email_hint = await self._redis.hget(challenge_key, "email")
+        if not email_hint:
             raise invalid_code_error()
-        active_key = f"auth:otp:active:{self._email_key(email)}"
+        active_key = f"auth:otp:active:{self._email_key(email_hint)}"
+        reservation_id = generate_opaque_token()
         result = await self._redis.eval(
-            _VERIFY_SCRIPT,
+            _RESERVE_SCRIPT,
             2,
             challenge_key,
             active_key,
             challenge_id,
             candidate_hash,
             self._settings.otp_max_attempts,
+            reservation_id,
         )
         status = result[0]
         if status == "verified":
-            return result[1]
+            return OtpReservation(
+                challenge_id=challenge_id,
+                email=str(result[1]),
+                reservation_id=reservation_id,
+            )
         if status == "locked":
             raise AuthError(
                 code="code_attempts_exhausted",
@@ -214,6 +272,44 @@ class OtpService:
                 retry_after_seconds=self._settings.otp_resend_cooldown_seconds,
             )
         raise invalid_code_error()
+
+    async def finalize(self, reservation: OtpReservation) -> bool:
+        active_key = f"auth:otp:active:{self._email_key(reservation.email)}"
+        result = await self._redis.eval(
+            _FINALIZE_SCRIPT,
+            2,
+            f"auth:otp:challenge:{reservation.challenge_id}",
+            active_key,
+            reservation.reservation_id,
+            reservation.challenge_id,
+        )
+        return bool(int(result))
+
+    async def release(self, reservation: OtpReservation) -> bool:
+        active_key = f"auth:otp:active:{self._email_key(reservation.email)}"
+        result = await self._redis.eval(
+            _RELEASE_SCRIPT,
+            2,
+            f"auth:otp:challenge:{reservation.challenge_id}",
+            active_key,
+            reservation.reservation_id,
+            reservation.challenge_id,
+        )
+        return bool(int(result))
+
+    async def verify(self, *, challenge_id: str, code: str, ip_address: str) -> str:
+        reservation = await self.reserve(
+            challenge_id=challenge_id,
+            code=code,
+            ip_address=ip_address,
+        )
+        try:
+            if not await self.finalize(reservation):
+                raise invalid_code_error()
+        except Exception:
+            await self.release(reservation)
+            raise
+        return reservation.email
 
     async def close(self) -> None:
         await self._redis.aclose()
