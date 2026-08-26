@@ -32,7 +32,7 @@ OTP request responses are identical for new and existing email addresses. Errors
 
 ## Email Template
 
-`apps/emails/emails/login-otp.tsx` is the versioned React Email source. Publish it in Resend with alias `mybot-login-otp`, subject `Your myBOT sign-in code`, and variables `OTP_CODE` and `EXPIRATION_MINUTES`. The API sends from `RESEND_FROM`; production uses `myBOT <hello@mybot.cekrause.eu>`.
+`apps/emails/emails/login-otp.tsx` is the versioned React Email source. Publish it in Resend with alias `mybot-login-otp`, subject `Your myBot sign-in code`, and variables `OTP_CODE` and `EXPIRATION_MINUTES`. The API sends from `RESEND_FROM`; production uses `myBot <hello@mybot.cekrause.eu>`.
 
 ## Production Topology
 

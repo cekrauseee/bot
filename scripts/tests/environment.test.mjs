@@ -16,7 +16,7 @@ RATE_LIMIT_PEPPER=replace-with-rate
 GOOGLE_CLIENT_ID=example.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=replace-with-google-client-secret
 RESEND_API_KEY=re_example
-RESEND_FROM="myBOT <hello@example.com>"
+RESEND_FROM="myBot <hello@example.com>"
 RESEND_OTP_TEMPLATE_ID=mybot-login-otp
 `
 
@@ -53,7 +53,7 @@ test('prepareEnvironment creates files and generates independent local secrets',
     'RATE_LIMIT_PEPPER',
   ])
   assert.equal(new Set(generatedValues).size, 3)
-  assert.equal(values.get('RESEND_FROM'), 'myBOT <hello@mybot.cekrause.eu>')
+  assert.equal(values.get('RESEND_FROM'), 'myBot <hello@mybot.cekrause.eu>')
   assert.equal((await stat(path.join(root, '.env'))).mode & 0o777, 0o600)
 })
 

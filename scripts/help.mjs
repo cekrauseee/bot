@@ -4,7 +4,7 @@ const commandWidth = Math.max(
   ...commandSections.flatMap(({ commands }) => commands.map(([name]) => name.length)),
 )
 
-console.log('myBOT development commands')
+console.log('myBot development commands')
 
 for (const { title, commands } of commandSections) {
   console.log(`\n${title}`)

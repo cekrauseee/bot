@@ -2,7 +2,7 @@
 
 ## Purpose
 
-myBOT is a portfolio project for an AI agent inspired by the clarity and restraint of products such as ChatGPT and Grok. The product will use a React frontend and a Python backend while keeping provider and infrastructure decisions explicit.
+myBot is a portfolio project for an AI agent inspired by the clarity and restraint of products such as ChatGPT and Grok. The product will use a React frontend and a Python backend while keeping provider and infrastructure decisions explicit.
 
 ## Scope
 

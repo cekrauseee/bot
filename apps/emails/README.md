@@ -1,6 +1,6 @@
-# myBOT transactional email
+# myBot transactional email
 
-`login-otp.tsx` is the React Email source for the Resend template alias `mybot-login-otp`. Set the hosted template subject to **Your myBOT sign-in code**.
+`login-otp.tsx` is the React Email source for the Resend template alias `mybot-login-otp`. Set the hosted template subject to **Your myBot sign-in code**.
 
 ## Local preview and render
 
@@ -16,6 +16,6 @@ The preview uses code `482913` and a 10-minute expiry. `render` writes `out/logi
 
 ## Resend template upload
 
-Run `npm run resend:setup --workspace @my-bot/emails` once to configure the React Email CLI with a Resend API key locally. Then run the preview and use its Resend toolbar tab to upload the template. In Resend, set the subject to **Your myBOT sign-in code**, publish the template with alias `mybot-login-otp`, and define `OTP_CODE` (string) and `EXPIRATION_MINUTES` (number). The template must be published before the backend alias can send. Never commit the API key.
+Run `npm run resend:setup --workspace @my-bot/emails` once to configure the React Email CLI with a Resend API key locally. Then run the preview and use its Resend toolbar tab to upload the template. In Resend, set the subject to **Your myBot sign-in code**, publish the template with alias `mybot-login-otp`, and define `OTP_CODE` (string) and `EXPIRATION_MINUTES` (number). The template must be published before the backend alias can send. Never commit the API key.
 
 The backend sends the published alias using Resend's template API, passing `OTP_CODE` and `EXPIRATION_MINUTES` in `template.variables`.

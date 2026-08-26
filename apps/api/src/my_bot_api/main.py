@@ -29,7 +29,7 @@ def create_app(
         finally:
             await resolved_container.close()
 
-    application = FastAPI(title="myBOT API", version="0.1.0", lifespan=lifespan)
+    application = FastAPI(title="myBot API", version="0.1.0", lifespan=lifespan)
     application.state.container = resolved_container
     application.add_middleware(
         CORSMiddleware,

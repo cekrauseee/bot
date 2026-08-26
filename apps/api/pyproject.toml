@@ -1,7 +1,7 @@
 [project]
 name = "my-bot-api"
 version = "0.1.0"
-description = "HTTP API for myBOT."
+description = "HTTP API for myBot."
 requires-python = ">=3.14"
 dependencies = [
     "alembic==1.19.1",

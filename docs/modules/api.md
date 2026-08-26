@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-`apps/api` is the Python service boundary for myBOT. It uses Python 3.14, FastAPI, Pydantic, SQLAlchemy, Psycopg, Redis, Authlib, Resend, Alembic, and `uv`.
+`apps/api` is the Python service boundary for myBot. It uses Python 3.14, FastAPI, Pydantic, SQLAlchemy, Psycopg, Redis, Authlib, Resend, Alembic, and `uv`.
 
 ## Structure
 

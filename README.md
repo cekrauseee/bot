@@ -1,6 +1,6 @@
-# myBOT
+# myBot
 
-myBOT is a portfolio project for a modern AI agent. The current foundation includes passwordless email and Google authentication backed by the Python service.
+myBot is a portfolio project for a modern AI agent. The current foundation includes passwordless email and Google authentication backed by the Python service.
 
 ## Repository
 

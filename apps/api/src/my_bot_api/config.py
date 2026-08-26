@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     trusted_proxy_hosts: Annotated[tuple[str, ...], NoDecode] = ()
 
     resend_api_key: SecretStr = SecretStr("")
-    resend_from: str = "myBOT <hello@mybot.cekrause.eu>"
+    resend_from: str = "myBot <hello@mybot.cekrause.eu>"
     resend_otp_template_id: str = "mybot-login-otp"
 
     @field_validator("trusted_proxy_hosts", mode="before")

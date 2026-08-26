@@ -46,7 +46,7 @@ function stopChildren(signal = 'SIGTERM') {
 
 try {
   await prepareDevelopment()
-  console.log('\nmyBOT is starting at http://localhost:5173\n')
+  console.log('\nmyBot is starting at http://localhost:5173\n')
 
   const api = start(
     'uv',
