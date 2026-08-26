@@ -53,7 +53,7 @@ test('prepareEnvironment creates files and generates independent local secrets',
     'RATE_LIMIT_PEPPER',
   ])
   assert.equal(new Set(generatedValues).size, 3)
-  assert.equal(values.get('RESEND_FROM'), 'myBot <hello@mybot.cekrause.eu>')
+  assert.equal(values.get('RESEND_FROM'), 'myBot <mybot@cekrause.eu>')
   assert.equal((await stat(path.join(root, '.env'))).mode & 0o777, 0o600)
 })
 
@@ -91,7 +91,7 @@ test('externalAuthenticationStatus reports only external provider gaps', () => {
         .replace('example.apps.googleusercontent.com', 'client.apps.googleusercontent.com')
         .replace('replace-with-google-client-secret', 'google-secret')
         .replace('re_example', 're_live')
-        .replace('hello@example.com', 'hello@mybot.cekrause.eu'),
+        .replace('hello@example.com', 'mybot@cekrause.eu'),
     ),
   )
 
