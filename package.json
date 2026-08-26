@@ -1,0 +1,21 @@
+{
+  "name": "my-bot",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "npm@11.17.0",
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace @my-bot/web",
+    "dev:api": "uv run --project apps/api fastapi dev apps/api/src/my_bot_api/main.py",
+    "build:web": "npm run build --workspace @my-bot/web",
+    "lint:web": "npm run lint --workspace @my-bot/web",
+    "lint:api": "uv run --project apps/api ruff check apps/api",
+    "test:api": "uv run --project apps/api pytest apps/api/tests",
+    "check": "npm run lint:web && npm run lint:api && npm run test:api && npm run build:web"
+  }
+}
