@@ -7,15 +7,21 @@
     "node": ">=22.22.0"
   },
   "workspaces": [
-    "apps/web"
+    "apps/web",
+    "apps/emails"
   ],
   "scripts": {
     "dev:web": "npm run dev --workspace @my-bot/web",
+    "dev:emails": "npm run dev --workspace @my-bot/emails",
     "dev:api": "uv run --project apps/api fastapi dev apps/api/src/my_bot_api/main.py",
+    "dev:infra": "docker compose up -d --wait postgres redis",
     "build:web": "npm run build --workspace @my-bot/web",
+    "build:emails": "npm run build --workspace @my-bot/emails",
     "lint:web": "npm run lint --workspace @my-bot/web",
+    "lint:emails": "npm exec tsc --workspace @my-bot/emails -- --noEmit",
     "lint:api": "uv run --project apps/api ruff check apps/api",
+    "db:migrate": "uv run --project apps/api alembic -c apps/api/alembic.ini upgrade head",
     "test:api": "uv run --project apps/api pytest apps/api/tests",
-    "check": "npm run lint:web && npm run lint:api && npm run test:api && npm run build:web"
+    "check": "npm run lint:web && npm run lint:emails && npm run lint:api && npm run test:api && npm run build:web && npm run build:emails"
   }
 }

@@ -1,10 +1,12 @@
 import { ArrowLeft } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/motion/button/base'
 import { Input } from '@/components/motion/input'
 import { OTPInput } from '@/components/motion/otp-input'
 import { useLoginForm } from '@/features/auth/hooks/use-login-form'
+import { authApi } from '@/features/auth/services/auth-api'
+import { cn } from '@/lib/utils'
 
 export function LoginForm() {
   const {
@@ -15,16 +17,29 @@ export function LoginForm() {
     emailError,
     handleCodeSubmit,
     handleEmailSubmit,
-    isExistingUser,
-    isVerified,
+    isRequesting,
+    isVerifying,
     normalizedEmail,
     resendCode,
+    resendIn,
     status,
     step,
     updateCode,
     updateEmail,
   } = useLoginForm()
+  const [callbackError] = useState(() => {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('error') === 'google'
+      ? 'Google sign-in could not be completed. Try again or use your email.'
+      : ''
+  })
   const emailInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('error') !== 'google') return
+    window.history.replaceState({}, '', `${window.location.pathname}${window.location.hash}`)
+  }, [])
 
   useEffect(() => {
     if (step === 'email') emailInputRef.current?.focus()
@@ -34,17 +49,21 @@ export function LoginForm() {
     if (emailError) emailInputRef.current?.focus()
   }, [emailError])
 
+  useEffect(() => {
+    if (codeError) {
+      document.querySelector<HTMLInputElement>('[aria-label="Verification code"]')?.focus()
+    }
+  }, [codeError])
+
   if (step === 'code') {
     return (
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-1 text-start">
           <h1 className="text-balance text-2xl font-semibold leading-tight tracking-tight">
-            {isExistingUser ? 'Welcome back' : 'Create account'}
+            Confirm your email
           </h1>
           <p className="text-pretty text-sm leading-normal text-muted-foreground">
-            {isExistingUser
-              ? `Enter the code sent to ${normalizedEmail}.`
-              : `Confirm ${normalizedEmail} with the code we sent.`}
+            Enter the code sent to {normalizedEmail}.
           </p>
         </div>
 
@@ -56,29 +75,22 @@ export function LoginForm() {
           <OTPInput
             aria-label="Verification code"
             autoFocus
-            disabled={isVerified}
+            disabled={isVerifying}
             errorMessage={codeError || undefined}
             label="Verification code"
             onChange={updateCode}
-            status={isVerified ? 'success' : codeError ? 'error' : 'idle'}
-            successMessage={isVerified ? status : undefined}
+            status={codeError ? 'error' : 'idle'}
             value={code}
           />
 
           <Button
             className="min-h-11 w-full sm:min-h-10"
-            disabled={isVerified}
+            disabled={isVerifying}
             pressScale={0.96}
             size="md"
             type="submit"
           >
-            {isVerified
-              ? isExistingUser
-                ? 'Signed in'
-                : 'Account created'
-              : isExistingUser
-                ? 'Sign in'
-                : 'Create account'}
+            {isVerifying ? 'Verifying…' : 'Verify code'}
           </Button>
         </form>
 
@@ -92,22 +104,17 @@ export function LoginForm() {
             Change email
           </button>
 
-          {!isVerified ? (
-            <button
-              className="min-h-10 rounded-sm text-sm font-medium text-foreground underline-offset-4 hover:underline"
-              onClick={resendCode}
-              type="button"
-            >
-              {status ? 'Code sent' : 'Resend code'}
-            </button>
-          ) : null}
+          <button
+            className="min-h-10 rounded-sm text-sm font-medium text-foreground underline-offset-4 hover:underline"
+            disabled={Boolean(resendIn) || isRequesting}
+            onClick={resendCode}
+            type="button"
+          >
+            {resendIn ? `Resend code in ${resendIn}s` : isRequesting ? 'Sending…' : 'Resend code'}
+          </button>
         </div>
 
-        {!isVerified ? (
-          <span className="sr-only" aria-live="polite" role="status">
-            {status}
-          </span>
-        ) : null}
+        <span className="sr-only" aria-live="polite" role="status">{status}</span>
       </div>
     )
   }
@@ -128,12 +135,20 @@ export function LoginForm() {
         onSubmit={handleEmailSubmit}
         noValidate
       >
+        <p
+          aria-live="polite"
+          className={cn('text-sm', callbackError && 'text-destructive')}
+          role="status"
+        >
+          {callbackError}
+        </p>
         <Button
           className="min-h-11 w-full sm:min-h-10"
           pressScale={0.96}
           size="md"
           type="button"
           variant="outline"
+          onClick={() => { window.location.href = authApi.googleStartUrl() }}
         >
           Continue with Google
         </Button>
@@ -160,11 +175,12 @@ export function LoginForm() {
 
         <Button
           className="min-h-11 w-full sm:min-h-10"
+          disabled={isRequesting}
           pressScale={0.96}
           size="md"
           type="submit"
         >
-          Continue
+          {isRequesting ? 'Sending…' : 'Continue'}
         </Button>
       </form>
     </div>

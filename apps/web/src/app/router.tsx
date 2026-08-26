@@ -8,6 +8,14 @@ export const router = createBrowserRouter([
     HydrateFallback: RouteFallback,
     lazy: {
       Component: async () =>
+        (await import('@/pages/home/page')).HomePage,
+    },
+  },
+  {
+    path: '/login',
+    HydrateFallback: RouteFallback,
+    lazy: {
+      Component: async () =>
         (await import('@/pages/auth/login/page')).LoginPage,
     },
   },
