@@ -1,100 +1,242 @@
-import { Eye, EyeOff } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
+import { useEffect, useRef, useState } from 'react'
 
-import { Button } from '@/components/motion/button/base'
 import { Input } from '@/components/motion/input'
+import { OTPInput } from '@/components/motion/otp-input'
+import { StatefulButton, type ButtonState } from '@/components/motion/button/stateful'
 import { useLoginForm } from '@/features/auth/hooks/use-login-form'
+import { authApi } from '@/features/auth/services/auth-api'
+import { SPRING_SWAP } from '@/lib/ease'
+import { cn } from '@/lib/utils'
+
+function CountdownValue({ value }: { value: number }) {
+  const reduceMotion = useReducedMotion()
+
+  return (
+    <span className="inline-flex min-w-[2ch] justify-center overflow-hidden tabular-nums">
+      <AnimatePresence initial={false} mode="popLayout">
+        <motion.span
+          key={value}
+          initial={reduceMotion ? false : { opacity: 0, y: '100%', filter: 'blur(4px)' }}
+          animate={{ opacity: 1, y: '0%', filter: 'blur(0px)' }}
+          exit={reduceMotion ? undefined : { opacity: 0, y: '-100%', filter: 'blur(4px)' }}
+          transition={reduceMotion ? { duration: 0 } : SPRING_SWAP}
+        >
+          {value}
+        </motion.span>
+      </AnimatePresence>
+    </span>
+  )
+}
 
 export function LoginForm() {
   const {
+    changeEmail,
+    code,
+    codeError,
     email,
-    handleSubmit,
-    isPasswordVisible,
-    password,
-    setEmail,
-    setPassword,
-    togglePasswordVisibility,
+    emailError,
+    handleCodeSubmit,
+    handleEmailSubmit,
+    isVerifying,
+    normalizedEmail,
+    requestStatus,
+    resendCode,
+    resendIn,
+    resendStatus,
+    status,
+    step,
+    updateCode,
+    updateEmail,
+    verifyStatus,
   } = useLoginForm()
+  const [callbackError] = useState(() => {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('error') === 'google'
+      ? 'Google sign-in could not be completed. Try again or use your email.'
+      : ''
+  })
+  const [googleStatus, setGoogleStatus] = useState<ButtonState>(() =>
+    callbackError ? 'error' : 'idle',
+  )
+  const emailInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('error') !== 'google') return
+    window.history.replaceState({}, '', `${window.location.pathname}${window.location.hash}`)
+  }, [])
+
+  useEffect(() => {
+    if (step === 'email') emailInputRef.current?.focus()
+  }, [step])
+
+  useEffect(() => {
+    if (emailError) emailInputRef.current?.focus()
+  }, [emailError])
+
+  useEffect(() => {
+    if (codeError) {
+      document.querySelector<HTMLInputElement>('[aria-label="Verification code"]')?.focus()
+    }
+  }, [codeError])
+
+  if (step === 'code') {
+    return (
+      <div key="code-step" className="flex flex-col gap-4">
+        <div className="flex flex-col gap-1 text-start">
+          <h1 className="text-balance text-2xl font-semibold leading-tight tracking-tight">
+            Confirm your email
+          </h1>
+          <p className="text-pretty text-sm leading-normal text-muted-foreground">
+            Enter the code sent to {normalizedEmail}.
+          </p>
+        </div>
+
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={handleCodeSubmit}
+          noValidate
+        >
+          <OTPInput
+            aria-label="Verification code"
+            autoFocus
+            disabled={isVerifying}
+            errorMessage={codeError || undefined}
+            label="Verification code"
+            onChange={updateCode}
+            status={codeError ? 'error' : 'idle'}
+            value={code}
+          />
+
+          <StatefulButton
+            className="min-h-11 w-full sm:min-h-10"
+            pressScale={0.96}
+            size="md"
+            state={verifyStatus}
+            errorText="Try again"
+            loadingText="Verifying…"
+            successText="Verified"
+            type="submit"
+          >
+            Verify code
+          </StatefulButton>
+        </form>
+
+        <div className="flex min-h-10 items-center justify-between gap-3">
+          <button
+            className="-ml-2 flex min-h-10 items-center gap-1.5 rounded-full px-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+            onClick={changeEmail}
+            type="button"
+          >
+            <ArrowLeft aria-hidden="true" className="size-4" />
+            Change email
+          </button>
+
+          <StatefulButton
+            className="min-h-10 rounded-sm px-2 text-sm font-medium text-foreground underline-offset-4 hover:bg-transparent hover:underline disabled:cursor-default disabled:opacity-100 disabled:text-muted-foreground"
+            disabled={Boolean(resendIn)}
+            onClick={resendCode}
+            size="sm"
+            state={resendStatus}
+            type="button"
+            errorText="Try again"
+            loadingText="Sending…"
+            variant="ghost"
+          >
+            <span className="inline-flex items-baseline">
+              <span>Resend code</span>
+              {resendIn ? (
+                <>
+                  <span className="whitespace-pre"> in </span>
+                  <CountdownValue value={resendIn} />
+                  <span>s</span>
+                </>
+              ) : null}
+            </span>
+          </StatefulButton>
+        </div>
+
+        <span className="sr-only" aria-live="polite" role="status">{status}</span>
+      </div>
+    )
+  }
 
   return (
-    <form className="flex flex-col gap-3" onSubmit={handleSubmit} noValidate>
-      <Button
-        className="min-h-11 w-full sm:min-h-10"
-        pressScale={0.96}
-        size="md"
-        type="button"
-        variant="outline"
-      >
-        Continue with Google
-      </Button>
-
-      <div className="flex items-center gap-2.5" aria-hidden="true">
-        <span className="h-px flex-1 bg-border" />
-        <span className="text-xs font-medium text-muted-foreground">or</span>
-        <span className="h-px flex-1 bg-border" />
+    <div key="email-step" className="flex flex-col gap-5">
+      <div className="flex flex-col gap-1 text-start">
+        <h1 className="text-balance text-2xl font-semibold leading-tight tracking-tight">
+          Welcome back
+        </h1>
+        <p className="text-pretty text-sm leading-normal text-muted-foreground">
+          Sign in to continue.
+        </p>
       </div>
 
-      <div className="flex flex-col gap-2.5">
+      <form
+        className="flex flex-col gap-3"
+        onSubmit={handleEmailSubmit}
+        noValidate
+      >
+        <p
+          aria-live="polite"
+          className={cn('text-sm', callbackError && 'text-destructive')}
+          role="status"
+        >
+          {callbackError}
+        </p>
+        <StatefulButton
+          className="min-h-11 w-full sm:min-h-10"
+          pressScale={0.96}
+          size="md"
+          state={googleStatus}
+          errorText="Try again"
+          loadingText="Opening Google…"
+          successText="Signed in"
+          type="button"
+          onClick={() => {
+            setGoogleStatus('loading')
+            window.location.href = authApi.googleStartUrl()
+          }}
+          variant="outline"
+        >
+          Continue with Google
+        </StatefulButton>
+
+        <div className="flex items-center gap-2.5" aria-hidden="true">
+          <span className="h-px flex-1 bg-border" />
+          <span className="text-xs font-medium text-muted-foreground">or</span>
+          <span className="h-px flex-1 bg-border" />
+        </div>
+
         <Input
-          autoComplete="username"
+          ref={emailInputRef}
+          autoComplete="email"
+          error={emailError || undefined}
           inputMode="email"
           label="Email"
           name="email"
-          onChange={setEmail}
+          onChange={updateEmail}
           placeholder="name@example.com"
           spellCheck={false}
           type="email"
           value={email}
         />
 
-        <div className="flex flex-col gap-1">
-          <Input
-            autoComplete="current-password"
-            label="Password"
-            name="password"
-            onChange={setPassword}
-            rightIcon={
-              <button
-                aria-label={
-                  isPasswordVisible ? 'Hide password' : 'Show password'
-                }
-                className="rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:text-foreground"
-                onClick={togglePasswordVisibility}
-                type="button"
-              >
-                {isPasswordVisible ? <EyeOff /> : <Eye />}
-              </button>
-            }
-            type={isPasswordVisible ? 'text' : 'password'}
-            value={password}
-          />
-
-          <a
-            className="w-fit self-start rounded-sm text-sm font-medium text-foreground underline-offset-4 hover:underline"
-            href="#forgot-password"
-          >
-            Forgot password?
-          </a>
-        </div>
-      </div>
-
-      <Button
-        className="min-h-11 w-full sm:min-h-10"
-        pressScale={0.96}
-        size="md"
-        type="submit"
-      >
-        Sign in
-      </Button>
-
-      <p className="text-start text-sm text-muted-foreground">
-        New to myBOT?{' '}
-        <a
-          className="rounded-sm font-medium text-foreground underline-offset-4 hover:underline"
-          href="#create-account"
+        <StatefulButton
+          className="min-h-11 w-full sm:min-h-10"
+          pressScale={0.96}
+          size="md"
+          state={requestStatus}
+          errorText="Try again"
+          loadingText="Sending…"
+          successText="Sent"
+          type="submit"
         >
-          Create account
-        </a>
-      </p>
-    </form>
+          Continue
+        </StatefulButton>
+      </form>
+    </div>
   )
 }

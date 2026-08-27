@@ -2,19 +2,23 @@
 
 ## Purpose
 
-myBOT is a portfolio project for an AI agent inspired by the clarity and restraint of products such as ChatGPT and Grok. The product will use a React frontend and a Python backend while keeping provider and infrastructure decisions explicit.
+myBot is a portfolio project for an AI agent inspired by the clarity and restraint of products such as ChatGPT and Grok. The product will use a React frontend and a Python backend while keeping provider and infrastructure decisions explicit.
 
 ## Scope
 
 The current implementation includes:
 
 - a Vite and React frontend;
-- a lazy-loaded login page;
+- lazy-loaded public login and protected root pages;
 - light and dark appearances with the system preference as the default;
 - beUI inputs, buttons, and theme transition installed through its shadcn registry;
-- a minimal FastAPI application with a health endpoint.
+- a FastAPI application with health and authentication endpoints;
+- passwordless email OTP and Google OpenID Connect login;
+- PostgreSQL user, identity, and session persistence;
+- Redis-backed OTP challenges and abuse limits;
+- a repository-owned React Email component rendered locally and sent through Resend.
 
-Authentication, agent conversations, persistence, model integration, and production deployment are not implemented yet.
+Agent conversations, model integration, and production deployment are not implemented yet.
 
 ## Core Concepts
 
@@ -25,8 +29,8 @@ Authentication, agent conversations, persistence, model integration, and product
 
 ## Boundaries
 
-- The login form is a visual mockup and does not transmit credentials.
-- The frontend does not call the API in the current scope.
+- Browser authentication uses opaque `HttpOnly` cookies. It does not store credentials in web storage.
+- The web and API origins must be sibling subdomains in production.
 - beUI components must be added or updated through the `@beui` registry, not copied manually.
 - Light and dark colors come from semantic Tailwind tokens, not component-level color overrides.
 - Foundational dependencies use current stable releases unless a documented constraint requires otherwise.

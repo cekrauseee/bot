@@ -15,3 +15,4 @@ Read only the documents relevant to the task.
 | --- | --- |
 | [Web application](modules/web.md) | Changing routes, interface structure, theming, or beUI components |
 | [HTTP API](modules/api.md) | Changing FastAPI setup, routing, or API tests |
+| [Authentication](modules/authentication.md) | Changing Google, email OTP, sessions, or identity persistence |

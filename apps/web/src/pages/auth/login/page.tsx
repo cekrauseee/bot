@@ -15,15 +15,7 @@ export function LoginPage() {
 
       <section className="mx-auto flex w-full max-w-xl flex-1 items-center px-5 py-8 sm:px-6">
         <div className="mx-auto flex w-full max-w-xs flex-col gap-5">
-          <div className="flex flex-col gap-1 text-start">
-            <span className="text-sm font-semibold tracking-tight">myBOT</span>
-            <h1 className="text-balance text-2xl font-semibold leading-tight tracking-tight">
-              Welcome back
-            </h1>
-            <p className="text-pretty text-sm leading-normal text-muted-foreground">
-              Sign in to continue.
-            </p>
-          </div>
+          <span className="text-sm font-semibold tracking-tight">myBot</span>
 
           <LoginForm />
 

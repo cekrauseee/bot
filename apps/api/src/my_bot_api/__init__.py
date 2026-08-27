@@ -1,1 +1,1 @@
-"""myBOT API package."""
+"""myBot API package."""

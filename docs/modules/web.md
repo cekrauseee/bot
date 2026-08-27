@@ -13,9 +13,11 @@
 - `src/shared`: domain-neutral product elements.
 - `src/lib`: shared utilities and motion primitives required by beUI.
 
-## Authentication Mockup
+## Authentication
 
-The `/` route lazy-loads the login page. The page composes a typographic myBOT wordmark, theme toggle, and login form. The form stores values only in React state and prevents submission. Password visibility is the only functional form interaction.
+The `/login` route lazy-loads the public login page. The feature service sends credentialed requests to `VITE_API_BASE_URL`. Its hook manages email, OTP, resend countdown, pending, and error state without inferring whether an account exists.
+
+The `/` route is protected by a server session check. Its current signed-in mock contains a Sign out action. An HTTP 401 redirects to `/login`; an unavailable API keeps a recoverable error state instead of treating the user as signed out.
 
 ## Theming
 
