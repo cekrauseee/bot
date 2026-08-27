@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { AuthApiError, authApi } from '@/features/auth/services/auth-api'
 
 export type LoginStep = 'email' | 'code'
+export type AuthActionStatus = 'idle' | 'loading' | 'success' | 'error'
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -15,9 +16,12 @@ export function useLoginForm() {
   const [codeError, setCodeError] = useState('')
   const [status, setStatus] = useState('')
   const [resendIn, setResendIn] = useState(0)
-  const [isRequesting, setIsRequesting] = useState(false)
-  const [isVerifying, setIsVerifying] = useState(false)
+  const [requestStatus, setRequestStatus] = useState<AuthActionStatus>('idle')
+  const [resendStatus, setResendStatus] = useState<AuthActionStatus>('idle')
+  const [verifyStatus, setVerifyStatus] = useState<AuthActionStatus>('idle')
   const normalizedEmail = email.trim().toLowerCase()
+  const isRequesting = requestStatus === 'loading' || resendStatus === 'loading'
+  const isVerifying = verifyStatus === 'loading'
 
   useEffect(() => {
     if (!resendIn) return
@@ -54,17 +58,20 @@ export function useLoginForm() {
   const updateEmail = useCallback((value: string) => {
     setEmail(value)
     setEmailError('')
+    setRequestStatus('idle')
   }, [])
 
   const updateCode = useCallback((value: string) => {
     setCode(value)
     setCodeError('')
     setStatus('')
+    setVerifyStatus('idle')
   }, [])
 
   const requestCode = useCallback(
     async (target: 'email' | 'code' = 'email') => {
-      setIsRequesting(true)
+      if (target === 'code') setResendStatus('loading')
+      else setRequestStatus('loading')
       setEmailError('')
       setCodeError('')
 
@@ -77,8 +84,14 @@ export function useLoginForm() {
         setStep('code')
       } catch (error) {
         applyApiError(error, target)
+        if (target === 'code') setResendStatus('error')
+        else setRequestStatus('error')
       } finally {
-        setIsRequesting(false)
+        if (target === 'code') {
+          setResendStatus((current) => current === 'loading' ? 'idle' : current)
+        } else {
+          setRequestStatus((current) => current === 'loading' ? 'idle' : current)
+        }
       }
     },
     [applyApiError, normalizedEmail],
@@ -89,6 +102,7 @@ export function useLoginForm() {
       event.preventDefault()
       if (!EMAIL_PATTERN.test(normalizedEmail)) {
         setEmailError('Enter a valid email, such as name@example.com.')
+        setRequestStatus('error')
         return
       }
       void requestCode()
@@ -101,19 +115,20 @@ export function useLoginForm() {
       event.preventDefault()
       if (code.length !== 6) {
         setCodeError('Enter the 6-digit code sent to your email.')
+        setVerifyStatus('error')
         return
       }
 
-      setIsVerifying(true)
+      setVerifyStatus('loading')
       setCodeError('')
       try {
         await authApi.verifyOtp(challengeId, code)
+        setVerifyStatus('success')
         setStatus("Code verified. You're signed in.")
         window.location.assign('/')
       } catch (error) {
         applyApiError(error, 'code')
-      } finally {
-        setIsVerifying(false)
+        setVerifyStatus('error')
       }
     },
     [applyApiError, challengeId, code],
@@ -123,6 +138,8 @@ export function useLoginForm() {
     setCode('')
     setCodeError('')
     setStatus('')
+    setVerifyStatus('idle')
+    setResendStatus('idle')
     setStep('email')
   }, [])
 
@@ -141,10 +158,13 @@ export function useLoginForm() {
     isRequesting,
     isVerifying,
     normalizedEmail,
+    requestStatus,
     resendCode,
     resendIn,
+    resendStatus,
     status,
     step,
+    verifyStatus,
     updateCode,
     updateEmail,
   }

@@ -1,12 +1,34 @@
 import { ArrowLeft } from 'lucide-react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 
-import { Button } from '@/components/motion/button/base'
 import { Input } from '@/components/motion/input'
 import { OTPInput } from '@/components/motion/otp-input'
+import { StatefulButton, type ButtonState } from '@/components/motion/button/stateful'
 import { useLoginForm } from '@/features/auth/hooks/use-login-form'
 import { authApi } from '@/features/auth/services/auth-api'
+import { SPRING_SWAP } from '@/lib/ease'
 import { cn } from '@/lib/utils'
+
+function CountdownValue({ value }: { value: number }) {
+  const reduceMotion = useReducedMotion()
+
+  return (
+    <span className="inline-flex min-w-[2ch] justify-center overflow-hidden tabular-nums">
+      <AnimatePresence initial={false} mode="popLayout">
+        <motion.span
+          key={value}
+          initial={reduceMotion ? false : { opacity: 0, y: '100%', filter: 'blur(4px)' }}
+          animate={{ opacity: 1, y: '0%', filter: 'blur(0px)' }}
+          exit={reduceMotion ? undefined : { opacity: 0, y: '-100%', filter: 'blur(4px)' }}
+          transition={reduceMotion ? { duration: 0 } : SPRING_SWAP}
+        >
+          {value}
+        </motion.span>
+      </AnimatePresence>
+    </span>
+  )
+}
 
 export function LoginForm() {
   const {
@@ -17,15 +39,17 @@ export function LoginForm() {
     emailError,
     handleCodeSubmit,
     handleEmailSubmit,
-    isRequesting,
     isVerifying,
     normalizedEmail,
+    requestStatus,
     resendCode,
     resendIn,
+    resendStatus,
     status,
     step,
     updateCode,
     updateEmail,
+    verifyStatus,
   } = useLoginForm()
   const [callbackError] = useState(() => {
     const params = new URLSearchParams(window.location.search)
@@ -33,6 +57,9 @@ export function LoginForm() {
       ? 'Google sign-in could not be completed. Try again or use your email.'
       : ''
   })
+  const [googleStatus, setGoogleStatus] = useState<ButtonState>(() =>
+    callbackError ? 'error' : 'idle',
+  )
   const emailInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -57,7 +84,7 @@ export function LoginForm() {
 
   if (step === 'code') {
     return (
-      <div className="flex flex-col gap-4">
+      <div key="code-step" className="flex flex-col gap-4">
         <div className="flex flex-col gap-1 text-start">
           <h1 className="text-balance text-2xl font-semibold leading-tight tracking-tight">
             Confirm your email
@@ -83,15 +110,18 @@ export function LoginForm() {
             value={code}
           />
 
-          <Button
+          <StatefulButton
             className="min-h-11 w-full sm:min-h-10"
-            disabled={isVerifying}
             pressScale={0.96}
             size="md"
+            state={verifyStatus}
+            errorText="Try again"
+            loadingText="Verifying…"
+            successText="Verified"
             type="submit"
           >
-            {isVerifying ? 'Verifying…' : 'Verify code'}
-          </Button>
+            Verify code
+          </StatefulButton>
         </form>
 
         <div className="flex min-h-10 items-center justify-between gap-3">
@@ -104,14 +134,28 @@ export function LoginForm() {
             Change email
           </button>
 
-          <button
-            className="min-h-10 rounded-sm text-sm font-medium text-foreground underline-offset-4 hover:underline"
-            disabled={Boolean(resendIn) || isRequesting}
+          <StatefulButton
+            className="min-h-10 rounded-sm px-2 text-sm font-medium text-foreground underline-offset-4 hover:bg-transparent hover:underline disabled:cursor-default disabled:opacity-100 disabled:text-muted-foreground"
+            disabled={Boolean(resendIn)}
             onClick={resendCode}
+            size="sm"
+            state={resendStatus}
             type="button"
+            errorText="Try again"
+            loadingText="Sending…"
+            variant="ghost"
           >
-            {resendIn ? `Resend code in ${resendIn}s` : isRequesting ? 'Sending…' : 'Resend code'}
-          </button>
+            <span className="inline-flex items-baseline">
+              <span>Resend code</span>
+              {resendIn ? (
+                <>
+                  <span className="whitespace-pre"> in </span>
+                  <CountdownValue value={resendIn} />
+                  <span>s</span>
+                </>
+              ) : null}
+            </span>
+          </StatefulButton>
         </div>
 
         <span className="sr-only" aria-live="polite" role="status">{status}</span>
@@ -120,7 +164,7 @@ export function LoginForm() {
   }
 
   return (
-    <div className="flex flex-col gap-5">
+    <div key="email-step" className="flex flex-col gap-5">
       <div className="flex flex-col gap-1 text-start">
         <h1 className="text-balance text-2xl font-semibold leading-tight tracking-tight">
           Welcome back
@@ -142,16 +186,23 @@ export function LoginForm() {
         >
           {callbackError}
         </p>
-        <Button
+        <StatefulButton
           className="min-h-11 w-full sm:min-h-10"
           pressScale={0.96}
           size="md"
+          state={googleStatus}
+          errorText="Try again"
+          loadingText="Opening Google…"
+          successText="Signed in"
           type="button"
+          onClick={() => {
+            setGoogleStatus('loading')
+            window.location.href = authApi.googleStartUrl()
+          }}
           variant="outline"
-          onClick={() => { window.location.href = authApi.googleStartUrl() }}
         >
           Continue with Google
-        </Button>
+        </StatefulButton>
 
         <div className="flex items-center gap-2.5" aria-hidden="true">
           <span className="h-px flex-1 bg-border" />
@@ -173,15 +224,18 @@ export function LoginForm() {
           value={email}
         />
 
-        <Button
+        <StatefulButton
           className="min-h-11 w-full sm:min-h-10"
-          disabled={isRequesting}
           pressScale={0.96}
           size="md"
+          state={requestStatus}
+          errorText="Try again"
+          loadingText="Sending…"
+          successText="Sent"
           type="submit"
         >
-          {isRequesting ? 'Sending…' : 'Continue'}
-        </Button>
+          Continue
+        </StatefulButton>
       </form>
     </div>
   )
