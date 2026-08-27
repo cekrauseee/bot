@@ -24,7 +24,7 @@ The setup script:
 - starts the dedicated PostgreSQL and Redis services;
 - applies all database migrations.
 
-It reports the remaining Google and Resend variables without blocking local UI development. Add those provider credentials to `.env`, register `http://localhost:8000/auth/google/callback`, publish the Resend template, then run `npm run auth:check`.
+It reports the remaining Google and Resend variables without blocking local UI development. Add those provider credentials to `.env`, register `http://localhost:8000/auth/google/callback`, then run `npm run auth:check`. React Email templates are rendered locally during setup and development; Resend needs no hosted template configuration.
 
 ## Daily Development
 
@@ -71,7 +71,7 @@ Project-specific commands remain available for focused development and diagnosis
 | --- | --- | --- | --- |
 | API | `api:dev` | `api:lint`, `api:test` | — |
 | Web | `web:dev` | `web:lint` | `web:build` |
-| Emails | `emails:dev` | `emails:typecheck` | `emails:build` |
+| Emails | `emails:dev` | `emails:check`, `emails:typecheck` | `emails:render`, `emails:build` |
 | Automation | — | `scripts:lint`, `scripts:test` | — |
 
 Prefix every entry with `npm run`, for example `npm run api:test`.

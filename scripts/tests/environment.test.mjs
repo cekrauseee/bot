@@ -17,7 +17,6 @@ GOOGLE_CLIENT_ID=example.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=replace-with-google-client-secret
 RESEND_API_KEY=re_example
 RESEND_FROM="myBot <hello@example.com>"
-RESEND_OTP_TEMPLATE_ID=mybot-login-otp
 `
 
 async function fixture(context) {

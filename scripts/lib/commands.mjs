@@ -43,6 +43,8 @@ export const commandSections = [
     title: 'Emails',
     commands: [
       ['emails:dev', 'Preview React Email templates'],
+      ['emails:render', 'Render local API email artifacts from React'],
+      ['emails:check', 'Check local email artifacts for source drift'],
       ['emails:typecheck', 'Type-check transactional email templates'],
       ['emails:build', 'Build the React Email preview application'],
     ],

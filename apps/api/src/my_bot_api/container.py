@@ -34,7 +34,6 @@ def create_container(
     sender = email_sender or ResendOtpEmailSender(
         api_key=settings.resend_api_key.get_secret_value(),
         sender=settings.resend_from,
-        template_id=settings.resend_otp_template_id,
     )
     return ApplicationContainer(
         settings=settings,

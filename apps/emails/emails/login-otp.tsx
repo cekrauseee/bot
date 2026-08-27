@@ -11,7 +11,7 @@ import {
 } from '@react-email/components'
 import type { CSSProperties } from 'react'
 
-export const loginOtpAlias = 'mybot-login-otp'
+export const loginOtpSubject = 'Your myBot sign-in code'
 
 export type LoginOtpEmailProps = {
   otpCode?: string
@@ -38,8 +38,8 @@ const textStyle: CSSProperties = {
 }
 
 export default function LoginOtpEmail({
-  otpCode = '{{{OTP_CODE}}}',
-  expirationMinutes = '{{{EXPIRATION_MINUTES}}}',
+  otpCode = '482913',
+  expirationMinutes = 10,
 }: LoginOtpEmailProps) {
   const expiry = String(expirationMinutes)
 

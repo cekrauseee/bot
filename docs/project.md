@@ -16,7 +16,7 @@ The current implementation includes:
 - passwordless email OTP and Google OpenID Connect login;
 - PostgreSQL user, identity, and session persistence;
 - Redis-backed OTP challenges and abuse limits;
-- a React Email template sent through Resend.
+- a repository-owned React Email component rendered locally and sent through Resend.
 
 Agent conversations, model integration, and production deployment are not implemented yet.
 

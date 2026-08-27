@@ -44,7 +44,6 @@ class Settings(BaseSettings):
 
     resend_api_key: SecretStr = SecretStr("")
     resend_from: str = "myBot <mybot@cekrause.eu>"
-    resend_otp_template_id: str = "mybot-login-otp"
 
     @field_validator("trusted_proxy_hosts", mode="before")
     @classmethod

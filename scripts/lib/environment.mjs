@@ -6,7 +6,7 @@ import { projectRoot } from './project.mjs'
 
 const LOCAL_SECRET_KEYS = ['SESSION_SECRET', 'OTP_PEPPER', 'RATE_LIMIT_PEPPER']
 const GOOGLE_CONFIG_KEYS = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET']
-const RESEND_CONFIG_KEYS = ['RESEND_API_KEY', 'RESEND_OTP_TEMPLATE_ID']
+const RESEND_CONFIG_KEYS = ['RESEND_API_KEY']
 const DEFAULT_SENDER = 'myBot <mybot@cekrause.eu>'
 
 function unquote(value) {

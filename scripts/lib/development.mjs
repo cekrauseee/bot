@@ -65,6 +65,12 @@ export async function migrateDatabase() {
   )
 }
 
+export async function renderEmailTemplates() {
+  await run(npmCommand, ['run', 'emails:render'], {
+    label: 'Render local React Email templates for the API',
+  })
+}
+
 export async function prepareDevelopment({ dependencies = 'if-missing' } = {}) {
   await assertDevelopmentPrerequisites()
   const environment = await prepareEnvironment()
@@ -74,6 +80,7 @@ export async function prepareDevelopment({ dependencies = 'if-missing' } = {}) {
     await installDependencies()
   }
 
+  await renderEmailTemplates()
   await startInfrastructure()
   await migrateDatabase()
   return environment

@@ -32,7 +32,7 @@ OTP request responses are identical for new and existing email addresses. Errors
 
 ## Email Template
 
-`apps/emails/emails/login-otp.tsx` is the versioned React Email source. Publish it in Resend with alias `mybot-login-otp`, subject `Your myBot sign-in code`, and variables `OTP_CODE` and `EXPIRATION_MINUTES`. The API sends from `RESEND_FROM`; production uses `myBot <mybot@cekrause.eu>`.
+`apps/emails/emails/login-otp.tsx` is the versioned React Email component and source of truth. Repository scripts render HTML, plain text, and subject metadata into the API package. FastAPI substitutes the generated OTP and expiry, then sends those local assets through Resend without a hosted template or alias. The API sends from `RESEND_FROM`; production uses `myBot <mybot@cekrause.eu>`.
 
 ## Production Topology
 

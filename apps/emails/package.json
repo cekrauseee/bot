@@ -8,8 +8,7 @@
     "build": "email build",
     "export": "email export --pretty",
     "render": "tsx scripts/render.tsx",
-    "resend:setup": "email resend setup",
-    "resend:reset": "email resend reset"
+    "render:check": "tsx scripts/render.tsx --check"
   },
   "dependencies": {
     "@react-email/components": "^1.0.12",
