@@ -75,10 +75,10 @@ const normalizeOrigin = (value: string, name: string) => parseHttpUrl(value.repl
 const parseDatabaseUrl = (value: string) => {
   let parsed: URL
   try { parsed = new URL(value) } catch { throw new Error('DATABASE_URL must be a valid PostgreSQL URL') }
-  if (parsed.protocol !== 'postgresql:' || !parsed.hostname) {
-    throw new Error('DATABASE_URL must use postgresql://')
+  if (!['postgresql:', 'postgresql+psycopg:'].includes(parsed.protocol) || !parsed.hostname) {
+    throw new Error('DATABASE_URL must use postgresql:// or postgresql+psycopg://')
   }
-  return value
+  return value.replace(/^postgresql\+psycopg:/i, 'postgresql:')
 }
 
 const parseNeonWsProxy = (value: string | undefined) => {

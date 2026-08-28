@@ -1,11 +1,12 @@
 import { spawn } from 'node:child_process'
 
 import { prepareDevelopment } from './lib/development.mjs'
+import { terminateDescendants } from './lib/process-tree.mjs'
 import { projectRoot, turboInvocation } from './lib/project.mjs'
 
 const windows = process.platform === 'win32'
 const children = new Set()
-let shuttingDown = false
+let shutdownPromise
 
 function start(command, args, label) {
   console.log(`→ Start ${label}`)
@@ -30,18 +31,11 @@ function start(command, args, label) {
 }
 
 function stopChildren(signal = 'SIGTERM') {
-  if (shuttingDown) return
-  shuttingDown = true
-
-  for (const child of children) {
-    if (!child.pid) continue
-    try {
-      if (windows) child.kill(signal)
-      else process.kill(-child.pid, signal)
-    } catch (error) {
-      if (error.code !== 'ESRCH') throw error
-    }
-  }
+  if (shutdownPromise) return shutdownPromise
+  shutdownPromise = windows
+    ? Promise.resolve([...children].forEach((child) => child.kill(signal)))
+    : terminateDescendants(process.pid, { signal })
+  return shutdownPromise
 }
 
 try {
@@ -53,12 +47,12 @@ try {
 
   for (const signal of ['SIGINT', 'SIGTERM']) {
     process.once(signal, () => {
-      stopChildren(signal)
+      void stopChildren(signal)
     })
   }
 
   const result = await turbo.exited
-  if (!shuttingDown) stopChildren()
+  await stopChildren()
   if (result.error) console.error(`${result.label} failed to start: ${result.error.message}`)
 
   process.exitCode = result.signal ? 1 : (result.code ?? 1)

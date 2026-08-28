@@ -17,8 +17,10 @@ describe('configuration', () => {
       .toBe('postgresql://explicit.example/db')
   })
 
-  it('accepts standard PostgreSQL URLs and rejects Python-driver URLs', () => {
-    expect(() => loadSettings({ ...base, DATABASE_URL: 'postgresql+psycopg://x' })).toThrow()
+  it('normalizes the legacy Python PostgreSQL URL and rejects unrelated drivers', () => {
+    expect(loadSettings({ ...base, DATABASE_URL: 'postgresql+psycopg://user:password@localhost/mybot' }).databaseUrl)
+      .toBe('postgresql://user:password@localhost/mybot')
+    expect(() => loadSettings({ ...base, DATABASE_URL: 'mysql://user:password@localhost/mybot' })).toThrow()
     expect(() => loadSettings({ ...base, REDIS_URL: 'http://localhost:6380' })).toThrow()
   })
 
