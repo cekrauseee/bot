@@ -1,24 +1,36 @@
-import postgres, { type Sql } from 'postgres'
-import { drizzle } from 'drizzle-orm/postgres-js'
 import type { Settings } from '../config.js'
-import { schema } from './schema.js'
+import type { Db, DatabaseClient } from './drivers/types.js'
 
-export type Db = ReturnType<typeof drizzle<typeof schema>>
+export type { Db } from './drivers/types.js'
+
+export type DatabaseDriverName = 'neon' | 'node-postgres'
+
+export const databaseDriverFor = (environment: Settings['environment']): DatabaseDriverName =>
+  environment === 'production' ? 'neon' : 'node-postgres'
 
 export class Database {
-  readonly client: Sql
-  readonly db: Db
+  private constructor(
+    readonly client: DatabaseClient,
+    readonly db: Db,
+  ) {}
 
-  constructor(settings: Settings) {
-    this.client = postgres(settings.databaseUrl, { max: 10 })
-    this.db = drizzle(this.client, { schema })
+  /** Select exactly one runtime driver; the unused driver module is never loaded. */
+  static async create(settings: Settings): Promise<Database> {
+    if (databaseDriverFor(settings.environment) === 'neon') {
+      const { createNeonDatabase } = await import('./drivers/neon.js')
+      const { db, client } = await createNeonDatabase(settings.databaseUrl, settings.neonWsProxy)
+      return new Database(client, db)
+    }
+    const { createNodePostgresDatabase } = await import('./drivers/node-postgres.js')
+    const { db, client } = await createNodePostgresDatabase(settings.databaseUrl)
+    return new Database(client, db)
   }
 
   async transaction<T>(callback: (db: Db) => Promise<T>): Promise<T> {
-    return this.db.transaction(async (transaction) => callback(transaction as unknown as Db))
+    return this.db.transaction(async (transaction) => callback(transaction as Db))
   }
 
   async close() {
-    await this.client.end({ timeout: 2 })
+    await this.client.end()
   }
 }

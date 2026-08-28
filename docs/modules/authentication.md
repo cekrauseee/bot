@@ -32,7 +32,7 @@ OTP request responses are identical for new and existing email addresses. Errors
 
 ## Email Template
 
-`apps/emails/emails/login-otp.tsx` is the versioned React Email component and source of truth. Repository scripts render HTML, plain text, and subject metadata into the Node API package. The API substitutes the generated OTP and expiry, then sends those local assets through Resend without a hosted template or alias. The API sends from `RESEND_FROM`; production uses `myBot <mybot@cekrause.eu>`.
+`apps/emails/emails/login-otp.tsx` is the versioned React Email component and source of truth. The `@my-bot/emails` workspace package exports the component and subject. The API supplies the generated OTP and expiry as props and sends the element through the Resend Node SDK `react` field without a hosted template or generated HTML/text artifacts. The API sends from `RESEND_FROM`; production uses `myBot <mybot@cekrause.eu>`.
 
 ## Production Topology
 

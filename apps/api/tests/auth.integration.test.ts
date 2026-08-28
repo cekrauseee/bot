@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { drizzle } from 'drizzle-orm/postgres-js'
-import { migrate } from 'drizzle-orm/postgres-js/migrator'
+import { drizzle } from 'drizzle-orm/node-postgres'
+import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { Redis } from 'ioredis'
-import postgres from 'postgres'
+import { Pool } from 'pg'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from '../src/app.js'
 import { loadSettings } from '../src/config.js'
@@ -33,8 +33,6 @@ class DelayedActiveLookupRedis extends Redis {
   releaseLookup() { this.resolveAllowLookup() }
 }
 
-const enabled = process.env.RUN_API_INTEGRATION === '1'
-const describeIntegration = describe.skipIf(!enabled)
 const redisUrl = new URL(process.env.REDIS_URL ?? 'redis://localhost:6380/0')
 redisUrl.pathname = '/15'
 const settings = loadSettings({
@@ -43,10 +41,10 @@ const settings = loadSettings({
   REDIS_URL: redisUrl.toString(),
 })
 
-describeIntegration('PostgreSQL and Redis authentication', () => {
-  const sql = postgres(settings.databaseUrl, { max: 2, connect_timeout: 1 })
+describe('PostgreSQL and Redis authentication', () => {
+  const pool = new Pool({ connectionString: settings.databaseUrl, max: 2, connectionTimeoutMillis: 1_000 })
   const redis = new Redis(settings.redisUrl, { lazyConnect: true, connectTimeout: 1_000 })
-  const database = new Database(settings)
+  let database: Database
   const sent: Array<{ to: string; code: string; challengeId: string }> = []
   const sender = {
     sendOtp: async (input: { to: string; code: string; challengeId: string }) => {
@@ -57,9 +55,10 @@ describeIntegration('PostgreSQL and Redis authentication', () => {
   let app: ReturnType<typeof createApp>
 
   beforeAll(async () => {
-    await sql`select 1`
+    await pool.query('select 1')
     await redis.connect()
-    await migrate(drizzle(sql, { schema }), {
+    database = await Database.create(settings)
+    await migrate(drizzle(pool, { schema }), {
       migrationsFolder: new URL('../drizzle', import.meta.url).pathname,
     })
     app = createApp(settings, {
@@ -77,7 +76,7 @@ describeIntegration('PostgreSQL and Redis authentication', () => {
 
   afterEach(async () => {
     for (const email of emailsToDelete) {
-      await sql`delete from users where email = ${email}`
+      await pool.query('delete from users where email = $1', [email])
     }
     emailsToDelete.clear()
   })
@@ -86,7 +85,7 @@ describeIntegration('PostgreSQL and Redis authentication', () => {
     await redis.flushdb()
     await redis.quit()
     await database.close()
-    await sql.end({ timeout: 2 })
+    await pool.end()
   })
 
   it('requests and verifies one OTP, then revokes only that session', async () => {
@@ -253,7 +252,7 @@ describeIntegration('PostgreSQL and Redis authentication', () => {
     })
 
     expect(ids[0]).toBe(ids[1])
-    const rows = await sql`select count(*)::int as count from users where email = ${email}`
-    expect(rows[0].count).toBe(1)
+    const result = await pool.query<{ count: number }>('select count(*)::int as count from users where email = $1', [email])
+    expect(result.rows[0].count).toBe(1)
   })
 })

@@ -11,7 +11,7 @@ The repository contains independently managed product services under `apps/`. Ro
 | `apps/web` | Browser application, routing, theming, and product interface |
 | `apps/api` | Node.js HTTP API, authentication, and server-side product capabilities |
 | `apps/ai` | Python service boundary for model providers and AI workloads |
-| `apps/emails` | React Email components, local previews, and API artifact rendering |
+| `apps/emails` | React Email components, local previews, and the consumable email package |
 | PostgreSQL | Users, OAuth identities, and revocable sessions |
 | Redis | Short-lived OTP challenges, OAuth state, and rate limits |
 | Root workspace | Shared commands, repository rules, and canonical documentation |
@@ -30,7 +30,7 @@ The email login flow crosses both applications:
 
 1. The web application requests an OTP for a normalized email address.
 2. Redis atomically applies cooldown and rate limits, then stores only the HMAC of a short-lived code.
-3. The repository renders the React Email component into versioned API artifacts, and Resend delivers its HTML and text.
+3. The API passes the React Email component and OTP props to Resend's Node SDK; Resend renders the component in Node and delivers the message.
 4. Redis verifies and consumes the code once.
 5. PostgreSQL creates or reuses the user and stores a hashed opaque session token.
 6. The API sets a host-only `HttpOnly` cookie and the browser loads the protected root page.

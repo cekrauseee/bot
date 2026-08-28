@@ -23,6 +23,9 @@ async function fixture(context) {
     JSON.stringify({ workspaces: ['apps/api', 'apps/web', 'apps/emails'] }),
   )
   await writeFile(path.join(root, 'package-lock.json'), '{"lockfileVersion":3}')
+  await writeFile(path.join(root, 'apps/ai/pyproject.toml'), '[project]\nname = "ai"\n')
+  await writeFile(path.join(root, 'apps/ai/uv.lock'), 'version = 1\n')
+  await writeFile(path.join(root, 'apps/ai/.python-version'), '3.14\n')
   for (const workspace of ['api', 'web', 'emails']) {
     await writeFile(path.join(root, `apps/${workspace}/package.json`), `{"name":"${workspace}"}`)
   }
@@ -53,5 +56,22 @@ test('workspace manifest changes invalidate the dependency marker', async (conte
 
   await writeFile(path.join(root, 'apps/api/package.json'), '{"name":"api","changed":true}')
   assert.notEqual(JSON.parse(await readFile(markerPath, 'utf8')).fingerprint, await dependencyFingerprint(root))
+  assert.equal(await dependenciesAreInstalled(root), false)
+})
+
+test('Python dependency manifests invalidate the dependency marker', async (context) => {
+  const root = await fixture(context)
+  const markerPath = path.join(root, 'node_modules', dependencyMarkerName)
+  await writeFile(markerPath, JSON.stringify({ fingerprint: await dependencyFingerprint(root) }))
+
+  await writeFile(path.join(root, 'apps/ai/pyproject.toml'), '[project]\nname = "changed"\n')
+  assert.equal(await dependenciesAreInstalled(root), false)
+
+  await writeFile(markerPath, JSON.stringify({ fingerprint: await dependencyFingerprint(root) }))
+  await writeFile(path.join(root, 'apps/ai/uv.lock'), 'version = 2\n')
+  assert.equal(await dependenciesAreInstalled(root), false)
+
+  await writeFile(markerPath, JSON.stringify({ fingerprint: await dependencyFingerprint(root) }))
+  await writeFile(path.join(root, 'apps/ai/.python-version'), '3.15\n')
   assert.equal(await dependenciesAreInstalled(root), false)
 })

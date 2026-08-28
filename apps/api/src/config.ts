@@ -12,6 +12,7 @@ export type Environment = 'development' | 'test' | 'production'
 export type Settings = {
   environment: Environment
   databaseUrl: string
+  neonWsProxy?: string
   redisUrl: string
   webBaseUrl: string
   apiBaseUrl: string
@@ -72,13 +73,43 @@ const parseHttpUrl = (value: string, name: string, origin: boolean) => {
 const normalizeOrigin = (value: string, name: string) => parseHttpUrl(value.replace(/\/$/, ''), name, true).origin
 
 const parseDatabaseUrl = (value: string) => {
-  const normalized = value.replace(/^postgresql\+psycopg:\/\//, 'postgresql://')
   let parsed: URL
-  try { parsed = new URL(normalized) } catch { throw new Error('DATABASE_URL must be a valid PostgreSQL URL') }
+  try { parsed = new URL(value) } catch { throw new Error('DATABASE_URL must be a valid PostgreSQL URL') }
   if (parsed.protocol !== 'postgresql:' || !parsed.hostname) {
-    throw new Error('DATABASE_URL must use postgresql:// or postgresql+psycopg://')
+    throw new Error('DATABASE_URL must use postgresql://')
   }
-  return normalized
+  return value
+}
+
+const parseNeonWsProxy = (value: string | undefined) => {
+  const proxy = value?.trim()
+  if (!proxy) return undefined
+  const match = /^(?<authority>[^/?#]+)(?<path>\/[^?#]*)?$/.exec(proxy)
+  if (!match || /\s|\\/.test(proxy) || match.groups?.authority.endsWith(':') ||
+      match.groups?.path === '/') {
+    throw new Error('NEON_WS_PROXY must be host[:port][/path] without a protocol')
+  }
+
+  let parsed: URL
+  try {
+    parsed = new URL(`http://${match.groups?.authority}${match.groups?.path ?? ''}`)
+  } catch {
+    throw new Error('NEON_WS_PROXY must be host[:port][/path] without a protocol')
+  }
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, '')
+  const validHostname = isIP(hostname) !== 0 || hostname === 'localhost' ||
+    hostname.split('.').every((label) => /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(label))
+  const port = parsed.port ? Number(parsed.port) : undefined
+  if (!validHostname || parsed.username || parsed.password || parsed.search || parsed.hash ||
+      (port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65_535))) {
+    throw new Error('NEON_WS_PROXY must be host[:port][/path] without a protocol')
+  }
+  return proxy
+}
+
+const isNeonHostname = (databaseUrl: string) => {
+  const hostname = new URL(databaseUrl).hostname.toLowerCase()
+  return hostname === 'neon.tech' || hostname.endsWith('.neon.tech')
 }
 
 const parseRedisUrl = (value: string) => {
@@ -94,6 +125,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
   const environment = env.ENVIRONMENT ?? 'development'
   if (!['development', 'test', 'production'].includes(environment)) throw new Error('ENVIRONMENT is invalid')
   const databaseUrl = parseDatabaseUrl(env.DATABASE_URL ?? 'postgresql://mybot:mybot@localhost:5434/mybot')
+  const neonWsProxy = parseNeonWsProxy(env.NEON_WS_PROXY)
   const redisUrl = parseRedisUrl(env.REDIS_URL ?? 'redis://localhost:6380/0')
   const webOrigin = normalizeOrigin(env.WEB_BASE_URL ?? 'http://localhost:5173', 'WEB_BASE_URL')
   const apiOrigin = normalizeOrigin(env.API_BASE_URL ?? 'http://localhost:8000', 'API_BASE_URL')
@@ -112,6 +144,9 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     rateLimitPepper: env.RATE_LIMIT_PEPPER ?? developmentSecrets.rateLimitPepper,
   }
   if (environment === 'production') {
+    if (!isNeonHostname(databaseUrl) && !neonWsProxy) {
+      throw new Error('production DATABASE_URL must target a Neon host (*.neon.tech) or set NEON_WS_PROXY')
+    }
     const values = Object.values(secrets)
     if (values.some((value) => value.length < 32 || value.startsWith('development-') || isPlaceholder(value)) || new Set(values).size !== values.length) {
       throw new Error('production authentication secrets must be unique and at least 32 characters')
@@ -131,7 +166,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     }
   }
   return {
-    environment: environment as Environment, databaseUrl, redisUrl,
+    environment: environment as Environment, databaseUrl, neonWsProxy, redisUrl,
     webBaseUrl: webOrigin, apiBaseUrl: apiOrigin, ...secrets,
     sessionTtlSeconds: positiveInteger(env, 'SESSION_TTL_SECONDS', 2_592_000),
     otpTtlSeconds: positiveInteger(env, 'OTP_TTL_SECONDS', 600),

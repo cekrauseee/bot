@@ -1,33 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { LoginOtpEmail } from '@my-bot/emails'
 import {
   EmailDeliveryError,
-  loadLoginOtpTemplate,
   ResendOtpEmailSender,
 } from '../src/email.js'
 
 describe('OTP email delivery', () => {
   afterEach(() => vi.restoreAllMocks())
 
-  it('loads generated HTML and text artifacts with both tokens', async () => {
-    const template = await loadLoginOtpTemplate()
-
-    expect(template.subject).toBe('Your myBot sign-in code')
-    for (const body of [template.html, template.text]) {
-      expect(body).toContain('__MYBOT_OTP_CODE__')
-      expect(body).toContain('__MYBOT_EXPIRATION_MINUTES__')
-    }
-  })
-
-  it('sends rendered bodies with a stable idempotency key', async () => {
+  it('sends the React Email component with actual props and stable metadata', async () => {
     const send = vi.fn().mockResolvedValue({ data: { id: 'email_123' }, error: null })
     const sender = new ResendOtpEmailSender(
       're_test',
       'myBot <mybot@example.com>',
-      Promise.resolve({
-        subject: 'Your myBot sign-in code',
-        html: '<p>__MYBOT_OTP_CODE__ __MYBOT_EXPIRATION_MINUTES__</p>',
-        text: '__MYBOT_OTP_CODE__ __MYBOT_EXPIRATION_MINUTES__',
-      }),
       { emails: { send } } as never,
     )
 
@@ -43,10 +28,12 @@ describe('OTP email delivery', () => {
       from: 'myBot <mybot@example.com>',
       to: ['private@example.com'],
       subject: 'Your myBot sign-in code',
-      html: '<p>482913 11</p>',
-      text: '482913 11',
+      tags: [{ name: 'category', value: 'authentication' }],
     })
+    expect(payload).not.toHaveProperty('html')
+    expect(payload).not.toHaveProperty('text')
     expect(payload).not.toHaveProperty('template')
+    expect(payload.react).toMatchObject({ type: LoginOtpEmail, props: { otpCode: '482913', expirationMinutes: 11 } })
     expect(options).toEqual({ idempotencyKey: 'otp-challenge_123' })
   })
 
@@ -55,11 +42,6 @@ describe('OTP email delivery', () => {
     const sender = new ResendOtpEmailSender(
       're_private',
       'myBot <mybot@example.com>',
-      Promise.resolve({
-        subject: 'Code',
-        html: '__MYBOT_OTP_CODE__ __MYBOT_EXPIRATION_MINUTES__',
-        text: '__MYBOT_OTP_CODE__ __MYBOT_EXPIRATION_MINUTES__',
-      }),
       { emails: { send: vi.fn().mockRejectedValue(new TypeError('provider unavailable')) } } as never,
     )
 
@@ -83,11 +65,6 @@ describe('OTP email delivery', () => {
     const sender = new ResendOtpEmailSender(
       're_test',
       'myBot <mybot@example.com>',
-      Promise.resolve({
-        subject: 'Code',
-        html: '__MYBOT_OTP_CODE__ __MYBOT_EXPIRATION_MINUTES__',
-        text: '__MYBOT_OTP_CODE__ __MYBOT_EXPIRATION_MINUTES__',
-      }),
       {
         emails: {
           send: vi.fn().mockResolvedValue({

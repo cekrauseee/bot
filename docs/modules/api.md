@@ -10,7 +10,7 @@
 - `src/config.ts`: validated environment configuration and production guardrails.
 - `src/modules/auth`: OTP, Google OpenID Connect, and session services.
 - `src/db`: Drizzle schema, repository, connection, migration, and drift checks.
-- `src/email.ts`: local template loading and Resend delivery.
+- `src/email.ts`: React Email composition and Resend delivery.
 - `drizzle`: versioned, non-destructive SQL migrations.
 - `tests`: unit and PostgreSQL/Redis integration coverage.
 
@@ -26,7 +26,7 @@ The response is validated by an Elysia runtime schema and covered by API tests. 
 
 ## Dependency Management
 
-`package.json` defines runtime and development dependencies. The repository root `package-lock.json` records the complete npm workspace graph. Strict TypeScript, Oxlint, Vitest, production builds, integration tests, and Drizzle migration checks run through the root command catalog.
+`package.json` defines runtime and development dependencies. The repository root `package-lock.json` records the complete npm workspace graph. Strict TypeScript, Oxlint, Vitest, production builds, integration tests, and Drizzle migration checks run through the root command catalog. Local and test connections use `pg.Pool`; production selects Neon Serverless `Pool` and configures the Node `ws` constructor. Production accepts only Neon hosts (`*.neon.tech`) unless `NEON_WS_PROXY` is configured as a `host[:port][/path]` WebSocket proxy address without a protocol.
 
 ## Database Compatibility
 

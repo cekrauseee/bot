@@ -18,13 +18,14 @@ npm run setup
 
 The setup script:
 
-- installs the npm workspace and Python AI lockfiles. A marker under `node_modules` records a fingerprint of the root npm lockfile and npm workspace manifests only after both installs succeed; changing branches or those npm dependency files invalidates readiness and reruns installation;
+- installs the npm workspace and Python AI lockfiles. A marker under `node_modules` records a fingerprint of the root npm lockfile, npm workspace manifests, and `apps/ai/pyproject.toml`, `apps/ai/uv.lock`, and `apps/ai/.python-version` only after both installs succeed; changing any of these dependency inputs invalidates readiness and reruns installation;
+- builds the `@my-bot/emails` workspace package consumed by the API;
 - creates `.env` and `apps/web/.env` only when absent;
 - generates three independent local authentication secrets without printing or replacing existing values;
 - starts the dedicated PostgreSQL and Redis services;
 - applies all database migrations.
 
-It reports the remaining Google and Resend variables without blocking local UI development. Add those provider credentials to `.env`, register `http://localhost:8000/auth/google/callback`, then run `npm run auth:check`. React Email templates are rendered locally during setup and development; Resend needs no hosted template configuration.
+It reports the remaining Google and Resend variables without blocking local UI development. Add those provider credentials to `.env`, register `http://localhost:8000/auth/google/callback`, then run `npm run auth:check`. React Email templates are previewed locally; the API sends the component directly through Resend, which renders it in Node, so no hosted template configuration is required.
 
 ## Daily Development
 
@@ -32,7 +33,7 @@ It reports the remaining Google and Resend variables without blocking local UI d
 npm run dev
 ```
 
-This command ensures environment files, dependencies, infrastructure, email artifacts, and migrations are ready. It then runs the Elysia API on `8000`, the FastAPI AI service on `8001`, and Vite on `5173`. `Ctrl+C` stops every application process. Open `http://localhost:5173`; use `localhost`, not `127.0.0.1`, so the configured browser origin matches.
+This command ensures environment files, dependencies, infrastructure, and migrations are ready. It then runs the Elysia API on `8000`, the FastAPI AI service on `8001`, and Vite on `5173`. `Ctrl+C` stops every application process. Open `http://localhost:5173`; use `localhost`, not `127.0.0.1`, so the configured browser origin matches.
 
 Stop the background database and Redis containers when they are no longer needed:
 
@@ -44,7 +45,7 @@ npm run infra:stop
 
 When starting development, the scripts check ports `5434` and `6380` before invoking Docker Compose. A healthy PostgreSQL or Redis container from the current Compose project and service configuration is reused. If another process or Compose project owns either port, startup stops with a friendly message and does not stop it automatically.
 
-The npm lockfile at the repository root covers the web, email, and Elysia API workspaces. The Python lockfile lives at `apps/ai/uv.lock`.
+The npm lockfile at the repository root covers the web, email, and Elysia API workspaces. The Python dependency inputs live at `apps/ai/pyproject.toml`, `apps/ai/uv.lock`, and `apps/ai/.python-version`.
 
 ## Commands
 
@@ -79,12 +80,12 @@ Project-specific commands remain available for focused development and diagnosis
 | API | `api:dev` | `api:lint`, `api:test`, `api:test:integration` | `api:build` |
 | AI | `ai:dev` | `ai:lint`, `ai:test` | — |
 | Web | `web:dev` | `web:lint` | `web:build` |
-| Emails | `emails:dev` | `emails:check`, `emails:typecheck` | `emails:render`, `emails:build` |
+| Emails | `emails:dev` | `emails:typecheck` | `emails:build` |
 | Automation | — | `scripts:lint`, `scripts:test` | — |
 
 Prefix every entry with `npm run`, for example `npm run api:test`.
 
-The API workspace also exposes `npm run db:migrate:production --workspace @my-bot/api` and `npm run db:check:production --workspace @my-bot/api` for running migration and schema checks from compiled `dist` artifacts. The root `db:migrate` and `db:check` commands remain the local development workflow.
+The API workspace also exposes `npm run db:migrate:production --workspace @my-bot/api` and `npm run db:check:production --workspace @my-bot/api` for running migration and schema checks from compiled `dist` artifacts. The root `db:migrate` and `db:check` commands remain the local development workflow. Development and test use a local `pg.Pool`; production always uses Neon Serverless with the Node `ws` constructor. Production `DATABASE_URL` must target `*.neon.tech`, unless `NEON_WS_PROXY` names the configured WebSocket proxy as `host[:port][/path]` without a protocol.
 
 To add a beUI component, inspect and install it from `apps/web`:
 
@@ -103,7 +104,7 @@ Run one command before handing off a change:
 npm run verify
 ```
 
-It prepares the runtime, runs unit checks and builds, executes the PostgreSQL and Redis authentication integration suite, and checks the Drizzle migration history and relational contract.
+It prepares the runtime, runs unit checks and builds, executes the PostgreSQL and Redis authentication integration suite, and checks the Drizzle migration history and relational contract. The focused `npm run api:test:integration` command builds `@my-bot/emails` first and runs every `*.integration.test.ts` file; it requires the local Compose services.
 
 Interface work should also be checked in both appearances, at narrow widths, with keyboard navigation, and with reduced motion.
 

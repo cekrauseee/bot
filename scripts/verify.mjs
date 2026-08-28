@@ -7,7 +7,6 @@ try {
   await run(npmCommand, ['run', 'check'], { label: 'Run repository checks' })
   await run(npmCommand, ['run', 'api:test:integration'], {
     label: 'Run PostgreSQL and Redis authentication integration tests',
-    env: { ...process.env, RUN_API_INTEGRATION: '1' },
   })
   await run(npmCommand, ['run', 'db:check'], { label: 'Check migration history' })
   console.log('\nVerification completed successfully.')

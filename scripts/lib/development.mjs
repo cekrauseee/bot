@@ -45,7 +45,13 @@ export async function dependencyFingerprint(root = projectRoot) {
   // Hash the lockfile and every declared workspace manifest. The current
   // repository uses explicit workspace directories; fail clearly if that
   // contract changes without updating this readiness check.
-  const manifests = [rootPackagePath, path.join(root, 'package-lock.json')]
+  const manifests = [
+    rootPackagePath,
+    path.join(root, 'package-lock.json'),
+    path.join(root, 'apps/ai', 'pyproject.toml'),
+    path.join(root, 'apps/ai', 'uv.lock'),
+    path.join(root, 'apps/ai', '.python-version'),
+  ]
   for (const workspace of workspacePatterns) {
     if (workspace.endsWith('/*')) {
       throw new Error(`Unsupported workspace pattern in dependency graph: ${workspace}`)
@@ -120,9 +126,9 @@ export async function migrateDatabase() {
   })
 }
 
-export async function renderEmailTemplates() {
-  await run(npmCommand, ['run', 'emails:render'], {
-    label: 'Render local React Email templates for the API',
+export async function buildEmailPackage() {
+  await run(npmCommand, ['run', 'emails:build'], {
+    label: 'Build the transactional email package for the API',
   })
 }
 
@@ -135,7 +141,7 @@ export async function prepareDevelopment({ dependencies = 'if-missing' } = {}) {
     await installDependencies()
   }
 
-  await renderEmailTemplates()
+  await buildEmailPackage()
   await startInfrastructure()
   await migrateDatabase()
   return environment

@@ -8,7 +8,7 @@ import { OtpService } from './modules/auth/otp.js'
 import { SessionManager } from './modules/auth/sessions.js'
 
 const settings = loadSettings()
-const database = new Database(settings)
+const database = await Database.create(settings)
 const redis = new Redis(settings.redisUrl, { lazyConnect: true })
 await redis.connect()
 

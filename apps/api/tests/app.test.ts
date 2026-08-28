@@ -44,6 +44,7 @@ describe('HTTP contract', () => {
     const productionSettings = loadSettings({
       ...process.env,
       ENVIRONMENT: 'production',
+      DATABASE_URL: 'postgresql://user:password@ep-test.us-east-1.aws.neon.tech/mybot',
       WEB_BASE_URL: 'https://app.example.com',
       API_BASE_URL: 'https://api.example.com',
       GOOGLE_REDIRECT_URI: 'https://api.example.com/auth/google/callback',

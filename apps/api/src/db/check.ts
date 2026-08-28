@@ -1,6 +1,6 @@
-import postgres from 'postgres'
 import { loadSettings } from '../config.js'
 import { compareMigrationHistory, readMigrationManifest, resolveMigrationsFolder } from './migrations.js'
+import type { QueryClient, QueryRow } from './drivers/types.js'
 
 type ColumnContract = {
   name: string
@@ -11,8 +11,16 @@ type ColumnContract = {
 }
 type ConstraintContract = { table: string; name: string; type: string; definition: string }
 type IndexContract = { table: string; name: string; definition: string }
-type ConstraintRow = { table_name: unknown; conname: unknown; contype: unknown; definition: unknown }
-type IndexRow = { table_name: unknown; indexname: unknown; indexdef: unknown; is_primary: unknown }
+type ConstraintRow = QueryRow & { table_name: unknown; conname: unknown; contype: unknown; definition: unknown }
+type IndexRow = QueryRow & { table_name: unknown; indexname: unknown; indexdef: unknown; is_primary: unknown }
+type ColumnRow = QueryRow & {
+  table_name: unknown
+  column_name: unknown
+  data_type: unknown
+  character_maximum_length: unknown
+  is_nullable: unknown
+  column_default: unknown
+}
 
 const columns: Record<string, ColumnContract[]> = {
   users: [
@@ -129,15 +137,18 @@ export function validateIndexContract(rows: readonly IndexRow[]) {
 }
 
 export async function checkDatabase(databaseUrl = loadSettings().databaseUrl) {
-  const client = postgres(databaseUrl)
+  const settings = loadSettings()
+  const client: QueryClient = settings.environment === 'production'
+    ? await (await import('./drivers/neon.js')).createNeonQueryClient(databaseUrl, settings.neonWsProxy)
+    : await (await import('./drivers/node-postgres.js')).createNodePostgresQueryClient(databaseUrl)
   try {
-    const columnRows = await client`
+    const columnRows = (await client.query<ColumnRow>(`
       select table_name, column_name, data_type, character_maximum_length,
              is_nullable, column_default, ordinal_position
       from information_schema.columns
       where table_schema = 'public' and table_name in ('users', 'oauth_identities', 'sessions')
       order by table_name, ordinal_position
-    `
+    `)).rows
     for (const [table, expected] of Object.entries(columns)) {
       const actual = columnRows.filter((row) => row.table_name === table)
       if (actual.length !== expected.length) throw new Error(`invalid column contract in ${table}`)
@@ -153,17 +164,17 @@ export async function checkDatabase(databaseUrl = loadSettings().databaseUrl) {
       }
     }
 
-    const constraintRows = await client`
+    const constraintRows = (await client.query<ConstraintRow>(`
       select c.conrelid::regclass::text as table_name, c.conname,
              c.contype, pg_get_constraintdef(c.oid) as definition
       from pg_constraint c
       join pg_namespace n on n.oid = c.connamespace
       where n.nspname = 'public' and c.contype <> 'n'
         and c.conrelid::regclass::text in ('users', 'oauth_identities', 'sessions')
-    `
-    if (!validateConstraintContract(constraintRows as unknown as ConstraintRow[])) throw new Error('invalid auth constraint contract')
+    `)).rows
+    if (!validateConstraintContract(constraintRows)) throw new Error('invalid auth constraint contract')
 
-    const indexRows = await client`
+    const indexRows = (await client.query<IndexRow>(`
       select p.tablename as table_name, p.indexname, p.indexdef, i.indisprimary as is_primary
       from pg_indexes p
       join pg_class index_class on index_class.relname = p.indexname
@@ -172,28 +183,28 @@ export async function checkDatabase(databaseUrl = loadSettings().databaseUrl) {
       where p.schemaname = 'public' and index_namespace.nspname = 'public'
         and p.tablename in ('users', 'oauth_identities', 'sessions')
       order by case p.tablename when 'users' then 1 when 'oauth_identities' then 2 else 3 end, p.indexname
-    `
-    if (!validateIndexContract(indexRows as unknown as IndexRow[])) throw new Error('invalid auth index contract')
+    `)).rows
+    if (!validateIndexContract(indexRows)) throw new Error('invalid auth index contract')
 
-    const migrationTable = await client`
+    const migrationTable = (await client.query(`
       select 1 from information_schema.tables
       where table_schema = 'drizzle' and table_name = '__drizzle_migrations'
-    `
+    `)).rows
     if (!migrationTable.length) throw new Error('database migration record is missing')
     const migrationsFolder = await resolveMigrationsFolder()
     const expectedMigrations = await readMigrationManifest(migrationsFolder)
-    const appliedMigrations = await client`
+    const appliedMigrations = (await client.query<QueryRow & { hash: unknown; createdAt: unknown }>(`
       select hash, created_at as "createdAt"
       from drizzle.__drizzle_migrations
       order by created_at asc, id asc
-    `
+    `)).rows
     const migrationResult = compareMigrationHistory(expectedMigrations, appliedMigrations.map((row) => ({
       hash: String(row.hash), createdAt: row.createdAt as string | number | bigint,
     })))
     if (!migrationResult.ok) throw new Error(migrationResult.message)
     console.log('auth schema and migration record OK')
   } finally {
-    await client.end({ timeout: 2 })
+    await client.end()
   }
 }
 
