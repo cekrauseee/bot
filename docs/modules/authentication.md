@@ -2,7 +2,7 @@
 
 ## Methods
 
-Email login creates or reuses a user only after a valid one-time code. Google login uses OpenID Connect and links a verified Google email to the same user record. Later Google logins resolve the provider subject before considering the current email claim.
+Email login creates or reuses a user only after a valid one-time code. Google login uses OpenID Connect through `openid-client` and links a verified Google email to the same user record. Later Google logins resolve the provider subject before considering the current email claim.
 
 The API requests only `openid email profile`. It stores the Google subject, provider email, first name, last name, and avatar URL. It does not store Google access or refresh tokens.
 
@@ -32,7 +32,7 @@ OTP request responses are identical for new and existing email addresses. Errors
 
 ## Email Template
 
-`apps/emails/emails/login-otp.tsx` is the versioned React Email component and source of truth. Repository scripts render HTML, plain text, and subject metadata into the API package. FastAPI substitutes the generated OTP and expiry, then sends those local assets through Resend without a hosted template or alias. The API sends from `RESEND_FROM`; production uses `myBot <mybot@cekrause.eu>`.
+`packages/email/emails/login-otp.tsx` is the versioned React Email component and source of truth. The `@my-bot/email` workspace package exports the component and subject. The API supplies the generated OTP and expiry as props and sends the element through the Resend Node SDK `react` field without a hosted template or generated HTML/text artifacts. The API sends from `RESEND_FROM`; production uses `myBot <mybot@cekrause.eu>`.
 
 ## Production Topology
 

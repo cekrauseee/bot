@@ -1,4 +1,5 @@
-import { access } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { access, readdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { prepareEnvironment, printEnvironmentSummary } from './environment.mjs'
@@ -33,18 +34,80 @@ async function assertDevelopmentPrerequisites() {
   await assertInfrastructurePrerequisites()
 }
 
-async function dependenciesAreInstalled() {
-  return (
-    (await pathExists(path.join(projectRoot, 'node_modules/.package-lock.json'))) &&
-    (await pathExists(path.join(projectRoot, 'apps/api/.venv/pyvenv.cfg')))
-  )
+export const dependencyMarkerName = '.mybot-dependencies.json'
+
+export async function dependencyFingerprint(root = projectRoot) {
+  const rootPackagePath = path.join(root, 'package.json')
+  const rootPackage = JSON.parse(await readFile(rootPackagePath, 'utf8'))
+  const workspacePatterns = Array.isArray(rootPackage.workspaces)
+    ? rootPackage.workspaces
+    : rootPackage.workspaces?.packages ?? []
+  // Hash the lockfile and every declared workspace manifest. Resolve the
+  // simple one-level globs used by npm workspaces so package moves and new
+  // packages invalidate the readiness marker.
+  const manifests = [
+    rootPackagePath,
+    path.join(root, 'package-lock.json'),
+    path.join(root, 'apps/ai', 'pyproject.toml'),
+    path.join(root, 'apps/ai', 'uv.lock'),
+    path.join(root, 'apps/ai', '.python-version'),
+  ]
+  const turboPath = path.join(root, 'turbo.json')
+  if (await pathExists(turboPath)) manifests.splice(2, 0, turboPath)
+  for (const workspace of workspacePatterns) {
+    if (workspace.endsWith('/*')) {
+      const parent = path.join(root, workspace.slice(0, -2))
+      const entries = await readdir(parent, { withFileTypes: true })
+      for (const entry of entries
+        .filter((item) => item.isDirectory())
+        .sort((a, b) => a.name.localeCompare(b.name))) {
+        const manifest = path.join(parent, entry.name, 'package.json')
+        if (await pathExists(manifest)) manifests.push(manifest)
+      }
+      continue
+    }
+    manifests.push(path.join(root, workspace, 'package.json'))
+  }
+
+  const hash = createHash('sha256')
+  for (const manifest of manifests) {
+    hash.update(manifest.slice(root.length))
+    hash.update('\0')
+    hash.update(await readFile(manifest))
+    hash.update('\0')
+  }
+  return hash.digest('hex')
 }
 
-export async function installDependencies() {
-  await run(npmCommand, ['ci'], { label: 'Install Node.js workspaces from the lockfile' })
-  await run('uv', ['sync', '--project', 'apps/api', '--locked'], {
-    label: 'Install the Python environment from the lockfile',
+export async function dependenciesAreInstalled(root = projectRoot) {
+  const packageLockReady = await pathExists(path.join(root, 'node_modules/.package-lock.json'))
+  const pythonReady = await pathExists(path.join(root, 'apps/ai/.venv/pyvenv.cfg'))
+  if (!packageLockReady || !pythonReady) return false
+
+  try {
+    const marker = JSON.parse(
+      await readFile(path.join(root, 'node_modules', dependencyMarkerName), 'utf8'),
+    )
+    return marker.fingerprint === (await dependencyFingerprint(root))
+  } catch {
+    return false
+  }
+}
+
+export async function installDependencies(root = projectRoot) {
+  await run(npmCommand, ['ci'], {
+    cwd: root,
+    label: 'Install Node.js workspaces from the lockfile',
   })
+  await run('uv', ['sync', '--project', 'apps/ai', '--locked'], {
+    cwd: root,
+    label: 'Install the Python AI environment from the lockfile',
+  })
+  await writeFile(
+    path.join(root, 'node_modules', dependencyMarkerName),
+    `${JSON.stringify({ fingerprint: await dependencyFingerprint(root) }, null, 2)}\n`,
+    { mode: 0o600 },
+  )
 }
 
 export async function startInfrastructure() {
@@ -68,25 +131,14 @@ export async function startInfrastructure() {
 }
 
 export async function migrateDatabase() {
-  await run(
-    'uv',
-    [
-      'run',
-      '--project',
-      'apps/api',
-      'alembic',
-      '-c',
-      'apps/api/alembic.ini',
-      'upgrade',
-      'head',
-    ],
-    { label: 'Apply database migrations' },
-  )
+  await run(npmCommand, ['run', 'db:migrate'], {
+    label: 'Apply application API database migrations',
+  })
 }
 
-export async function renderEmailTemplates() {
-  await run(npmCommand, ['run', 'emails:render'], {
-    label: 'Render local React Email templates for the API',
+export async function buildEmailPackage() {
+  await run(npmCommand, ['run', 'email:build'], {
+    label: 'Build the transactional email package for the API',
   })
 }
 
@@ -99,7 +151,7 @@ export async function prepareDevelopment({ dependencies = 'if-missing' } = {}) {
     await installDependencies()
   }
 
-  await renderEmailTemplates()
+  await buildEmailPackage()
   await startInfrastructure()
   await migrateDatabase()
   return environment

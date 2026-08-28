@@ -1,0 +1,7 @@
+import { describe, expect, it } from 'vitest'
+import { loadSettings } from '../src/config.js'
+import { OtpService } from '../src/modules/auth/otp.js'
+import { EmailDeliveryError } from '../src/email.js'
+const settings=loadSettings({...process.env,ENVIRONMENT:'test'})
+describe('OTP persistence safety',()=>{it('rolls back Redis state when delivery fails',async()=>{const calls:string[]=[];const redis={set:async()=> 'OK',get:async()=>null,ttl:async()=>60,eval:async(script:string)=>{calls.push(script);if(script.includes("return {'installed'}"))return ['installed'];if(script.includes('INCR'))return [1,60];return 1}} as any;const sender={sendOtp:async()=>{throw new EmailDeliveryError('down')}};await expect(new OtpService(redis,sender,settings).issue('person@example.com','unknown')).rejects.toMatchObject({code:'email_delivery_unavailable'});expect(calls.some((script)=>script.includes('KEYS[3]'))).toBe(true)})})
+it('releases its cooldown claim after an atomic stale install',async()=>{const calls:string[]=[];const redis={set:async()=> 'OK',get:async()=> 'old',ttl:async()=>60,eval:async(script:string)=>{calls.push(script);if(script.includes("return {'stale'}"))return ['stale'];if(script.includes('INCR'))return [1,60];return 1}} as any;const sender={sendOtp:async()=>{throw new Error('must not send')}};await expect(new OtpService(redis,sender,settings).issue('person@example.com','unknown')).rejects.toMatchObject({code:'rate_limited'});expect(calls.some((script)=>script.includes('KEYS[1]')&&script.includes('ARGV[1]'))).toBe(true)})

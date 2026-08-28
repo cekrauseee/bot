@@ -7,32 +7,42 @@
     "node": ">=22.22.0"
   },
   "workspaces": [
-    "apps/web",
-    "apps/emails"
+    "apps/*",
+    "packages/*"
   ],
   "scripts": {
     "help": "node scripts/help.mjs",
     "setup": "node scripts/setup.mjs",
     "dev": "node scripts/dev.mjs",
     "verify": "node scripts/verify.mjs",
-    "check": "npm run api:lint && npm run scripts:lint && npm run web:lint && npm run emails:typecheck && npm run emails:check && npm run scripts:test && npm run api:test && npm run emails:build && npm run web:build",
+    "check": "turbo run lint typecheck test build //#scripts:lint //#scripts:test",
     "auth:check": "node scripts/check-auth.mjs",
-    "db:migrate": "uv run --project apps/api alembic -c apps/api/alembic.ini upgrade head",
+    "db:generate": "turbo run db:generate --filter=@my-bot/api",
+    "db:migrate": "turbo run db:migrate --filter=@my-bot/api",
+    "db:check": "turbo run db:check --filter=@my-bot/api",
     "infra:start": "node scripts/infra-start.mjs",
     "infra:stop": "docker compose down",
     "infra:reset": "docker compose down --volumes --remove-orphans && npm run infra:start",
-    "api:dev": "uv run --project apps/api fastapi dev apps/api/src/my_bot_api/main.py",
-    "api:lint": "uv run --project apps/api ruff check apps/api",
-    "api:test": "uv run --project apps/api pytest apps/api/tests",
-    "web:dev": "npm run dev --workspace @my-bot/web",
-    "web:lint": "npm run lint --workspace @my-bot/web",
-    "web:build": "npm run build --workspace @my-bot/web",
-    "emails:dev": "npm run dev --workspace @my-bot/emails",
-    "emails:render": "npm run render --workspace @my-bot/emails",
-    "emails:check": "npm run render:check --workspace @my-bot/emails",
-    "emails:typecheck": "npm exec tsc --workspace @my-bot/emails -- --noEmit",
-    "emails:build": "npm run build --workspace @my-bot/emails",
+    "api:dev": "turbo run dev --filter=@my-bot/api",
+    "api:lint": "turbo run lint --filter=@my-bot/api",
+    "api:typecheck": "turbo run typecheck --filter=@my-bot/api",
+    "api:test": "turbo run test --filter=@my-bot/api",
+    "api:test:integration": "turbo run test:integration --filter=@my-bot/api",
+    "api:build": "turbo run build --filter=@my-bot/api",
+    "ai:dev": "turbo run dev --filter=@my-bot/ai",
+    "ai:lint": "turbo run lint --filter=@my-bot/ai",
+    "ai:test": "turbo run test --filter=@my-bot/ai",
+    "web:dev": "turbo run dev --filter=@my-bot/web",
+    "web:lint": "turbo run lint --filter=@my-bot/web",
+    "web:typecheck": "turbo run typecheck --filter=@my-bot/web",
+    "web:build": "turbo run build --filter=@my-bot/web",
+    "email:dev": "turbo run dev:preview --filter=@my-bot/email",
+    "email:typecheck": "turbo run typecheck --filter=@my-bot/email",
+    "email:build": "turbo run build --filter=@my-bot/email",
     "scripts:lint": "npm exec oxlint -- scripts",
     "scripts:test": "node --test scripts/tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "turbo": "2.10.12"
   }
 }
