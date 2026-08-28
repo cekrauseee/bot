@@ -21,6 +21,7 @@ export const commandSections = [
       ['db:migrate', 'Apply pending database migrations'],
       ['infra:start', 'Start PostgreSQL and Redis'],
       ['infra:stop', 'Stop PostgreSQL and Redis without deleting data'],
+      ['infra:reset', 'Reset PostgreSQL and Redis containers and data'],
     ],
   },
   {

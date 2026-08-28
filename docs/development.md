@@ -42,6 +42,8 @@ npm run infra:stop
 
 `TRUSTED_PROXY_HOSTS` is an optional comma-separated allowlist of immediate proxy IP addresses. Only a request whose direct peer is in this list may supply exactly one valid address in `X-Forwarded-For`; all other forwarded headers are ignored. In production, set `VITE_API_BASE_URL` in `apps/web/.env` to the API sibling origin.
 
+When starting development, the scripts check ports `5434` and `6380` before invoking Docker Compose. A healthy PostgreSQL or Redis container from the current Compose project and service configuration is reused. If another process or Compose project owns either port, startup stops with a friendly message and does not stop it automatically.
+
 The frontend lockfile lives at the repository root. The API lockfile lives at `apps/api/uv.lock`.
 
 ## Commands
@@ -64,6 +66,9 @@ Operational commands:
 | `npm run db:migrate` | Apply pending database migrations |
 | `npm run infra:start` | Start the dedicated PostgreSQL and Redis containers |
 | `npm run infra:stop` | Stop local PostgreSQL and Redis containers without deleting data |
+| `npm run infra:reset` | Recreate local PostgreSQL and Redis containers and delete their data |
+
+`infra:reset` is destructive for local infrastructure: it removes this Compose project's containers, volumes, and orphan containers before starting PostgreSQL and Redis again. It does not remove Docker images or repository files.
 
 Project-specific commands remain available for focused development and diagnosis:
 
