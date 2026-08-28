@@ -1,4 +1,4 @@
-import { LoginOtpEmail, loginOtpSubject } from '@my-bot/emails'
+import { LoginOtpEmail, loginOtpSubject } from '@my-bot/email'
 import { createElement } from 'react'
 import { Resend } from 'resend'
 

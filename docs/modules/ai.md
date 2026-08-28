@@ -23,4 +23,4 @@ The service runs on port `8001` in local development. The application API does n
 
 ## Dependency Management
 
-`pyproject.toml` defines the Python 3.14 runtime and development dependencies. `uv.lock` records the resolved environment. Keep product-neutral AI libraries here; dependencies used only by the Node application API belong to `apps/api`.
+`pyproject.toml` defines the Python 3.14 runtime and development dependencies. `uv.lock` records the resolved environment. Keep product-neutral AI libraries here; dependencies used only by the Node application API belong to `apps/api`. The minimal `package.json` is a Turbo discovery wrapper: its `dev`, `lint`, and `test` scripts delegate to `uv`; it does not duplicate Python dependencies in npm.

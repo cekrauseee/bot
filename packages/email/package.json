@@ -1,5 +1,5 @@
 {
-  "name": "@my-bot/emails",
+  "name": "@my-bot/email",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -11,8 +11,11 @@
     }
   },
   "scripts": {
-    "dev": "email dev",
-    "build": "tsc -p tsconfig.build.json"
+    "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+    "dev:preview": "email dev",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "preview": "email dev"
   },
   "dependencies": {
     "@react-email/components": "^1.0.12",

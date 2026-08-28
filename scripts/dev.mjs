@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 
 import { prepareDevelopment } from './lib/development.mjs'
-import { npmCommand, projectRoot } from './lib/project.mjs'
+import { projectRoot, turboInvocation } from './lib/project.mjs'
 
 const windows = process.platform === 'win32'
 const children = new Set()
@@ -48,9 +48,8 @@ try {
   await prepareDevelopment()
   console.log('\nmyBot is starting at http://localhost:5173\n')
 
-  const api = start(npmCommand, ['run', 'api:dev'], 'Elysia API')
-  const ai = start(npmCommand, ['run', 'ai:dev'], 'FastAPI AI service')
-  const web = start(npmCommand, ['run', 'dev', '--workspace', '@my-bot/web'], 'Vite')
+  const invocation = turboInvocation()
+  const turbo = start(invocation.command, [...invocation.args, 'run', 'dev', '--ui=tui'], 'Turbo development tasks')
 
   for (const signal of ['SIGINT', 'SIGTERM']) {
     process.once(signal, () => {
@@ -58,7 +57,7 @@ try {
     })
   }
 
-  const result = await Promise.race([api.exited, ai.exited, web.exited])
+  const result = await turbo.exited
   if (!shuttingDown) stopChildren()
   if (result.error) console.error(`${result.label} failed to start: ${result.error.message}`)
 

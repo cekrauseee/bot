@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { access, readFile, writeFile } from 'node:fs/promises'
+import { access, readdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { prepareEnvironment, printEnvironmentSummary } from './environment.mjs'
@@ -42,9 +42,9 @@ export async function dependencyFingerprint(root = projectRoot) {
   const workspacePatterns = Array.isArray(rootPackage.workspaces)
     ? rootPackage.workspaces
     : rootPackage.workspaces?.packages ?? []
-  // Hash the lockfile and every declared workspace manifest. The current
-  // repository uses explicit workspace directories; fail clearly if that
-  // contract changes without updating this readiness check.
+  // Hash the lockfile and every declared workspace manifest. Resolve the
+  // simple one-level globs used by npm workspaces so package moves and new
+  // packages invalidate the readiness marker.
   const manifests = [
     rootPackagePath,
     path.join(root, 'package-lock.json'),
@@ -52,9 +52,19 @@ export async function dependencyFingerprint(root = projectRoot) {
     path.join(root, 'apps/ai', 'uv.lock'),
     path.join(root, 'apps/ai', '.python-version'),
   ]
+  const turboPath = path.join(root, 'turbo.json')
+  if (await pathExists(turboPath)) manifests.splice(2, 0, turboPath)
   for (const workspace of workspacePatterns) {
     if (workspace.endsWith('/*')) {
-      throw new Error(`Unsupported workspace pattern in dependency graph: ${workspace}`)
+      const parent = path.join(root, workspace.slice(0, -2))
+      const entries = await readdir(parent, { withFileTypes: true })
+      for (const entry of entries
+        .filter((item) => item.isDirectory())
+        .sort((a, b) => a.name.localeCompare(b.name))) {
+        const manifest = path.join(parent, entry.name, 'package.json')
+        if (await pathExists(manifest)) manifests.push(manifest)
+      }
+      continue
     }
     manifests.push(path.join(root, workspace, 'package.json'))
   }
@@ -127,7 +137,7 @@ export async function migrateDatabase() {
 }
 
 export async function buildEmailPackage() {
-  await run(npmCommand, ['run', 'emails:build'], {
+  await run(npmCommand, ['run', 'email:build'], {
     label: 'Build the transactional email package for the API',
   })
 }

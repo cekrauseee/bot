@@ -31,6 +31,7 @@ export const commandSections = [
     commands: [
       ['api:dev', 'Run the Elysia API with reload'],
       ['api:lint', 'Lint the Elysia API'],
+      ['api:typecheck', 'Type-check the Elysia API'],
       ['api:test', 'Run API unit tests'],
       ['api:test:integration', 'Run API integration tests'],
       ['api:build', 'Build the Elysia API'],
@@ -49,15 +50,16 @@ export const commandSections = [
     commands: [
       ['web:dev', 'Run the Vite application'],
       ['web:lint', 'Lint the web application'],
+      ['web:typecheck', 'Type-check the web application'],
       ['web:build', 'Type-check and build the web application'],
     ],
   },
   {
-    title: 'Emails',
+    title: 'Email',
     commands: [
-      ['emails:dev', 'Preview React Email templates'],
-      ['emails:typecheck', 'Type-check transactional email templates'],
-      ['emails:build', 'Build the transactional email workspace package'],
+      ['email:dev', 'Preview React Email templates'],
+      ['email:typecheck', 'Type-check transactional email templates'],
+      ['email:build', 'Build the transactional email workspace package'],
     ],
   },
   {

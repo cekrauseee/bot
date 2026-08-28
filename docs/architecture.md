@@ -2,7 +2,7 @@
 
 ## Overview
 
-The repository contains independently managed product services under `apps/`. Root scripts provide one entry point for development and validation while npm owns the web, email, and application API dependency graph and `uv` owns the Python AI environment.
+The repository contains independently managed product services under `apps/` and a consumable React Email package under `packages/`. Root scripts provide one entry point for development and validation while Turborepo owns the JavaScript/TypeScript task graph and `uv` owns the Python AI environment.
 
 ## Components
 
@@ -11,7 +11,7 @@ The repository contains independently managed product services under `apps/`. Ro
 | `apps/web` | Browser application, routing, theming, and product interface |
 | `apps/api` | Node.js HTTP API, authentication, and server-side product capabilities |
 | `apps/ai` | Python service boundary for model providers and AI workloads |
-| `apps/emails` | React Email components, local previews, and the consumable email package |
+| `packages/email` | React Email components, local previews, and the consumable email package |
 | PostgreSQL | Users, OAuth identities, and revocable sessions |
 | Redis | Short-lived OTP challenges, OAuth state, and rate limits |
 | Root workspace | Shared commands, repository rules, and canonical documentation |

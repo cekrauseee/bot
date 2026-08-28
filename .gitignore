@@ -2,6 +2,7 @@
 
 # JavaScript
 node_modules/
+.turbo/
 dist/
 
 # Python

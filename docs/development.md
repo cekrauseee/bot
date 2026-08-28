@@ -18,8 +18,8 @@ npm run setup
 
 The setup script:
 
-- installs the npm workspace and Python AI lockfiles. A marker under `node_modules` records a fingerprint of the root npm lockfile, npm workspace manifests, and `apps/ai/pyproject.toml`, `apps/ai/uv.lock`, and `apps/ai/.python-version` only after both installs succeed; changing any of these dependency inputs invalidates readiness and reruns installation;
-- builds the `@my-bot/emails` workspace package consumed by the API;
+- installs the npm workspace and Python AI lockfiles. A marker under `node_modules` records a fingerprint of the root npm lockfile, Turbo configuration, npm workspace manifests, and `apps/ai/pyproject.toml`, `apps/ai/uv.lock`, and `apps/ai/.python-version` only after both installs succeed; changing any of these dependency inputs invalidates readiness and reruns installation;
+- builds the `@my-bot/email` workspace package consumed by the API;
 - creates `.env` and `apps/web/.env` only when absent;
 - generates three independent local authentication secrets without printing or replacing existing values;
 - starts the dedicated PostgreSQL and Redis services;
@@ -33,7 +33,7 @@ It reports the remaining Google and Resend variables without blocking local UI d
 npm run dev
 ```
 
-This command ensures environment files, dependencies, infrastructure, and migrations are ready. It then runs the Elysia API on `8000`, the FastAPI AI service on `8001`, and Vite on `5173`. `Ctrl+C` stops every application process. Open `http://localhost:5173`; use `localhost`, not `127.0.0.1`, so the configured browser origin matches.
+This command ensures environment files, dependencies, infrastructure, and migrations are ready. It then runs the Elysia API on `8000`, the FastAPI AI service on `8001`, and Vite on `5173`. Vite uses `strictPort`, so a busy `5173` fails with a clear startup error instead of silently moving to another port; stop the conflicting process and retry. `Ctrl+C` stops every application process. Open `http://localhost:5173`; use `localhost`, not `127.0.0.1`, so the configured browser origin matches.
 
 Stop the background database and Redis containers when they are no longer needed:
 
@@ -45,7 +45,7 @@ npm run infra:stop
 
 When starting development, the scripts check ports `5434` and `6380` before invoking Docker Compose. A healthy PostgreSQL or Redis container from the current Compose project and service configuration is reused. If another process or Compose project owns either port, startup stops with a friendly message and does not stop it automatically.
 
-The npm lockfile at the repository root covers the web, email, and Elysia API workspaces. The Python dependency inputs live at `apps/ai/pyproject.toml`, `apps/ai/uv.lock`, and `apps/ai/.python-version`.
+The npm lockfile at the repository root covers the `apps/*` applications and `packages/*` packages. Turbo schedules package-owned lint, typecheck, test, build, and development tasks; the Python wrapper delegates to `uv`, which remains the Python dependency manager. AI settings optionally discover the canonical root `.env` from a source checkout, while shell environment overrides retain precedence; missing dotenv files are harmless. The Python dependency inputs live at `apps/ai/pyproject.toml`, `apps/ai/uv.lock`, and `apps/ai/.python-version`.
 
 ## Commands
 
@@ -77,10 +77,10 @@ Project-specific commands remain available for focused development and diagnosis
 
 | Project | Development | Quality | Build |
 | --- | --- | --- | --- |
-| API | `api:dev` | `api:lint`, `api:test`, `api:test:integration` | `api:build` |
+| API | `api:dev` | `api:lint`, `api:typecheck`, `api:test`, `api:test:integration` | `api:build` |
 | AI | `ai:dev` | `ai:lint`, `ai:test` | — |
-| Web | `web:dev` | `web:lint` | `web:build` |
-| Emails | `emails:dev` | `emails:typecheck` | `emails:build` |
+| Web | `web:dev` | `web:lint`, `web:typecheck` | `web:build` |
+| Email | `email:dev` | `email:typecheck` | `email:build` |
 | Automation | — | `scripts:lint`, `scripts:test` | — |
 
 Prefix every entry with `npm run`, for example `npm run api:test`.
@@ -104,7 +104,7 @@ Run one command before handing off a change:
 npm run verify
 ```
 
-It prepares the runtime, runs unit checks and builds, executes the PostgreSQL and Redis authentication integration suite, and checks the Drizzle migration history and relational contract. The focused `npm run api:test:integration` command builds `@my-bot/emails` first and runs every `*.integration.test.ts` file; it requires the local Compose services.
+It prepares the runtime, runs cached Turbo unit checks and builds, executes the PostgreSQL and Redis authentication integration suite without caching, and checks the Drizzle migration history and relational contract. The focused `npm run api:test:integration` command builds `@my-bot/email` first and runs every `*.integration.test.ts` file; it requires the local Compose services.
 
 Interface work should also be checked in both appearances, at narrow widths, with keyboard navigation, and with reduced motion.
 

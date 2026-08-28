@@ -16,18 +16,20 @@ async function fixture(context) {
   await mkdir(path.join(root, 'node_modules'), { recursive: true })
   await mkdir(path.join(root, 'apps/api'), { recursive: true })
   await mkdir(path.join(root, 'apps/web'), { recursive: true })
-  await mkdir(path.join(root, 'apps/emails'), { recursive: true })
+  await mkdir(path.join(root, 'packages/email'), { recursive: true })
   await mkdir(path.join(root, 'apps/ai/.venv'), { recursive: true })
   await writeFile(
     path.join(root, 'package.json'),
-    JSON.stringify({ workspaces: ['apps/api', 'apps/web', 'apps/emails'] }),
+    JSON.stringify({ workspaces: ['apps/*', 'packages/*'] }),
   )
   await writeFile(path.join(root, 'package-lock.json'), '{"lockfileVersion":3}')
+  await writeFile(path.join(root, 'turbo.json'), '{}')
   await writeFile(path.join(root, 'apps/ai/pyproject.toml'), '[project]\nname = "ai"\n')
   await writeFile(path.join(root, 'apps/ai/uv.lock'), 'version = 1\n')
   await writeFile(path.join(root, 'apps/ai/.python-version'), '3.14\n')
-  for (const workspace of ['api', 'web', 'emails']) {
-    await writeFile(path.join(root, `apps/${workspace}/package.json`), `{"name":"${workspace}"}`)
+  await writeFile(path.join(root, 'apps/ai/package.json'), '{"name":"ai-wrapper"}')
+  for (const workspace of ['apps/api', 'apps/web', 'packages/email']) {
+    await writeFile(path.join(root, `${workspace}/package.json`), `{"name":"${workspace}"}`)
   }
   await writeFile(path.join(root, 'node_modules/.package-lock.json'), '{}')
   await writeFile(path.join(root, 'apps/ai/.venv/pyvenv.cfg'), 'home = test\n')

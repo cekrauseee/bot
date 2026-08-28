@@ -26,7 +26,7 @@ The response is validated by an Elysia runtime schema and covered by API tests. 
 
 ## Dependency Management
 
-`package.json` defines runtime and development dependencies. The repository root `package-lock.json` records the complete npm workspace graph. Strict TypeScript, Oxlint, Vitest, production builds, integration tests, and Drizzle migration checks run through the root command catalog. Local and test connections use `pg.Pool`; production selects Neon Serverless `Pool` and configures the Node `ws` constructor. Production accepts only Neon hosts (`*.neon.tech`) unless `NEON_WS_PROXY` is configured as a `host[:port][/path]` WebSocket proxy address without a protocol.
+`package.json` defines runtime and development dependencies. The repository root `package-lock.json` records the complete npm workspace graph. Turbo runs package-owned TypeScript, Oxlint, Vitest, and production build tasks; integration tests and Drizzle migration checks are explicitly non-cached external-state tasks. Local and test connections use `pg.Pool`; production selects Neon Serverless `Pool` and configures the Node `ws` constructor. Production accepts only Neon hosts (`*.neon.tech`) unless `NEON_WS_PROXY` is configured as a `host[:port][/path]` WebSocket proxy address without a protocol.
 
 ## Database Compatibility
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { LoginOtpEmail } from '@my-bot/emails'
+import { LoginOtpEmail } from '@my-bot/email'
 import {
   EmailDeliveryError,
   ResendOtpEmailSender,
