@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 
+import { type ButtonState } from '@/components/motion/button/stateful'
 import { Button } from '@/components/motion/button/base'
-import { StatefulButton, type ButtonState } from '@/components/motion/button/stateful'
 import { useSession } from '@/features/auth/hooks/use-session'
 import { authApi } from '@/features/auth/services/auth-api'
-import { cn } from '@/lib/utils'
+import { ChatFeature } from '@/features/chat'
 
 export function HomePage() {
   const navigate = useNavigate()
@@ -46,24 +46,15 @@ export function HomePage() {
   }
 
   return (
-    <main className="flex min-h-svh flex-col items-center justify-center gap-3 bg-background p-5">
-      <StatefulButton
-        errorText="Try again"
-        loadingText="Signing out…"
-        pressScale={0.96}
-        state={signOutStatus}
-        successText="Signed out"
-        onClick={() => void signOut()}
-      >
-        Sign out
-      </StatefulButton>
-      <p
-        aria-live="polite"
-        className={cn('text-sm', signOutError && 'text-destructive')}
-        role="status"
-      >
-        {signOutError}
-      </p>
-    </main>
+    <ChatFeature
+      user={{
+        displayName: [user.first_name, user.last_name].filter(Boolean).join(' ') || 'You',
+        email: user.email,
+        avatarUrl: user.avatar_url ?? undefined,
+      }}
+      signOutError={signOutError}
+      signOutStatus={signOutStatus}
+      onSignOut={() => void signOut()}
+    />
   )
 }

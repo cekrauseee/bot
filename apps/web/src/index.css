@@ -24,6 +24,8 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-success: var(--success);
+  --color-reasoning-fill: var(--reasoning-fill);
+  --color-reasoning-track: var(--reasoning-track);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -66,6 +68,8 @@
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
   --success: oklch(0.55 0.15 145);
+  --reasoning-fill: oklch(0.67 0.19 245);
+  --reasoning-track: oklch(0.92 0.01 245);
   --border: oklch(0.9 0 0);
   --input: oklch(0.9 0 0);
   --ring: oklch(0.42 0 0);
@@ -102,6 +106,8 @@
   --accent-foreground: oklch(0.97 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --success: oklch(0.75 0.16 145);
+  --reasoning-fill: oklch(0.72 0.18 250);
+  --reasoning-track: oklch(0.25 0.02 250);
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 16%);
   --ring: oklch(0.72 0 0);
@@ -141,6 +147,14 @@
   button,
   a {
     touch-action: manipulation;
+  }
+
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
   }
 
   a:focus-visible,

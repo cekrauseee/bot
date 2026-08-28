@@ -15,7 +15,9 @@ The repository contains two independently managed applications under `apps/`. Ro
 | Redis | Short-lived OTP challenges, OAuth state, and rate limits |
 | Root workspace | Shared commands, repository rules, and canonical documentation |
 
-The web application uses React Router Data Mode. The router is created outside the React tree and lazy-loads the public login and protected root pages. Pages compose authentication features and beUI components. Hooks own interaction and session state; a feature service owns HTTP calls.
+The web application uses React Router Data Mode. The router is created outside the React tree and lazy-loads the public login and protected root pages. Pages compose authentication and chat features and beUI components. Hooks own interaction and session state; feature services own HTTP calls.
+
+The chat feature is application-owned under `apps/web/src/features/chat`. Its public entrypoint (`features/chat/index.ts`) re-exports the feature container, which owns temporary fixture state; `HomePage` adapts `AuthUser` to the page-owned user view model. `model.ts` and `fixtures/` contain serializable data only. `components/` owns the presentational shell, workspace, sidebar, messages, activity, tools, and composer; renderers adapt model blocks to interactive components. Chat components expose callbacks for navigation and composer actions and do not invent API event formats or persistence.
 
 The API uses an application factory in `my_bot_api.main`. A small application container owns database, Redis, OTP, OAuth, email, and session services. Routers expose typed health and authentication contracts.
 
@@ -45,3 +47,6 @@ The API runs on its own subdomain and does not add an `/api` path prefix. Creden
 - Authentication secrets and raw OTP or session tokens never enter persistent storage or logs.
 - Account lookup behavior does not reveal whether an email already exists.
 - The repository contains no Harness metadata or session state.
+- Pages do not import chat internals or vendor-style agent components.
+- Chat fixtures and model types do not import React or component types.
+- Chat workspace presentation receives data, view state, and callbacks from the feature container.
