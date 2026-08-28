@@ -2,6 +2,7 @@ import { access } from 'node:fs/promises'
 import path from 'node:path'
 
 import { prepareEnvironment, printEnvironmentSummary } from './environment.mjs'
+import { infrastructurePortError, inspectInfrastructurePorts } from './infrastructure.mjs'
 import { npmCommand, projectRoot } from './project.mjs'
 import { commandIsAvailable, run } from './process.mjs'
 
@@ -14,6 +15,12 @@ async function pathExists(target) {
   }
 }
 
+export async function assertInfrastructurePrerequisites() {
+  if (!(await commandIsAvailable('docker', ['compose', 'version']))) {
+    throw new Error('Docker Compose is required')
+  }
+}
+
 async function assertDevelopmentPrerequisites() {
   const [major, minor] = process.versions.node.split('.').map(Number)
   if (major < 22 || (major === 22 && minor < 22)) {
@@ -23,9 +30,7 @@ async function assertDevelopmentPrerequisites() {
   if (!(await commandIsAvailable('uv'))) {
     throw new Error('uv is required: https://docs.astral.sh/uv/getting-started/installation/')
   }
-  if (!(await commandIsAvailable('docker', ['compose', 'version']))) {
-    throw new Error('Docker Compose is required')
-  }
+  await assertInfrastructurePrerequisites()
 }
 
 async function dependenciesAreInstalled() {
@@ -43,7 +48,21 @@ export async function installDependencies() {
 }
 
 export async function startInfrastructure() {
-  await run('docker', ['compose', 'up', '-d', '--wait', 'postgres', 'redis'], {
+  const checks = await inspectInfrastructurePorts()
+  const portError = infrastructurePortError(checks)
+  if (portError) throw portError
+
+  const servicesToStart = checks
+    .filter(({ result }) => result.status === 'available')
+    .map(({ service }) => service.name)
+
+  for (const { service } of checks.filter(({ result }) => result.status === 'owned')) {
+    console.log(`✓ Reusing myBot ${service.label} on port ${service.port}`)
+  }
+
+  if (servicesToStart.length === 0) return
+
+  await run('docker', ['compose', 'up', '-d', '--wait', ...servicesToStart], {
     label: 'Start PostgreSQL and Redis',
   })
 }

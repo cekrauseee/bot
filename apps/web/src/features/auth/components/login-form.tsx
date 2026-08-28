@@ -86,7 +86,7 @@ export function LoginForm() {
     return (
       <div key="code-step" className="flex flex-col gap-4">
         <div className="flex flex-col gap-1 text-start">
-          <h1 className="text-balance text-2xl font-semibold leading-tight tracking-tight">
+          <h1 className="text-balance text-xl font-semibold leading-tight tracking-tight">
             Confirm your email
           </h1>
           <p className="text-pretty text-sm leading-normal text-muted-foreground">
@@ -135,7 +135,7 @@ export function LoginForm() {
           </button>
 
           <StatefulButton
-            className="min-h-10 rounded-sm px-2 text-sm font-medium text-foreground underline-offset-4 hover:bg-transparent hover:underline disabled:cursor-default disabled:opacity-100 disabled:text-muted-foreground"
+            className="min-h-10 rounded-sm px-2 text-sm font-medium text-foreground underline-offset-4 hover:bg-transparent hover:underline disabled:opacity-100 disabled:text-muted-foreground"
             disabled={Boolean(resendIn)}
             onClick={resendCode}
             size="sm"
@@ -166,7 +166,7 @@ export function LoginForm() {
   return (
     <div key="email-step" className="flex flex-col gap-5">
       <div className="flex flex-col gap-1 text-start">
-        <h1 className="text-balance text-2xl font-semibold leading-tight tracking-tight">
+        <h1 className="text-balance text-xl font-semibold leading-tight tracking-tight">
           Welcome back
         </h1>
         <p className="text-pretty text-sm leading-normal text-muted-foreground">
