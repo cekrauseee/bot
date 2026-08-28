@@ -4,7 +4,7 @@ export const commandSections = [
     commands: [
       ['help', 'Show this command guide'],
       ['setup', 'Prepare a fresh development environment'],
-      ['dev', 'Run the API and web application together'],
+      ['dev', 'Run the web, application API, and AI service together'],
     ],
   },
   {
@@ -18,7 +18,9 @@ export const commandSections = [
     title: 'Operations',
     commands: [
       ['auth:check', 'Check Google and Resend environment variables'],
+      ['db:generate', 'Generate a database migration from the API schema'],
       ['db:migrate', 'Apply pending database migrations'],
+      ['db:check', 'Check the database migration history'],
       ['infra:start', 'Start PostgreSQL and Redis'],
       ['infra:stop', 'Stop PostgreSQL and Redis without deleting data'],
       ['infra:reset', 'Reset PostgreSQL and Redis containers and data'],
@@ -27,9 +29,19 @@ export const commandSections = [
   {
     title: 'API',
     commands: [
-      ['api:dev', 'Run FastAPI with reload'],
-      ['api:lint', 'Lint the Python service'],
+      ['api:dev', 'Run the Elysia API with reload'],
+      ['api:lint', 'Lint the Elysia API'],
       ['api:test', 'Run API unit tests'],
+      ['api:test:integration', 'Run API integration tests'],
+      ['api:build', 'Build the Elysia API'],
+    ],
+  },
+  {
+    title: 'AI service',
+    commands: [
+      ['ai:dev', 'Run the FastAPI AI service with reload'],
+      ['ai:lint', 'Lint the Python AI service'],
+      ['ai:test', 'Run AI service tests'],
     ],
   },
   {

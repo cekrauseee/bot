@@ -13,7 +13,7 @@ npm run emails:check
 npm run export --workspace @my-bot/emails
 ```
 
-The preview uses code `482913` and a 10-minute expiry. `emails:render` renders HTML, plain text, and subject metadata into `apps/api/src/my_bot_api/templates`. Setup and development render these assets automatically. `emails:check` fails when the committed assets drift from the JSX source.
+The preview uses code `482913` and a 10-minute expiry. `emails:render` renders HTML, plain text, and subject metadata into `apps/api/src/modules/auth/email/templates`. Setup and development render these assets automatically. `emails:check` fails when the committed assets drift from the JSX source.
 
 ## Delivery
 

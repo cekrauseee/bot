@@ -36,14 +36,14 @@ async function assertDevelopmentPrerequisites() {
 async function dependenciesAreInstalled() {
   return (
     (await pathExists(path.join(projectRoot, 'node_modules/.package-lock.json'))) &&
-    (await pathExists(path.join(projectRoot, 'apps/api/.venv/pyvenv.cfg')))
+    (await pathExists(path.join(projectRoot, 'apps/ai/.venv/pyvenv.cfg')))
   )
 }
 
 export async function installDependencies() {
   await run(npmCommand, ['ci'], { label: 'Install Node.js workspaces from the lockfile' })
-  await run('uv', ['sync', '--project', 'apps/api', '--locked'], {
-    label: 'Install the Python environment from the lockfile',
+  await run('uv', ['sync', '--project', 'apps/ai', '--locked'], {
+    label: 'Install the Python AI environment from the lockfile',
   })
 }
 
@@ -68,20 +68,9 @@ export async function startInfrastructure() {
 }
 
 export async function migrateDatabase() {
-  await run(
-    'uv',
-    [
-      'run',
-      '--project',
-      'apps/api',
-      'alembic',
-      '-c',
-      'apps/api/alembic.ini',
-      'upgrade',
-      'head',
-    ],
-    { label: 'Apply database migrations' },
-  )
+  await run(npmCommand, ['run', 'db:migrate'], {
+    label: 'Apply application API database migrations',
+  })
 }
 
 export async function renderEmailTemplates() {

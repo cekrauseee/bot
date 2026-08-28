@@ -48,11 +48,8 @@ try {
   await prepareDevelopment()
   console.log('\nmyBot is starting at http://localhost:5173\n')
 
-  const api = start(
-    'uv',
-    ['run', '--project', 'apps/api', 'fastapi', 'dev', 'apps/api/src/my_bot_api/main.py'],
-    'FastAPI',
-  )
+  const api = start(npmCommand, ['run', 'api:dev'], 'Elysia API')
+  const ai = start(npmCommand, ['run', 'ai:dev'], 'FastAPI AI service')
   const web = start(npmCommand, ['run', 'dev', '--workspace', '@my-bot/web'], 'Vite')
 
   for (const signal of ['SIGINT', 'SIGTERM']) {
@@ -61,7 +58,7 @@ try {
     })
   }
 
-  const result = await Promise.race([api.exited, web.exited])
+  const result = await Promise.race([api.exited, ai.exited, web.exited])
   if (!shuttingDown) stopChildren()
   if (result.error) console.error(`${result.label} failed to start: ${result.error.message}`)
 

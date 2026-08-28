@@ -1,0 +1,37 @@
+{
+  "name": "@my-bot/api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": { "node": ">=22.22.0" },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
+    "start": "node dist/index.js",
+    "lint": "oxlint src tests",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "db:generate": "drizzle-kit generate --config drizzle.config.ts",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:check": "tsx src/db/check.ts"
+  },
+  "dependencies": {
+    "@elysiajs/cors": "1.4.2",
+    "@elysiajs/node": "1.4.5",
+    "@elysiajs/openapi": "1.4.15",
+    "drizzle-orm": "0.45.2",
+    "elysia": "1.4.30",
+    "ioredis": "6.0.0",
+    "openid-client": "6.8.7",
+    "postgres": "3.4.9",
+    "resend": "6.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "drizzle-kit": "0.31.10",
+    "oxlint": "1.80.0",
+    "tsx": "4.23.12",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  }
+}

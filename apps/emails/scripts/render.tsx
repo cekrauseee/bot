@@ -10,7 +10,7 @@ const EXPIRATION_MINUTES_TOKEN = '__MYBOT_EXPIRATION_MINUTES__'
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const templatesDirectory = path.resolve(
   scriptDirectory,
-  '../../api/src/my_bot_api/templates',
+  '../../api/src/modules/auth/email/templates',
 )
 const component = (
   <LoginOtpEmail

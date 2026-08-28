@@ -1,0 +1,31 @@
+[project]
+name = "my-bot-ai"
+version = "0.1.0"
+description = "AI service boundary for myBot."
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi[standard]==0.141.1",
+    "pydantic-settings==2.15.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.6,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx==0.28.1",
+    "pytest>=9.1.1",
+    "ruff>=0.16.4",
+]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

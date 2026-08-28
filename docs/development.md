@@ -18,7 +18,7 @@ npm run setup
 
 The setup script:
 
-- installs the npm and Python lockfiles;
+- installs the npm workspace and Python AI lockfiles;
 - creates `.env` and `apps/web/.env` only when absent;
 - generates three independent local authentication secrets without printing or replacing existing values;
 - starts the dedicated PostgreSQL and Redis services;
@@ -32,7 +32,7 @@ It reports the remaining Google and Resend variables without blocking local UI d
 npm run dev
 ```
 
-This command ensures environment files, dependencies, infrastructure, and migrations are ready, then runs FastAPI and Vite together. `Ctrl+C` stops both application processes. Open `http://localhost:5173`; use `localhost`, not `127.0.0.1`, so the configured browser origin matches.
+This command ensures environment files, dependencies, infrastructure, email artifacts, and migrations are ready. It then runs the Elysia API on `8000`, the FastAPI AI service on `8001`, and Vite on `5173`. `Ctrl+C` stops every application process. Open `http://localhost:5173`; use `localhost`, not `127.0.0.1`, so the configured browser origin matches.
 
 Stop the background database and Redis containers when they are no longer needed:
 
@@ -44,7 +44,7 @@ npm run infra:stop
 
 When starting development, the scripts check ports `5434` and `6380` before invoking Docker Compose. A healthy PostgreSQL or Redis container from the current Compose project and service configuration is reused. If another process or Compose project owns either port, startup stops with a friendly message and does not stop it automatically.
 
-The frontend lockfile lives at the repository root. The API lockfile lives at `apps/api/uv.lock`.
+The npm lockfile at the repository root covers the web, email, and Elysia API workspaces. The Python lockfile lives at `apps/ai/uv.lock`.
 
 ## Commands
 
@@ -63,7 +63,9 @@ Operational commands:
 | Command | Purpose |
 | --- | --- |
 | `npm run auth:check` | Check whether external Google and Resend variables are configured |
+| `npm run db:generate` | Generate a migration from the Drizzle schema |
 | `npm run db:migrate` | Apply pending database migrations |
+| `npm run db:check` | Check migration history and the required database contract |
 | `npm run infra:start` | Start the dedicated PostgreSQL and Redis containers |
 | `npm run infra:stop` | Stop local PostgreSQL and Redis containers without deleting data |
 | `npm run infra:reset` | Recreate local PostgreSQL and Redis containers and delete their data |
@@ -74,7 +76,8 @@ Project-specific commands remain available for focused development and diagnosis
 
 | Project | Development | Quality | Build |
 | --- | --- | --- | --- |
-| API | `api:dev` | `api:lint`, `api:test` | — |
+| API | `api:dev` | `api:lint`, `api:test`, `api:test:integration` | `api:build` |
+| AI | `ai:dev` | `ai:lint`, `ai:test` | — |
 | Web | `web:dev` | `web:lint` | `web:build` |
 | Emails | `emails:dev` | `emails:check`, `emails:typecheck` | `emails:render`, `emails:build` |
 | Automation | — | `scripts:lint`, `scripts:test` | — |
@@ -98,7 +101,7 @@ Run one command before handing off a change:
 npm run verify
 ```
 
-It prepares the runtime, runs unit checks and builds, executes the PostgreSQL and Redis authentication integration suite, and checks migration drift.
+It prepares the runtime, runs unit checks and builds, executes the PostgreSQL and Redis authentication integration suite, and checks the Drizzle migration history and relational contract.
 
 Interface work should also be checked in both appearances, at narrow widths, with keyboard navigation, and with reduced motion.
 

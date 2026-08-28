@@ -1,11 +1,12 @@
 # myBot
 
-myBot is a portfolio project for a modern AI agent. The current foundation includes passwordless email and Google authentication backed by the Python service.
+myBot is a portfolio project for a modern AI agent. The current foundation includes passwordless email and Google authentication backed by a Node.js application API, plus an independent Python service for future model integrations.
 
 ## Repository
 
 - `apps/web`: Vite, React, React Router, Tailwind CSS 4, and beUI.
-- `apps/api`: Python 3.14, FastAPI, PostgreSQL, and Redis.
+- `apps/api`: Node.js, TypeScript, Elysia, Drizzle, PostgreSQL, and Redis.
+- `apps/ai`: Python 3.14 and FastAPI boundary for model capabilities.
 - `apps/emails`: React Email source for transactional messages.
 
 ## Development
@@ -22,7 +23,7 @@ Prepare the complete local environment once:
 npm run setup
 ```
 
-Then start PostgreSQL, Redis, migrations, FastAPI, and Vite with:
+Then start PostgreSQL, Redis, migrations, Elysia, the FastAPI AI service, and Vite with:
 
 ```bash
 npm run dev

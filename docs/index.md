@@ -14,5 +14,6 @@ Read only the documents relevant to the task.
 | Module | Read when |
 | --- | --- |
 | [Web application](modules/web.md) | Changing routes, interface structure, theming, or beUI components |
-| [HTTP API](modules/api.md) | Changing FastAPI setup, routing, or API tests |
+| [HTTP API](modules/api.md) | Changing Elysia setup, routing, persistence, or API tests |
+| [AI service](modules/ai.md) | Changing the Python service or future model integrations |
 | [Authentication](modules/authentication.md) | Changing Google, email OTP, sessions, or identity persistence |
