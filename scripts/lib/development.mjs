@@ -1,4 +1,5 @@
-import { access } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { access, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { prepareEnvironment, printEnvironmentSummary } from './environment.mjs'
@@ -33,18 +34,64 @@ async function assertDevelopmentPrerequisites() {
   await assertInfrastructurePrerequisites()
 }
 
-async function dependenciesAreInstalled() {
-  return (
-    (await pathExists(path.join(projectRoot, 'node_modules/.package-lock.json'))) &&
-    (await pathExists(path.join(projectRoot, 'apps/ai/.venv/pyvenv.cfg')))
-  )
+export const dependencyMarkerName = '.mybot-dependencies.json'
+
+export async function dependencyFingerprint(root = projectRoot) {
+  const rootPackagePath = path.join(root, 'package.json')
+  const rootPackage = JSON.parse(await readFile(rootPackagePath, 'utf8'))
+  const workspacePatterns = Array.isArray(rootPackage.workspaces)
+    ? rootPackage.workspaces
+    : rootPackage.workspaces?.packages ?? []
+  // Hash the lockfile and every declared workspace manifest. The current
+  // repository uses explicit workspace directories; fail clearly if that
+  // contract changes without updating this readiness check.
+  const manifests = [rootPackagePath, path.join(root, 'package-lock.json')]
+  for (const workspace of workspacePatterns) {
+    if (workspace.endsWith('/*')) {
+      throw new Error(`Unsupported workspace pattern in dependency graph: ${workspace}`)
+    }
+    manifests.push(path.join(root, workspace, 'package.json'))
+  }
+
+  const hash = createHash('sha256')
+  for (const manifest of manifests) {
+    hash.update(manifest.slice(root.length))
+    hash.update('\0')
+    hash.update(await readFile(manifest))
+    hash.update('\0')
+  }
+  return hash.digest('hex')
 }
 
-export async function installDependencies() {
-  await run(npmCommand, ['ci'], { label: 'Install Node.js workspaces from the lockfile' })
+export async function dependenciesAreInstalled(root = projectRoot) {
+  const packageLockReady = await pathExists(path.join(root, 'node_modules/.package-lock.json'))
+  const pythonReady = await pathExists(path.join(root, 'apps/ai/.venv/pyvenv.cfg'))
+  if (!packageLockReady || !pythonReady) return false
+
+  try {
+    const marker = JSON.parse(
+      await readFile(path.join(root, 'node_modules', dependencyMarkerName), 'utf8'),
+    )
+    return marker.fingerprint === (await dependencyFingerprint(root))
+  } catch {
+    return false
+  }
+}
+
+export async function installDependencies(root = projectRoot) {
+  await run(npmCommand, ['ci'], {
+    cwd: root,
+    label: 'Install Node.js workspaces from the lockfile',
+  })
   await run('uv', ['sync', '--project', 'apps/ai', '--locked'], {
+    cwd: root,
     label: 'Install the Python AI environment from the lockfile',
   })
+  await writeFile(
+    path.join(root, 'node_modules', dependencyMarkerName),
+    `${JSON.stringify({ fingerprint: await dependencyFingerprint(root) }, null, 2)}\n`,
+    { mode: 0o600 },
+  )
 }
 
 export async function startInfrastructure() {

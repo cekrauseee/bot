@@ -17,4 +17,4 @@ The preview uses code `482913` and a 10-minute expiry. `emails:render` renders H
 
 ## Delivery
 
-FastAPI loads the generated package assets, substitutes the server-generated code and expiry, and sends `subject`, `html`, and `text` through the Resend Emails API. Resend requires only `RESEND_API_KEY` and `RESEND_FROM`; there is no template alias or dashboard publication step.
+The Node.js/Elysia application API loads the generated package assets, substitutes the server-generated code and expiry, and sends `subject`, `html`, and `text` through the Resend Emails API. Resend requires only `RESEND_API_KEY` and `RESEND_FROM`; there is no template alias or dashboard publication step.

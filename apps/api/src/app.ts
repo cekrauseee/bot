@@ -54,6 +54,15 @@ const detailSchema = t.Object({
     retry_after_seconds: t.Optional(t.Integer()),
   }),
 })
+const validationDetailSchema = t.Object({
+  detail: t.Array(t.Object({
+    loc: t.Array(t.Union([t.String(), t.Integer()])),
+    msg: t.String(),
+    type: t.String(),
+    input: t.Optional(t.Unknown()),
+    ctx: t.Optional(t.Record(t.String(), t.Unknown())),
+  })),
+})
 const challengeSchema = t.Object({
   challenge_id: t.String(),
   expires_in_seconds: t.Integer(),
@@ -76,14 +85,261 @@ const otpRequestResponses = {
   400: detailSchema,
   429: detailSchema,
   503: detailSchema,
-  422: detailSchema,
+  422: validationDetailSchema,
 }
 const otpVerifyResponses = {
   200: t.Object({ user: userSchema }),
   400: detailSchema,
   429: detailSchema,
   503: detailSchema,
-  422: detailSchema,
+  422: validationDetailSchema,
+}
+
+type ValidationIssue = {
+  path?: string
+  message?: string
+  type?: number | string
+  value?: unknown
+  schema?: Record<string, unknown>
+}
+
+type JsonBodyProfile = {
+  length: number
+  firstIndex?: number
+  firstChar?: string
+  lastIndex?: number
+  lastChar?: string
+  previousLastChar?: string
+  openContainer?: '{' | '['
+  openContainerIndex?: number
+  lastDelimiterIndex?: number
+  trailingComma?: '{' | '['
+  trailingCommaIndex?: number
+  repeatedCommaIndex?: number
+  repeatedCommaContainer?: '{' | '['
+  incompleteLiteral?: boolean
+  invalidEscapeIndex?: number
+  invalidUnicodeIndex?: number
+  controlCharacterIndex?: number
+  unterminatedStringIndex?: number
+}
+
+const profileJsonBody = (body: string): JsonBodyProfile => {
+  const profile: JsonBodyProfile = { length: body.length }
+  const stack: Array<{ kind: '{' | '['; index: number }> = []
+  let inString = false
+  let stringStart: number | undefined
+  let escaped = false
+  let lastSignificant: { char: string; index: number } | undefined
+  let previousSignificant: { char: string; index: number } | undefined
+  for (let index = 0; index < body.length; index += 1) {
+    const char = body[index]
+    if (inString) {
+      if (escaped) {
+        if (char === 'u') {
+          const hexadecimal = body.slice(index + 1, index + 5)
+          if (hexadecimal.length < 4 || !/^[0-9a-f]{4}$/i.test(hexadecimal)) profile.invalidUnicodeIndex ??= index
+          index += Math.min(4, hexadecimal.length)
+        } else if (!'"\\/bfnrt'.includes(char)) {
+          profile.invalidEscapeIndex ??= index - 1
+        }
+        escaped = false
+      } else if (char === '\\') escaped = true
+      else if (char === '"') inString = false
+      else if (char.charCodeAt(0) < 0x20) profile.controlCharacterIndex ??= index
+      continue
+    }
+    if (char === '"') {
+      inString = true
+      stringStart = index
+      continue
+    }
+    if (/\s/.test(char)) continue
+    const priorLastSignificant = lastSignificant
+    const priorPreviousSignificant = previousSignificant
+    if (profile.firstIndex === undefined) {
+      profile.firstIndex = index
+      profile.firstChar = char
+    }
+    profile.lastIndex = index
+    profile.lastChar = char
+    profile.previousLastChar = lastSignificant?.char
+    previousSignificant = lastSignificant
+    lastSignificant = { char, index }
+    if (char === '{' || char === '[') {
+      stack.push({ kind: char, index })
+      profile.lastDelimiterIndex = index
+    } else if (char === '}' || char === ']') {
+      const opening = stack.pop()
+      if (opening && priorLastSignificant?.char === ',' && priorPreviousSignificant?.char !== ',') {
+        profile.trailingComma = opening.kind
+        profile.trailingCommaIndex = priorLastSignificant.index
+      }
+    }
+    else if (char === ':' || char === ',') profile.lastDelimiterIndex = index
+  }
+  if (inString && stringStart !== undefined) profile.unterminatedStringIndex = stringStart
+  const open = stack.at(-1)
+  if (open) {
+    profile.openContainer = open.kind
+    profile.openContainerIndex = open.index
+  }
+  if (lastSignificant?.char === ',' && previousSignificant?.char !== ',') {
+    profile.trailingComma = stack.at(-1)?.kind
+    profile.trailingCommaIndex = lastSignificant.index
+  }
+  const lastBodyIndex = body.search(/\s*$/) - 1
+  const closing = lastBodyIndex >= 0 ? body[lastBodyIndex] : undefined
+  if ((closing === '}' || closing === ']') && body[lastBodyIndex - 1] === ',') {
+    const commaIndex = lastBodyIndex - 1
+    if (body[commaIndex - 1] === ',') {
+      profile.trailingComma = undefined
+      profile.trailingCommaIndex = undefined
+      profile.repeatedCommaIndex = commaIndex
+      profile.repeatedCommaContainer = closing === '}' ? '{' : '['
+    }
+    else {
+      profile.trailingComma = closing === '}' ? '{' : '['
+      profile.trailingCommaIndex = commaIndex
+    }
+  }
+  if (profile.openContainer && profile.lastDelimiterIndex !== undefined) {
+    const tail = body.slice(profile.lastDelimiterIndex + 1).trim()
+    profile.incompleteLiteral = /^(?:t|tr|tru|f|fa|fal|fals|n|nu|nul)$/.test(tail)
+  }
+  return profile
+}
+
+const validationContext = (issue: ValidationIssue, type: string) => {
+  if (type === 'string_too_short' && issue.schema?.minLength !== undefined) {
+    return { min_length: issue.schema.minLength }
+  }
+  if (type === 'string_too_long' && issue.schema?.maxLength !== undefined) {
+    return { max_length: issue.schema.maxLength }
+  }
+  if (type === 'string_pattern_mismatch' && issue.schema?.pattern !== undefined) {
+    return { pattern: issue.schema.pattern }
+  }
+  return undefined
+}
+
+const validationType = (issue: ValidationIssue) => {
+  if (issue.schema?.type === 'string') {
+    if (issue.value === undefined) return 'missing'
+    if (issue.value !== undefined && typeof issue.value !== 'string') return 'string_type'
+    if (issue.schema.pattern !== undefined) return 'string_pattern_mismatch'
+    if (issue.schema.minLength !== undefined && issue.value.length < Number(issue.schema.minLength)) return 'string_too_short'
+    if (issue.schema.maxLength !== undefined && issue.value.length > Number(issue.schema.maxLength)) return 'string_too_long'
+    return issue.schema.format ? 'value_error' : 'string_type'
+  }
+  return `typebox_${String(issue.type ?? 'validation')}`
+}
+
+const validationDetails = (error: ValidationError | ParseError, request: Request, bodyProfiles: WeakMap<Request, JsonBodyProfile>) => {
+  if (!(error instanceof ValidationError)) {
+    const cause = (error as ParseError & { cause?: unknown }).cause
+    const causeMessage = cause instanceof Error ? cause.message : String(cause ?? '')
+    const explicitOffset = causeMessage.match(/position (\d+)/)?.[1]
+    const profile = bodyProfiles.get(request)
+    const explicitPosition = explicitOffset === undefined ? undefined : Number(explicitOffset)
+    const specialOffset = causeMessage.startsWith('Exponent part') || causeMessage.startsWith('Unterminated fractional') || causeMessage.startsWith('No number after minus') ? -1 : 0
+    const offset = profile?.invalidEscapeIndex ?? profile?.invalidUnicodeIndex ?? profile?.controlCharacterIndex ?? profile?.unterminatedStringIndex ?? profile?.repeatedCommaIndex ??
+      (profile?.trailingCommaIndex !== undefined ? profile.trailingCommaIndex : undefined) ??
+      (explicitPosition !== undefined
+        ? explicitPosition - (causeMessage.startsWith('Expected double-quoted property name') ? 1 : 0) + specialOffset
+        : profile?.length)
+    const parserError = profile?.invalidEscapeIndex !== undefined
+      ? 'Invalid \\escape'
+      : profile?.invalidUnicodeIndex !== undefined
+        ? 'Invalid \\uXXXX escape'
+        : profile?.controlCharacterIndex !== undefined
+          ? 'Invalid control character at'
+          : profile?.trailingComma === '['
+            ? 'Illegal trailing comma before end of array'
+            : profile?.repeatedCommaContainer === '{'
+              ? 'Expecting property name enclosed in double quotes'
+              : profile?.repeatedCommaContainer === '['
+                ? 'Expecting value'
+            : causeMessage.startsWith("Expected property name")
+      ? 'Expecting property name enclosed in double quotes'
+      : causeMessage.startsWith("Expected ','")
+        ? "Expecting ',' delimiter"
+      : causeMessage.startsWith('Expected double-quoted property name')
+          ? 'Illegal trailing comma before end of object'
+          : causeMessage.startsWith("Unexpected token ']'")
+            ? 'Illegal trailing comma before end of array'
+            : causeMessage.startsWith('Unexpected non-whitespace') || causeMessage.startsWith('Exponent part') || causeMessage.startsWith('Unterminated fractional')
+              ? 'Extra data'
+              : causeMessage.startsWith('Unterminated string') || profile?.unterminatedStringIndex !== undefined
+                ? 'Unterminated string starting at'
+                : causeMessage.startsWith('Bad escaped') || profile?.invalidEscapeIndex !== undefined
+                  ? 'Invalid \\escape'
+                  : causeMessage.startsWith('Bad Unicode') || profile?.invalidUnicodeIndex !== undefined
+                    ? 'Invalid \\uXXXX escape'
+                    : causeMessage.startsWith('Bad control') || profile?.controlCharacterIndex !== undefined
+                      ? 'Invalid control character at'
+                      : causeMessage.startsWith('Unexpected end') || causeMessage.startsWith('Unexpected token') || causeMessage.startsWith('No number after minus')
+                        ? 'Expecting value'
+                        : 'Invalid JSON'
+    const canonicalOffset = profile?.repeatedCommaIndex !== undefined
+      ? profile.repeatedCommaIndex
+      : profile?.trailingCommaIndex !== undefined
+      ? profile.trailingCommaIndex
+      : profile?.invalidEscapeIndex !== undefined || profile?.invalidUnicodeIndex !== undefined || profile?.controlCharacterIndex !== undefined || profile?.unterminatedStringIndex !== undefined
+        ? offset
+        : causeMessage.startsWith('Unexpected token') && profile?.firstIndex !== undefined
+          ? profile.firstIndex
+      : causeMessage.startsWith('Unexpected end') && profile?.firstChar && !['{', '[', '"'].includes(profile.firstChar)
+      ? profile.firstIndex
+      : causeMessage.startsWith('Unexpected end') && profile?.incompleteLiteral && profile.lastDelimiterIndex !== undefined
+        ? profile.lastDelimiterIndex + 1
+        : causeMessage.startsWith('Unexpected end') && profile?.openContainer && profile.lastChar !== profile.openContainer && profile.lastChar !== ',' && profile.lastChar !== ':'
+        ? profile.length
+        : offset
+    return {
+      detail: [{
+        loc: ['body', ...(canonicalOffset !== undefined ? [canonicalOffset] : [])],
+        msg: 'JSON decode error',
+        type: 'json_invalid',
+        input: {},
+        ctx: { error: parserError },
+      }],
+    }
+  }
+  return {
+    detail: error.all.map((issue) => {
+      const typedIssue = issue as ValidationIssue
+      const path = typedIssue.path?.split('/').filter(Boolean) ?? []
+      const input = typedIssue.value !== undefined ? typedIssue.value : error.value
+      const type = validationType(typedIssue)
+      const context = validationContext(typedIssue, type)
+      const emailReason = type === 'value_error' && typedIssue.schema?.format === 'email' &&
+        typeof input === 'string' && !input.includes('@')
+        ? 'An email address must have an @-sign.'
+        : undefined
+      const message = type === 'missing'
+        ? 'Field required'
+        : type === 'string_too_short'
+          ? `String should have at least ${typedIssue.schema?.minLength} characters`
+          : type === 'string_too_long'
+            ? `String should have at most ${typedIssue.schema?.maxLength} characters`
+            : type === 'string_pattern_mismatch'
+              ? `String should match pattern '${typedIssue.schema?.pattern}'`
+              : type === 'string_type'
+                ? 'Input should be a valid string'
+                : emailReason
+                  ? `value is not a valid email address: ${emailReason}`
+                : typedIssue.message ?? typedIssue.path ?? 'Invalid value.'
+      return {
+        loc: [error.type, ...path],
+        msg: message,
+        type,
+        ...(input !== undefined ? { input } : {}),
+        ...(context ? { ctx: context } : {}),
+        ...(emailReason ? { ctx: { reason: emailReason } } : {}),
+      }
+    }),
+  }
 }
 
 const cookieValue = (request: Request, name: string) => {
@@ -106,7 +362,13 @@ const userResponse = (user: { id: string; email: string; firstName: string | nul
 })
 
 export function createApp(settings: Settings, services: Services, peerResolver: PeerResolver = nodeSocketPeer) {
+  const requestBodyProfiles = new WeakMap<Request, JsonBodyProfile>()
   const app = new Elysia({ name: 'mybot-api', adapter: node() })
+    .onRequest(async ({ request }) => {
+      if (request.headers.get('content-type')?.startsWith('application/json')) {
+        try { requestBodyProfiles.set(request, profileJsonBody(await request.clone().text())) } catch { /* parser reports the failure */ }
+      }
+    })
     .use(cors({
       origin: settings.webOrigin,
       credentials: true,
@@ -114,7 +376,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       allowedHeaders: ['Content-Type'],
     }))
     .use(openapi({ documentation: { info: { title: 'myBot API', version: '0.1.0' } } }))
-    .onError(({ error, set }) => {
+    .onError(({ error, request, set }) => {
       if (error instanceof AuthError) {
         set.status = error.statusCode
         if (error.retryAfterSeconds != null) set.headers['Retry-After'] = String(error.retryAfterSeconds)
@@ -122,7 +384,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       }
       if (error instanceof ValidationError || error instanceof ParseError) {
         set.status = 422
-        return { detail: { code: 'invalid_request', message: 'Invalid request.' } }
+        return validationDetails(error, request, requestBodyProfiles)
       }
       if ((error as { code?: string }).code === 'NOT_FOUND') {
         set.status = 404
@@ -183,15 +445,15 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     return { user: userResponse(issued.user) }
   }, { body: otpVerifyBody, response: otpVerifyResponses })
 
-  app.get('/auth/google/start', async () => {
+  app.get('/auth/google/start', async ({ set }) => {
     const result = await services.google.start()
-    return new Response(null, {
-      status: 303,
-      headers: { Location: result.url, 'Set-Cookie': oauthStateCookie(result.state) },
-    })
+    set.status = 303
+    set.headers.Location = result.url
+    set.headers['set-cookie'] = [oauthStateCookie(result.state)] as any
+    return undefined
   }, { response: { 303: t.Void(), 503: detailSchema } })
 
-  app.get('/auth/google/callback', async ({ request }) => {
+  app.get('/auth/google/callback', async ({ request, set }) => {
     const url = new URL(request.url)
     const query = Object.fromEntries(url.searchParams.entries())
     const state = verifySignedValue(cookieValue(request, oauthStateCookieName), settings.sessionSecret)
@@ -209,14 +471,15 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
         })
         return services.sessions.issue(repository, user.id)
       })
-      const headers = new Headers({ Location: `${settings.webOrigin}/` })
-      headers.append('Set-Cookie', services.sessions.cookie(issued.token))
-      headers.append('Set-Cookie', clearOauthStateCookie())
-      return new Response(null, { status: 303, headers })
+      set.status = 303
+      set.headers.Location = `${settings.webOrigin}/`
+      set.headers['set-cookie'] = [services.sessions.cookie(issued.token), clearOauthStateCookie()] as any
+      return undefined
     } catch {
-      const headers = new Headers({ Location: `${settings.webOrigin}/login?error=google` })
-      headers.append('Set-Cookie', clearOauthStateCookie())
-      return new Response(null, { status: 303, headers })
+      set.status = 303
+      set.headers.Location = `${settings.webOrigin}/login?error=google`
+      set.headers['set-cookie'] = [clearOauthStateCookie()] as any
+      return undefined
     }
   }, { response: { 303: t.Void() } })
 

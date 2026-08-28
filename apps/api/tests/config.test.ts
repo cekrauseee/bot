@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { loadSettings } from '../src/config.js'
+import { loadSettings, repositoryEnvPath } from '../src/config.js'
 
 const base = { ...process.env, ENVIRONMENT: 'test' }
 
 describe('configuration', () => {
+  it('resolves the repository .env next to the module and lets explicit values win', () => {
+    expect(repositoryEnvPath.endsWith('/.env') || repositoryEnvPath.endsWith('\\.env')).toBe(true)
+    expect(loadSettings({ ...base, DATABASE_URL: 'postgresql://explicit.example/db' }).databaseUrl)
+      .toBe('postgresql://explicit.example/db')
+  })
+
   it('normalizes legacy postgres URLs and validates Redis URLs', () => {
     expect(loadSettings({ ...base, DATABASE_URL: 'postgresql+psycopg://x' }).databaseUrl).toBe('postgresql://x')
     expect(() => loadSettings({ ...base, REDIS_URL: 'http://localhost:6380' })).toThrow()

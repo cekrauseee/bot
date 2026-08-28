@@ -33,11 +33,19 @@ export class GoogleOAuthService {
   }
 
   private async config() {
-    this.configuration ??= discovery(
-      new URL(GOOGLE_ISSUER),
-      this.settings.googleClientId,
-      this.settings.googleClientSecret,
-    )
+    if (!this.configuration) {
+      this.configuration = discovery(
+        new URL(GOOGLE_ISSUER),
+        this.settings.googleClientId,
+        this.settings.googleClientSecret,
+      ).catch((error) => {
+        // A transient discovery failure must not permanently poison this
+        // service with a rejected promise. The next request can retry Google
+        // discovery after the provider recovers.
+        this.configuration = undefined
+        throw error
+      })
+    }
     return this.configuration
   }
 

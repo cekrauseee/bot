@@ -18,7 +18,7 @@ npm run setup
 
 The setup script:
 
-- installs the npm workspace and Python AI lockfiles;
+- installs the npm workspace and Python AI lockfiles. A marker under `node_modules` records a fingerprint of the root npm lockfile and npm workspace manifests only after both installs succeed; changing branches or those npm dependency files invalidates readiness and reruns installation;
 - creates `.env` and `apps/web/.env` only when absent;
 - generates three independent local authentication secrets without printing or replacing existing values;
 - starts the dedicated PostgreSQL and Redis services;
@@ -54,7 +54,7 @@ Run `npm run help` for the current command guide. The primary workflows are:
 | --- | --- |
 | `npm run help` | Show the categorized command guide |
 | `npm run setup` | Bootstrap dependencies, environment, infrastructure, and migrations |
-| `npm run dev` | Prepare and run API and web together |
+| `npm run dev` | Prepare and run the web, Elysia API, and FastAPI AI service together |
 | `npm run verify` | Run the complete repository and authentication integration verification |
 | `npm run check` | Run checks and production builds without integration infrastructure |
 
@@ -83,6 +83,8 @@ Project-specific commands remain available for focused development and diagnosis
 | Automation | — | `scripts:lint`, `scripts:test` | — |
 
 Prefix every entry with `npm run`, for example `npm run api:test`.
+
+The API workspace also exposes `npm run db:migrate:production --workspace @my-bot/api` and `npm run db:check:production --workspace @my-bot/api` for running migration and schema checks from compiled `dist` artifacts. The root `db:migrate` and `db:check` commands remain the local development workflow.
 
 To add a beUI component, inspect and install it from `apps/web`:
 

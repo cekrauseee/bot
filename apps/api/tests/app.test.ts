@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../src/app.js'
 import { loadSettings } from '../src/config.js'
+import { signValue } from '../src/security.js'
 
 const settings = loadSettings({ ...process.env, ENVIRONMENT: 'test' })
 const services = {
@@ -14,7 +15,10 @@ const services = {
     clearCookie: vi.fn(() => 'mybot_session=; Max-Age=0'),
     resolve: vi.fn(),
   },
-  google: { start: vi.fn().mockResolvedValue({ url: 'https://accounts.google.com/authorize', state: 'state'.repeat(8) }) },
+  google: {
+    start: vi.fn().mockResolvedValue({ url: 'https://accounts.google.com/authorize', state: 'state'.repeat(8) }),
+    callback: vi.fn(),
+  },
 } as any
 
 describe('HTTP contract', () => {
@@ -71,14 +75,110 @@ describe('HTTP contract', () => {
     expect(await response.json()).toEqual({ challenge_id: 'challenge', expires_in_seconds: 600, resend_after_seconds: 60 })
   })
 
-  it('uses Elysia schemas for malformed verification bodies', async () => {
-    const app = createApp(settings, services)
-    const response = await app.handle(new Request('http://localhost/auth/otp/verify', {
-      method: 'POST', headers: { 'content-type': 'application/json', origin: settings.webOrigin },
-      body: JSON.stringify({ challenge_id: 'short', code: '12345' }),
-    }))
-    expect(response.status).toBe(422)
-    expect(await response.json()).toEqual({ detail: { code: 'invalid_request', message: 'Invalid request.' } })
+  it('preserves FastAPI validation semantics for representative auth bodies', async () => {
+    const controlBody = '{"a":"bad' + String.fromCharCode(1) + '"}'
+    const cases = [
+      {
+        path: '/auth/otp/request', body: JSON.stringify({ email: 'not-an-email' }),
+        detail: [{ loc: ['body', 'email'], msg: 'value is not a valid email address: An email address must have an @-sign.', type: 'value_error', input: 'not-an-email', ctx: { reason: 'An email address must have an @-sign.' } }],
+      },
+      {
+        path: '/auth/otp/verify', body: JSON.stringify({ challenge_id: 'short', code: '12345' }),
+        detail: [
+          { loc: ['body', 'challenge_id'], msg: 'String should have at least 32 characters', type: 'string_too_short', input: 'short', ctx: { min_length: 32 } },
+          { loc: ['body', 'code'], msg: "String should match pattern '^\\d{6}$'", type: 'string_pattern_mismatch', input: '12345', ctx: { pattern: '^\\d{6}$' } },
+        ],
+      },
+      {
+        path: '/auth/otp/verify', body: JSON.stringify({ challenge_id: 'x'.repeat(129), code: '123456' }),
+        detail: [{ loc: ['body', 'challenge_id'], msg: 'String should have at most 128 characters', type: 'string_too_long', input: 'x'.repeat(129), ctx: { max_length: 128 } }],
+      },
+      {
+        path: '/auth/otp/verify', body: JSON.stringify({ challenge_id: 'x'.repeat(32), code: '12345a' }),
+        detail: [{ loc: ['body', 'code'], msg: "String should match pattern '^\\d{6}$'", type: 'string_pattern_mismatch', input: '12345a', ctx: { pattern: '^\\d{6}$' } }],
+      },
+      {
+        path: '/auth/otp/verify', body: JSON.stringify({}),
+        detail: [
+          { loc: ['body', 'challenge_id'], msg: 'Field required', type: 'missing', input: {} },
+          { loc: ['body', 'code'], msg: 'Field required', type: 'missing', input: {} },
+        ],
+      },
+      {
+        path: '/auth/otp/verify', body: JSON.stringify({ challenge_id: 123, code: 123456 }),
+        detail: [
+          { loc: ['body', 'challenge_id'], msg: 'Input should be a valid string', type: 'string_type', input: 123 },
+          { loc: ['body', 'code'], msg: 'Input should be a valid string', type: 'string_type', input: 123456 },
+        ],
+      },
+      {
+        path: '/auth/otp/verify', body: '[1,]',
+        detail: [{ loc: ['body', 2], msg: 'JSON decode error', type: 'json_invalid', input: {}, ctx: { error: 'Illegal trailing comma before end of array' } }],
+      },
+      {
+        path: '/auth/otp/verify', body: '{}{} ',
+        detail: [{ loc: ['body', 2], msg: 'JSON decode error', type: 'json_invalid', input: {}, ctx: { error: 'Extra data' } }],
+      },
+      {
+        path: '/auth/otp/verify', body: 'tru',
+        detail: [{ loc: ['body', 0], msg: 'JSON decode error', type: 'json_invalid', input: {}, ctx: { error: 'Expecting value' } }],
+      },
+      {
+        path: '/auth/otp/verify', body: '{"a":"',
+        detail: [{ loc: ['body', 5], msg: 'JSON decode error', type: 'json_invalid', input: {}, ctx: { error: 'Unterminated string starting at' } }],
+      },
+      {
+        path: '/auth/otp/verify', body: '[1',
+        detail: [{ loc: ['body', 2], msg: 'JSON decode error', type: 'json_invalid', input: {}, ctx: { error: "Expecting ',' delimiter" } }],
+      },
+      {
+        path: '/auth/otp/verify', body: '1e',
+        detail: [{ loc: ['body', 1], msg: 'JSON decode error', type: 'json_invalid', input: {}, ctx: { error: 'Extra data' } }],
+      },
+      {
+        path: '/auth/otp/verify', body: '{"a":"\\x"}',
+        detail: [{ loc: ['body', 6], msg: 'JSON decode error', type: 'json_invalid', input: {}, ctx: { error: 'Invalid \\escape' } }],
+      },
+      {
+        path: '/auth/otp/verify', body: controlBody,
+        detail: [{ loc: ['body', 9], msg: 'JSON decode error', type: 'json_invalid', input: {}, ctx: { error: 'Invalid control character at' } }],
+      },
+      {
+        path: '/auth/otp/verify', body: '{"a":"bad\\u12"}',
+        detail: [{ loc: ['body', 10], msg: 'JSON decode error', type: 'json_invalid', input: {}, ctx: { error: 'Invalid \\uXXXX escape' } }],
+      },
+      {
+        path: '/auth/otp/verify', body: '{"a":1,,}',
+        detail: [{ loc: ['body', 7], msg: 'JSON decode error', type: 'json_invalid', input: {}, ctx: { error: 'Expecting property name enclosed in double quotes' } }],
+      },
+    ]
+    for (const testCase of cases) {
+      const app = createApp(settings, services)
+      const response = await app.handle(new Request(`http://localhost${testCase.path}`, {
+        method: 'POST', headers: { 'content-type': 'application/json', origin: settings.webOrigin }, body: testCase.body,
+      }))
+      expect(response.status).toBe(422)
+      expect(await response.json()).toEqual({ detail: testCase.detail })
+    }
+
+    const malformedCases = [
+      { body: '{', offset: 1, error: 'Expecting property name enclosed in double quotes' },
+      { body: '{"challenge_id":', offset: 16, error: 'Expecting value' },
+      { body: '{"challenge_id":"super-secret-token"', offset: 36, error: "Expecting ',' delimiter" },
+      { body: '{"challenge_id":"abc",}', offset: 21, error: 'Illegal trailing comma before end of object' },
+    ]
+    for (const testCase of malformedCases) {
+      const app = createApp(settings, services)
+      const malformed = await app.handle(new Request('http://localhost/auth/otp/verify', {
+        method: 'POST', headers: { 'content-type': 'application/json', origin: settings.webOrigin }, body: testCase.body,
+      }))
+      expect(malformed.status).toBe(422)
+      const serialized = await malformed.text()
+      expect(serialized).not.toContain('super-secret-token')
+      expect(JSON.parse(serialized)).toEqual({
+        detail: [{ loc: ['body', testCase.offset], msg: 'JSON decode error', type: 'json_invalid', input: {}, ctx: { error: testCase.error } }],
+      })
+    }
   })
 
   it('documents status-specific request and response schemas', async () => {
@@ -106,6 +206,38 @@ describe('HTTP contract', () => {
     expect(response.status).toBe(303)
     expect(response.headers.get('location')).toContain('/login?error=google')
     expect(response.headers.get('set-cookie')).toContain('mybot_oauth_state=;')
+  })
+
+  it('emits both Google callback cookies through the Node listener', async () => {
+    services.google.callback.mockResolvedValue({
+      subject: 'google-subject',
+      email: 'person@example.com',
+      firstName: 'Person',
+      lastName: null,
+      avatarUrl: null,
+    })
+    services.database.transaction = vi.fn().mockResolvedValue({ token: 'session-token' })
+    services.sessions.cookie.mockReturnValue('mybot_session=session-token')
+    const app = createApp(settings, services)
+    const server = await new Promise<any>((resolve) => app.listen({ port: 0, hostname: '127.0.0.1' }, resolve))
+    try {
+      const nodeServer = server.node.server
+      if (!nodeServer.listening) await new Promise((resolve: (value?: unknown) => void) => nodeServer.once('listening', resolve))
+      const address = nodeServer.address() as { port: number }
+      const response = await fetch(`http://127.0.0.1:${address.port}/auth/google/callback?state=state&code=code`, {
+        headers: { cookie: `mybot_oauth_state=${encodeURIComponent(signValue('state', settings.sessionSecret))}` },
+        redirect: 'manual',
+      })
+
+      expect(response.status).toBe(303)
+      expect(response.headers.get('location')).toBe(`${settings.webOrigin}/`)
+      expect(response.headers.getSetCookie()).toEqual([
+        'mybot_session=session-token',
+        'mybot_oauth_state=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax',
+      ])
+    } finally {
+      await server.stop()
+    }
   })
 
   it('returns a 204 response and clears the session cookie on sign-out', async () => {

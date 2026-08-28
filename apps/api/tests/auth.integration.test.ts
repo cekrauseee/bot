@@ -11,6 +11,27 @@ import { AuthRepository } from '../src/db/repository.js'
 import { schema } from '../src/db/schema.js'
 import { OtpService } from '../src/modules/auth/otp.js'
 import { SessionManager } from '../src/modules/auth/sessions.js'
+import { EmailDeliveryError } from '../src/email.js'
+
+class DelayedActiveLookupRedis extends Redis {
+  private resolveLookupStarted!: () => void
+  private resolveAllowLookup!: () => void
+  private delayed = false
+  readonly lookupStarted = new Promise<void>((resolve) => { this.resolveLookupStarted = resolve })
+  readonly allowLookup = new Promise<void>((resolve) => { this.resolveAllowLookup = resolve })
+
+  override async get(key: string) {
+    const value = await super.get(key)
+    if (key.startsWith('auth:otp:active:') && !this.delayed) {
+      this.delayed = true
+      this.resolveLookupStarted()
+      await this.allowLookup
+    }
+    return value
+  }
+
+  releaseLookup() { this.resolveAllowLookup() }
+}
 
 const enabled = process.env.RUN_API_INTEGRATION === '1'
 const describeIntegration = describe.skipIf(!enabled)
@@ -113,6 +134,105 @@ describeIntegration('PostgreSQL and Redis authentication', () => {
     expect(rejected).toHaveLength(1)
     expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ code: 'invalid_code' })
     await otp.finalize((fulfilled[0] as PromiseFulfilledResult<Awaited<ReturnType<typeof otp.reserve>>>).value)
+  })
+
+  it('locks a challenge after the configured number of incorrect codes', async () => {
+    const email = `lockout-${randomUUID()}@example.com`
+    const otp = new OtpService(redis, sender, settings)
+    const issued = await otp.issue(email, '192.0.2.20')
+    const wrongCode = sent[0].code === '000000' ? '111111' : '000000'
+
+    for (let attempt = 1; attempt < settings.otpMaxAttempts; attempt += 1) {
+      await expect(otp.reserve(issued.challengeId, wrongCode, '192.0.2.20'))
+        .rejects.toMatchObject({ code: 'invalid_code' })
+    }
+    await expect(otp.reserve(issued.challengeId, wrongCode, '192.0.2.20'))
+      .rejects.toMatchObject({ code: 'code_attempts_exhausted' })
+    await expect(otp.reserve(issued.challengeId, sent[0].code, '192.0.2.20'))
+      .rejects.toMatchObject({ code: 'invalid_code' })
+  })
+
+  it('enforces resend cooldown and replaces the previous active challenge', async () => {
+    const email = `replacement-${randomUUID()}@example.com`
+    const otp = new OtpService(redis, sender, settings)
+    const first = await otp.issue(email, '192.0.2.21')
+    const firstCode = sent[0].code
+    await expect(otp.issue(email, '192.0.2.21')).rejects.toMatchObject({
+      code: 'rate_limited',
+      retryAfterSeconds: expect.any(Number),
+    })
+
+    const cooldownKeys = await redis.keys('auth:otp:cooldown:*')
+    await redis.del(...cooldownKeys)
+    const second = await otp.issue(email, '192.0.2.21')
+    await expect(otp.reserve(first.challengeId, firstCode, '192.0.2.21'))
+      .rejects.toMatchObject({ code: 'invalid_code' })
+    const reservation = await otp.reserve(second.challengeId, sent[1].code, '192.0.2.21')
+    expect(await otp.finalize(reservation)).toBe(true)
+  })
+
+  it('releases a reservation without losing its challenge TTL', async () => {
+    const email = `release-${randomUUID()}@example.com`
+    const otp = new OtpService(redis, sender, settings)
+    const issued = await otp.issue(email, '192.0.2.22')
+    const challengeKey = `auth:otp:challenge:${issued.challengeId}`
+    const before = await redis.ttl(challengeKey)
+    const reservation = await otp.reserve(issued.challengeId, sent[0].code, '192.0.2.22')
+    const reserved = await redis.ttl(challengeKey)
+    expect(reserved).toBeGreaterThan(0)
+    expect(reserved).toBeLessThanOrEqual(before)
+    expect(await otp.release(reservation)).toBe(true)
+    const released = await redis.ttl(challengeKey)
+    expect(released).toBeGreaterThan(0)
+    expect(released).toBeLessThanOrEqual(reserved)
+
+    const replay = await otp.reserve(issued.challengeId, sent[0].code, '192.0.2.22')
+    expect(await otp.finalize(replay)).toBe(true)
+    expect(await redis.exists(challengeKey)).toBe(0)
+  })
+
+  it('rejects delayed stale issuance while preserving the newer challenge', async () => {
+    const delayedRedis = new DelayedActiveLookupRedis(settings.redisUrl, { lazyConnect: true, connectTimeout: 1_000 })
+    await delayedRedis.connect()
+    try {
+      const email = `stale-${randomUUID()}@example.com`
+      const otp = new OtpService(delayedRedis, sender, settings)
+      const firstTask = otp.issue(email, '192.0.2.23')
+      await delayedRedis.lookupStarted
+      const cooldownKeys = await delayedRedis.keys('auth:otp:cooldown:*')
+      await delayedRedis.del(...cooldownKeys)
+
+      const second = await otp.issue(email, '192.0.2.23')
+      expect(sent[0].challengeId).toBe(second.challengeId)
+      delayedRedis.releaseLookup()
+      await expect(firstTask).rejects.toMatchObject({ code: 'rate_limited' })
+      const activeKeys = await delayedRedis.keys('auth:otp:active:*')
+      expect(activeKeys).toHaveLength(1)
+      expect(await delayedRedis.get(activeKeys[0])).toBe(second.challengeId)
+    } finally {
+      delayedRedis.releaseLookup()
+      await delayedRedis.quit()
+    }
+  })
+
+  it('rolls back delivery failure so the next issue can retry', async () => {
+    const email = `retry-${randomUUID()}@example.com`
+    let fail = true
+    const messages: string[] = []
+    const failingSender = {
+      sendOtp: async (input: { challengeId: string }) => {
+        if (fail) {
+          fail = false
+          throw new EmailDeliveryError('provider unavailable')
+        }
+        messages.push(input.challengeId)
+      },
+    }
+    const otp = new OtpService(redis, failingSender, settings)
+    await expect(otp.issue(email, '192.0.2.24')).rejects.toMatchObject({ code: 'email_delivery_unavailable' })
+    const retried = await otp.issue(email, '192.0.2.24')
+    expect(messages).toEqual([retried.challengeId])
+    expect(await redis.keys('auth:otp:challenge:*')).toHaveLength(1)
   })
 
   it('links a Google subject to an existing verified email user', async () => {

@@ -2,7 +2,7 @@
 
 ## Architecture
 
-- Keep the product in a polyglot monorepo: `apps/web` for the Vite frontend and `apps/api` for the FastAPI backend.
+- Keep the product in a polyglot monorepo: `apps/web` for the Vite frontend, `apps/api` for the Node.js/Elysia application API, and `apps/ai` for the Python/FastAPI AI boundary.
 - Keep frontend code feature-based. Pages compose features; shared components remain domain-neutral.
 - Define routes outside the React tree and lazy-load page modules through React Router.
 - Keep business and interaction logic out of page components. Move reusable logic to feature hooks or services.

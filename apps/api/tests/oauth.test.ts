@@ -1,4 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import type { Configuration } from 'openid-client'
+
+vi.mock('openid-client', async () => {
+  const actual = await vi.importActual<typeof import('openid-client')>('openid-client')
+  return { ...actual, discovery: vi.fn() }
+})
+
+import { discovery } from 'openid-client'
 import { GoogleOAuthService } from '../src/modules/auth/oauth.js'
 import { loadSettings } from '../src/config.js'
 
@@ -33,5 +41,19 @@ describe('Google claim validation', () => {
       { iss: 'https://accounts.google.com', aud: settings.googleClientId, email_verified: true, sub: '', email: 'a@b.com' },
       { iss: 'https://accounts.google.com', aud: settings.googleClientId, email_verified: true, sub: 's', email: '' },
     ]) expect(service.validClaims(claims)).toBe(false)
+  })
+
+  it('retries discovery after a rejected discovery promise', async () => {
+    const firstError = new Error('discovery unavailable')
+    const configuration = {} as Configuration
+    vi.mocked(discovery)
+      .mockReset()
+      .mockRejectedValueOnce(firstError)
+      .mockResolvedValueOnce(configuration)
+    const service = new GoogleOAuthService({} as never, settings) as any
+
+    await expect(service.config()).rejects.toBe(firstError)
+    await expect(service.config()).resolves.toBe(configuration)
+    expect(discovery).toHaveBeenCalledTimes(2)
   })
 })

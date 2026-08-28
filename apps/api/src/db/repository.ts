@@ -66,7 +66,7 @@ export class AuthRepository {
     providerEmail?: string | null
   }) {
     const identity = await this.findGoogleIdentity(input.providerSubject)
-    if (identity) return this.updateGoogleUser(identity.userId, input)
+    if (identity) return this.updateGoogleUser(identity.userId, identity.providerSubject, input)
 
     const user = await this.getOrCreateEmailUser(input.email, {
       firstName: input.firstName,
@@ -94,7 +94,7 @@ export class AuthRepository {
     const linked = await this.findGoogleIdentity(input.providerSubject)
     if (!linked) throw new Error('OAuth identity insert conflicted without a matching identity')
     if (linked.userId !== user.id) throw new IdentityConflictError('OAuth identity is linked to another user')
-    return this.updateGoogleUser(user.id, input)
+    return this.updateGoogleUser(user.id, input.providerSubject, input)
   }
 
   private async findGoogleIdentity(providerSubject: string) {
@@ -105,7 +105,12 @@ export class AuthRepository {
     return row
   }
 
-  private async updateGoogleUser(userId: string, input: { firstName?: string | null; lastName?: string | null; avatarUrl?: string | null }) {
+  private async updateGoogleUser(userId: string, providerSubject: string, input: {
+    firstName?: string | null
+    lastName?: string | null
+    avatarUrl?: string | null
+    providerEmail?: string | null
+  }) {
     const [user] = await this.db.select().from(users).where(eq(users.id, userId))
     if (!user) throw new IdentityConflictError('OAuth identity references a missing user')
     const [updated] = await this.db
@@ -123,7 +128,11 @@ export class AuthRepository {
       await this.db
         .update(oauthIdentities)
         .set({ providerEmail: normalizeEmail(input.providerEmail), updatedAt: new Date() })
-        .where(and(eq(oauthIdentities.provider, 'google'), eq(oauthIdentities.userId, user.id)))
+        .where(and(
+          eq(oauthIdentities.provider, 'google'),
+          eq(oauthIdentities.providerSubject, providerSubject),
+          eq(oauthIdentities.userId, user.id),
+        ))
     }
     return updated ?? user
   }

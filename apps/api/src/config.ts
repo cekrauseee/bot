@@ -1,4 +1,12 @@
 import { isIP } from 'node:net'
+import { fileURLToPath } from 'node:url'
+import dotenv from 'dotenv'
+
+// Resolve the repository environment file from this module rather than from
+// process.cwd(). This keeps every API entrypoint consistent when invoked from
+// a workspace, a deployment directory, or a test runner.
+export const repositoryEnvPath = fileURLToPath(new URL('../../../.env', import.meta.url))
+dotenv.config({ path: repositoryEnvPath, override: false, quiet: true })
 
 export type Environment = 'development' | 'test' | 'production'
 export type Settings = {

@@ -1,5 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
+import { validateConstraintContract, validateIndexContract } from '../src/db/check.js'
+import { compareMigrationHistory, readMigrationManifest } from '../src/db/migrations.js'
 
 const migration = new URL('../drizzle/0000_compatibility.sql', import.meta.url)
 
@@ -19,5 +21,71 @@ describe('compatibility migration', () => {
     expect(sql.toLowerCase()).not.toContain('drop table')
     expect(sql).toContain('ALTER TABLE users ALTER COLUMN id SET DEFAULT')
     expect(sql).toContain('RENAME CONSTRAINT')
+  })
+
+  it('derives ordered hashes from the journal and detects pending, mismatched, and out-of-order history', async () => {
+    const expected = await readMigrationManifest(new URL('../drizzle/', import.meta.url))
+    expect(expected).toHaveLength(1)
+    expect(compareMigrationHistory(expected, [])).toMatchObject({ ok: false, reason: 'pending' })
+    expect(compareMigrationHistory(expected, [{ hash: 'wrong' }])).toMatchObject({ ok: false, reason: 'mismatch' })
+    expect(compareMigrationHistory(expected, [{ hash: expected[0].hash }])).toEqual({ ok: true })
+  })
+
+  it('supports a future local migration without hard-coding the latest tag', async () => {
+    const expected = await readMigrationManifest(new URL('../drizzle/', import.meta.url))
+    const future = { ...expected[0], idx: 1, tag: '0001_future' }
+    expect(compareMigrationHistory([expected[0], future], [{ hash: expected[0].hash }]))
+      .toMatchObject({ ok: false, reason: 'pending' })
+  })
+
+  it('rejects known migrations recorded out of order', () => {
+    const expected = [
+      { idx: 0, tag: '0000_first', hash: 'first' },
+      { idx: 1, tag: '0001_second', hash: 'second' },
+    ]
+    expect(compareMigrationHistory(expected, [{ hash: 'second' }, { hash: 'first' }]))
+      .toMatchObject({ ok: false, reason: 'out-of-order' })
+  })
+
+  it('keeps development database commands on source and production commands on compiled assets', async () => {
+    const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url))) as {
+      scripts: Record<string, string>
+    }
+    expect(packageJson.scripts['db:migrate']).toBe('tsx src/db/migrate.ts')
+    expect(packageJson.scripts['db:check']).toBe('tsx src/db/check.ts')
+    expect(packageJson.scripts['db:migrate:production']).toBe('node dist/db/migrate.js')
+    expect(packageJson.scripts['db:check:production']).toBe('node dist/db/check.js')
+  })
+
+  it('accepts adopted Alembic primary-key names and ignores PostgreSQL 18 NOT NULL rows', () => {
+    const constraints = [
+      { table_name: 'users', conname: 'pk_users', contype: 'p', definition: 'PRIMARY KEY (id)' },
+      { table_name: 'users', conname: 'uq_users_email', contype: 'u', definition: 'UNIQUE (email)' },
+      { table_name: 'users', conname: 'ck_users_email_lowercase', contype: 'c', definition: 'CHECK (email = lower(email))' },
+      { table_name: 'oauth_identities', conname: 'pk_oauth_identities', contype: 'p', definition: 'PRIMARY KEY (id)' },
+      { table_name: 'oauth_identities', conname: 'fk_oauth_identities_user_id_users', contype: 'f', definition: 'FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE' },
+      { table_name: 'oauth_identities', conname: 'uq_oauth_identities_provider_subject', contype: 'u', definition: 'UNIQUE (provider, provider_subject)' },
+      { table_name: 'sessions', conname: 'pk_sessions', contype: 'p', definition: 'PRIMARY KEY (id)' },
+      { table_name: 'sessions', conname: 'fk_sessions_user_id_users', contype: 'f', definition: 'FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE' },
+      { table_name: 'sessions', conname: 'uq_sessions_token_hash', contype: 'u', definition: 'UNIQUE (token_hash)' },
+      { table_name: 'users', conname: 'users_email_not_null', contype: 'n', definition: 'NOT NULL email' },
+    ]
+    expect(validateConstraintContract(constraints)).toBe(true)
+  })
+
+  it('accepts adopted primary-key index names while requiring exact non-primary indexes', () => {
+    const primary = (table: string) => ({ table_name: table, indexname: `pk_${table}`, indexdef: `CREATE UNIQUE INDEX pk_${table} ON public.${table} USING btree (id)`, is_primary: true })
+    const indexes = [
+      primary('users'),
+      { table_name: 'users', indexname: 'uq_users_email', indexdef: 'CREATE UNIQUE INDEX uq_users_email ON public.users USING btree (email)', is_primary: false },
+      primary('oauth_identities'),
+      { table_name: 'oauth_identities', indexname: 'ix_oauth_identities_user_id', indexdef: 'CREATE INDEX ix_oauth_identities_user_id ON public.oauth_identities USING btree (user_id)', is_primary: false },
+      { table_name: 'oauth_identities', indexname: 'uq_oauth_identities_provider_subject', indexdef: 'CREATE UNIQUE INDEX uq_oauth_identities_provider_subject ON public.oauth_identities USING btree (provider, provider_subject)', is_primary: false },
+      primary('sessions'),
+      { table_name: 'sessions', indexname: 'ix_sessions_expires_at_revoked_at', indexdef: 'CREATE INDEX ix_sessions_expires_at_revoked_at ON public.sessions USING btree (expires_at, revoked_at)', is_primary: false },
+      { table_name: 'sessions', indexname: 'ix_sessions_user_id', indexdef: 'CREATE INDEX ix_sessions_user_id ON public.sessions USING btree (user_id)', is_primary: false },
+      { table_name: 'sessions', indexname: 'uq_sessions_token_hash', indexdef: 'CREATE UNIQUE INDEX uq_sessions_token_hash ON public.sessions USING btree (token_hash)', is_primary: false },
+    ]
+    expect(validateIndexContract(indexes)).toBe(true)
   })
 })
