@@ -87,7 +87,7 @@ export function ChatSidebar({
                 <button
                   type="button"
                   aria-label="Create project"
-                  className="grid size-7 place-items-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                  className="grid size-7 place-items-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                 >
                   <Plus aria-hidden="true" className="size-4" />
                 </button>

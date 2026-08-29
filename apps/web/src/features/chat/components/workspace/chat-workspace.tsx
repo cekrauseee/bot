@@ -81,6 +81,10 @@ export function ChatWorkspace({
   onSignOut,
 }: ChatWorkspaceProps) {
   const empty = !loading && !loadError && messages.length === 0
+  const activeProjectId = conversations.find((conversation) =>
+    conversation.id === activeConversationId)?.project_id
+  const activeProjectName = projects.find((project) =>
+    project.id === activeProjectId)?.name
   const composer = (
     <ChatComposer
       models={models}
@@ -120,7 +124,11 @@ export function ChatWorkspace({
           onSignOut={onSignOut}
         />
         <AnimatedSidebarInset className="h-svh min-h-0">
-          <ChatHeader title={title} mobileOnly={!activeConversationId} />
+          <ChatHeader
+            title={title}
+            projectName={activeProjectName}
+            mobileOnly={!activeConversationId}
+          />
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             <span aria-live="polite" className="sr-only">{status}</span>
             {loading ? (

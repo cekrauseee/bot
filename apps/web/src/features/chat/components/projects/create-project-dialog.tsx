@@ -3,6 +3,7 @@ import { useState, type FormEvent, type ReactElement } from 'react'
 import { Button } from '@/components/motion/button'
 import { Input } from '@/components/motion/input'
 import { Tooltip } from '@/components/motion/tooltip'
+import { useAnimatedSidebar } from '@/components/motion/animated-sidebar-context'
 import {
   Dialog,
   DialogContent,
@@ -20,6 +21,7 @@ type CreateProjectDialogProps = {
 }
 
 export function CreateProjectDialog({ trigger, onCreate }: CreateProjectDialogProps) {
+  const sidebar = useAnimatedSidebar()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [error, setError] = useState('')
@@ -65,7 +67,7 @@ export function CreateProjectDialog({ trigger, onCreate }: CreateProjectDialogPr
         }
       }}
     >
-      <Tooltip content="Create project" side="right">
+      <Tooltip content="Create project" side={sidebar.isMobile ? 'bottom' : 'right'}>
         <DialogTrigger render={trigger} />
       </Tooltip>
       <DialogContent>
