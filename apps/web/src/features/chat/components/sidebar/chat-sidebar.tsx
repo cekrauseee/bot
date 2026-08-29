@@ -34,7 +34,7 @@ export type ChatSidebarProps = {
   onNewTask: () => void
   onProjectCreate: (name: string) => Promise<ProjectSummary>
   onConversationSelect: (conversation: ConversationSummary) => void
-  onConversationMove: (conversationId: string, projectId: string) => Promise<void>
+  onConversationMove: (conversationId: string, projectId: string | null) => Promise<void>
   onConversationDelete: (id: string) => Promise<void>
   onSignOut: () => void
 }
@@ -115,11 +115,28 @@ export function ChatSidebar({
         </AnimatedSidebarGroup>
 
         <AnimatedSidebarGroup className="px-0 group-data-[state=collapsed]/sidebar:hidden">
-          <AnimatedSidebarGroupLabel className="px-3.5">
-            Recents
-          </AnimatedSidebarGroupLabel>
+          <AnimatedSidebarGroupLabel className="px-3.5">Recents</AnimatedSidebarGroupLabel>
           <AnimatedSidebarGroupContent>
-            <div className="flex flex-col gap-0.5 px-1">
+            <div
+              className="flex flex-col gap-0.5 rounded-xl px-1 data-[drop-target=true]:bg-primary/10"
+              onDragOver={(event) => {
+                if (!event.dataTransfer.types.includes('application/x-mybot-conversation')) return
+                event.preventDefault()
+                event.dataTransfer.dropEffect = 'move'
+                event.currentTarget.dataset.dropTarget = 'true'
+              }}
+              onDragLeave={(event) => {
+                if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return
+                delete event.currentTarget.dataset.dropTarget
+              }}
+              onDrop={(event) => {
+                event.preventDefault()
+                delete event.currentTarget.dataset.dropTarget
+                const conversationId = event.dataTransfer.getData('application/x-mybot-conversation') ||
+                  event.dataTransfer.getData('text/plain')
+                if (conversationId) void onConversationMove(conversationId, null).catch(() => undefined)
+              }}
+            >
               {recentConversations.map((conversation) => (
                 <ConversationRow
                   key={conversation.id}

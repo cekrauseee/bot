@@ -6,14 +6,18 @@ const iso = (value: Date | string) =>
 export const normalizeProjectName = (name: string) =>
   name.trim().replace(/\s+/g, ' ')
 
-export const projectSlug = (name: string) => normalizeProjectName(name)
-  .normalize('NFKD')
-  .replace(/(\p{Script=Latin})\p{Mark}+/gu, '$1')
-  .normalize('NFC')
-  .toLowerCase()
-  .replace(/[^\p{Letter}\p{Number}]+/gu, '-')
-  .replace(/^-+|-+$/g, '')
-  .slice(0, 100)
+export const projectSlug = (name: string) => {
+  const slug = normalizeProjectName(name)
+    .normalize('NFKD')
+    .replace(/(\p{Script=Latin})\p{Mark}+/gu, '$1')
+    .normalize('NFC')
+    .toLowerCase()
+    .replace(/[^\p{Letter}\p{Number}\p{Mark}]+/gu, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 100)
+  return /[\p{Letter}\p{Number}]/u.test(slug) ? slug : ''
+}
+
 
 export const publicProject = (project: Project) => ({
   id: project.id,

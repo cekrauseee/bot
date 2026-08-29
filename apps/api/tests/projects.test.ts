@@ -8,9 +8,11 @@ describe('project names and slugs', () => {
     expect(projectSlug('  Résumé   Review  ')).toBe('resume-review')
     expect(projectSlug('API & UI')).toBe('api-ui')
     expect(projectSlug('日本語 プロジェクト')).toBe('日本語-プロジェクト')
+    expect(projectSlug('का कि कु')).toBe('का-कि-कु')
   })
 
   it('rejects names without a usable slug at the route boundary', () => {
     expect(projectSlug(' --- ')).toBe('')
+    expect(projectSlug('́́')).toBe('')
   })
 })

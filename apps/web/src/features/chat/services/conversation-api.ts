@@ -643,7 +643,7 @@ export function useConversation(
     return project
   }, [])
 
-  const moveToProject = useCallback(async (conversationId: string, projectId: string) => {
+  const moveToProject = useCallback(async (conversationId: string, projectId: string | null) => {
     const updated = await request<ConversationSummary>(
       `/conversations/${conversationId}/project`,
       {

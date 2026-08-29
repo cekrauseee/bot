@@ -223,7 +223,7 @@ export class ConversationRepository {
     const [row] = await this.db.delete(conversations).where(and(eq(conversations.id, id), eq(conversations.userId, userId))).returning()
     return row
   }
-  async assignProject(userId: string, id: string, projectId: string) {
+  async assignProject(userId: string, id: string, projectId: string | null) {
     const [row] = await this.db.update(conversations)
       .set({ projectId })
       .where(and(eq(conversations.id, id), eq(conversations.userId, userId)))

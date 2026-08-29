@@ -535,7 +535,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     name: t.String({ minLength: 1, maxLength: 80 }),
   })
   const assignProjectBody = t.Object({
-    project_id: t.String({ format: 'uuid' }),
+    project_id: t.Union([t.String({ format: 'uuid' }), t.Null()]),
   })
   const turnBody = t.Object({
     message: t.String({ minLength: 1, maxLength: 1_048_576 }),
@@ -637,8 +637,11 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     const conversation = await services.database.transaction(async (db) => {
       const projectRepository = new ProjectRepository(db)
       const conversationRepository = new ConversationRepository(db)
-      if (!await projectRepository.get(user.id, body.project_id)) return undefined
-      return conversationRepository.assignProject(user.id, params.conversationId, body.project_id)
+      const projectId = body.project_id
+      if (projectId !== null && !await projectRepository.get(user.id, projectId)) {
+        return undefined
+      }
+      return conversationRepository.assignProject(user.id, params.conversationId, projectId)
     })
     if (!conversation) {
       set.status = 404

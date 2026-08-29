@@ -283,7 +283,7 @@ describe('PostgreSQL conversation flow', () => {
       const otherProjectResponse = await create('Private project', other.cookie)
       const otherProject = await otherProjectResponse.json() as { id: string }
 
-      const assign = (projectId: string) => app.handle(new Request(
+      const assign = (projectId: string | null) => app.handle(new Request(
         `http://localhost/conversations/${conversation.id}/project`,
         {
           method: 'PATCH',
@@ -310,6 +310,10 @@ describe('PostgreSQL conversation flow', () => {
       expect(secondMove.status).toBe(200)
       expect(await secondMove.json()).toMatchObject({ project_id: second.id })
 
+      const recentMove = await assign(null)
+      expect(recentMove.status).toBe(200)
+      expect(await recentMove.json()).toMatchObject({ project_id: null })
+
       const projects = await app.handle(new Request('http://localhost/projects', {
         headers: { cookie: owner.cookie },
       }))
@@ -325,7 +329,7 @@ describe('PostgreSQL conversation flow', () => {
         headers: { cookie: owner.cookie },
       }))
       expect(await conversations.json()).toMatchObject({
-        conversations: [{ id: conversation.id, project_id: second.id }],
+        conversations: [{ id: conversation.id, project_id: null }],
       })
     } finally {
       await pool.query('delete from users where id = any($1::uuid[])', [[owner.id, other.id]])

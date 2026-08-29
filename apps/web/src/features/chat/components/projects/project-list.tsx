@@ -14,7 +14,7 @@ type ProjectListProps = {
   activeConversationId?: string
   onConversationSelect: (conversation: ConversationSummary) => void
   onConversationDelete: (id: string) => Promise<void>
-  onMoveToProject: (conversationId: string, projectId: string) => Promise<void>
+  onMoveToProject: (conversationId: string, projectId: string | null) => Promise<void>
 }
 
 export function ProjectList({
@@ -32,9 +32,10 @@ export function ProjectList({
   })
   const [moveError, setMoveError] = useState<Record<string, string>>({})
 
-  const move = async (conversationId: string, projectId: string) => {
+  const move = async (conversationId: string, projectId: string | null) => {
     const conversation = conversations.find((item) => item.id === conversationId)
     if (!conversation || conversation.project_id === projectId) return
+    if (projectId === null) return onMoveToProject(conversationId, null)
     setMoveError((current) => ({ ...current, [projectId]: '' }))
     try {
       await onMoveToProject(conversationId, projectId)

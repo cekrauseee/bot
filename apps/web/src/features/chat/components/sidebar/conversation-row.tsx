@@ -4,7 +4,14 @@ import {
   MoreHorizontal,
   Trash2,
 } from 'lucide-react'
-import { useState, type DragEvent, type MouseEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type MouseEvent,
+} from 'react'
 import { Link } from 'react-router'
 
 import { Button } from '@/components/motion/button'
@@ -28,7 +35,7 @@ type ConversationRowProps = {
   nested?: boolean
   onSelect: (conversation: ConversationSummary) => void
   onDelete: (id: string) => Promise<void>
-  onMoveToProject: (conversationId: string, projectId: string) => Promise<void>
+  onMoveToProject: (conversationId: string, projectId: string | null) => Promise<void>
 }
 
 type MenuView = 'actions' | 'projects' | 'delete'
@@ -48,7 +55,32 @@ export function ConversationRow({
   const [view, setView] = useState<MenuView>('actions')
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const focusObserverRef = useRef<MutationObserver | null>(null)
   const moveTargets = projects.filter((project) => project.id !== conversation.project_id)
+  const focusOnMount = useCallback((node: HTMLButtonElement | null) => {
+    focusObserverRef.current?.disconnect()
+    focusObserverRef.current = null
+    if (!node) return
+    const portal = node.closest<HTMLElement>('[data-morph-popover-portal]')
+    const focus = () => {
+      if (!node.isConnected || (portal && getComputedStyle(portal).visibility === 'hidden')) {
+        return false
+      }
+      node.focus()
+      return true
+    }
+    if (focus() || !portal) return
+    const observer = new MutationObserver(() => {
+      if (!focus()) return
+      observer.disconnect()
+      focusObserverRef.current = null
+    })
+    observer.observe(portal, { attributes: true, attributeFilter: ['style'] })
+    focusObserverRef.current = observer
+  }, [])
+
+  useEffect(() => () => focusObserverRef.current?.disconnect(), [])
 
   const select = (event: MouseEvent<HTMLAnchorElement>) => {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
@@ -69,7 +101,7 @@ export function ConversationRow({
     }
   }
 
-  const move = async (projectId: string) => {
+  const move = async (projectId: string | null) => {
     setPending(true)
     setError('')
     try {
@@ -120,6 +152,7 @@ export function ConversationRow({
         <MorphPopoverTrigger>
           <button
             type="button"
+            ref={triggerRef}
             aria-label={`Actions for ${conversation.title || 'conversation'}`}
             className={cn(
               'grid size-7 shrink-0 place-items-center rounded-lg text-muted-foreground/70 outline-none transition-[color,opacity] hover:bg-foreground/5 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover/conversation:opacity-100',
@@ -141,6 +174,7 @@ export function ConversationRow({
               {moveTargets.length ? (
                 <button
                   type="button"
+                  ref={focusOnMount}
                   onClick={() => setView('projects')}
                   className="flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-left text-xs text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
                 >
@@ -148,8 +182,22 @@ export function ConversationRow({
                   Move to project
                 </button>
               ) : null}
+              {conversation.project_id !== null ? (
+                <button
+                  type="button"
+                  ref={!moveTargets.length ? focusOnMount : undefined}
+                  onClick={() => void move(null)}
+                  className="flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-left text-xs text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <FolderInput aria-hidden="true" className="size-3.5" />
+                  Move to Recents
+                </button>
+              ) : null}
               <button
                 type="button"
+                ref={!moveTargets.length && conversation.project_id === null
+                  ? focusOnMount
+                  : undefined}
                 onClick={() => setView('delete')}
                 className="flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-left text-xs text-destructive outline-none transition-colors hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-ring"
               >
@@ -165,6 +213,7 @@ export function ConversationRow({
                 <button
                   type="button"
                   aria-label="Back to conversation actions"
+                  ref={focusOnMount}
                   onClick={() => setView('actions')}
                   className="grid size-7 place-items-center rounded-lg text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                 >
@@ -197,6 +246,7 @@ export function ConversationRow({
                   variant="ghost"
                   size="sm"
                   pressScale={0.96}
+                  ref={focusOnMount}
                   disabled={pending}
                   onClick={() => setView('actions')}
                 >
