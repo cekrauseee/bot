@@ -26,6 +26,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { SharedLayoutBg } from "@/components/motion/shared-layout-bg";
+import { Tooltip, type TooltipSide } from "@/components/motion/tooltip";
 import {
   AnimatedSidebarContext,
   useAnimatedSidebar,
@@ -597,6 +598,7 @@ export function AnimatedSidebarTrigger({
       className={cn(
         "inline-flex size-10 shrink-0 items-center justify-center rounded-xl outline-none",
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        "[&_svg]:size-4 [&_svg]:shrink-0",
         className,
       )}
     >
@@ -999,6 +1001,9 @@ export interface AnimatedSidebarMenuButtonProps {
   ariaExpanded?: boolean;
   disabled?: boolean;
   closeOnSelect?: boolean;
+  expandSidebarOnSelect?: boolean;
+  tooltip?: ReactNode;
+  tooltipSide?: TooltipSide;
   target?: "_blank" | "_self" | "_parent" | "_top";
   rel?: string;
   onSelect?: () => void;
@@ -1014,6 +1019,9 @@ export function AnimatedSidebarMenuButton({
   ariaExpanded,
   disabled = false,
   closeOnSelect,
+  expandSidebarOnSelect = true,
+  tooltip,
+  tooltipSide = "right",
   target,
   rel,
   onSelect,
@@ -1040,7 +1048,12 @@ export function AnimatedSidebarMenuButton({
     // leaves its children unreachable — a pointer can still fall back to the
     // rail or the shortcut, a finger has nothing. Selecting a group unfolds
     // the panel that is about to hold it.
-    if (ariaExpanded !== undefined && panel.collapsed && !context.isMobile) {
+    if (
+      expandSidebarOnSelect &&
+      ariaExpanded !== undefined &&
+      panel.collapsed &&
+      !context.isMobile
+    ) {
       context.setOpen(true);
     }
   };
@@ -1115,7 +1128,7 @@ export function AnimatedSidebarMenuButton({
     className,
   );
 
-  return href ? (
+  const control = href ? (
     <motion.a
       href={href}
       target={target}
@@ -1127,7 +1140,7 @@ export function AnimatedSidebarMenuButton({
       aria-expanded={ariaExpanded}
       aria-disabled={disabled || undefined}
       aria-label={panel.collapsed ? textLabel : undefined}
-      title={panel.collapsed ? textLabel : undefined}
+      title={panel.collapsed && !tooltip ? textLabel : undefined}
       tabIndex={disabled ? -1 : undefined}
       onClick={select}
       whileTap={context.reduce || disabled ? undefined : { scale: 0.98 }}
@@ -1143,7 +1156,7 @@ export function AnimatedSidebarMenuButton({
       aria-current={isActive ? "page" : undefined}
       aria-expanded={ariaExpanded}
       aria-label={panel.collapsed ? textLabel : undefined}
-      title={panel.collapsed ? textLabel : undefined}
+      title={panel.collapsed && !tooltip ? textLabel : undefined}
       onClick={select}
       whileTap={context.reduce || disabled ? undefined : { scale: 0.98 }}
       transition={SPRING_PRESS}
@@ -1151,5 +1164,18 @@ export function AnimatedSidebarMenuButton({
     >
       {content}
     </motion.button>
+  );
+
+  return tooltip ? (
+    <Tooltip
+      content={tooltip}
+      side={tooltipSide}
+      disabled={!panel.collapsed}
+      wrapperClassName="flex w-full"
+    >
+      {control}
+    </Tooltip>
+  ) : (
+    control
   );
 }

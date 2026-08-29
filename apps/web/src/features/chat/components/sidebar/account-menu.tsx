@@ -72,6 +72,7 @@ export function AccountMenu({
         <AnimatedSidebarMenuItem>
           <AnimatedSidebarMenuButton
             ariaExpanded={menuOpen}
+            expandSidebarOnSelect={false}
             icon={
               <UserAvatar
                 user={user}
@@ -80,6 +81,7 @@ export function AccountMenu({
               />
             }
             onSelect={() => setMenuOpen((current) => !current)}
+            tooltip={user.displayName}
           >
             {user.displayName}
           </AnimatedSidebarMenuButton>

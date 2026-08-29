@@ -110,7 +110,7 @@ export function ChatWorkspace({
           onSignOut={onSignOut}
         />
         <AnimatedSidebarInset className="h-svh min-h-0">
-          <ChatHeader title={title} />
+          <ChatHeader title={title} mobileOnly={!activeConversationId} />
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             <span aria-live="polite" className="sr-only">{status}</span>
             {loading ? (
