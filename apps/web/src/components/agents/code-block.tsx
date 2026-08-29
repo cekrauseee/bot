@@ -104,7 +104,7 @@ export function CodeBlock({
       data-state={status}
       aria-busy={streaming}
       className={cn(
-        "w-full overflow-hidden rounded-2xl bg-muted/80 text-sm",
+        "w-full overflow-hidden rounded-2xl bg-muted/80 text-sm [&>div>pre>code]:rounded-none [&>div>pre>code]:bg-transparent [&>div>pre>code]:p-0 [&>div>pre>code]:text-[1em]",
         className,
       )}
     >
