@@ -7,9 +7,12 @@ export const router = createBrowserRouter([
     path: '/',
     HydrateFallback: RouteFallback,
     lazy: {
-      Component: async () =>
-        (await import('@/pages/home/page')).HomePage,
+      Component: async () => (await import('@/pages/chat/page')).ChatPage,
     },
+    children: [
+      { index: true, Component: () => null },
+      { path: 'conversations/:conversationId', Component: () => null },
+    ],
   },
   {
     path: '/sign',

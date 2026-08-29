@@ -1,5 +1,5 @@
-import { and, eq, gt, isNull, lte, or } from 'drizzle-orm'
-import { oauthIdentities, sessions, users } from './schema.js'
+import { and, eq, gt, isNull, lte, or, sql } from 'drizzle-orm'
+import { conversations, messages, oauthIdentities, sessions, users } from './schema.js'
 import type { Db } from './database.js'
 
 export type User = typeof users.$inferSelect
@@ -161,5 +161,96 @@ export class AuthRepository {
 
   async revokeSession(id: string) {
     await this.db.update(sessions).set({ revokedAt: new Date() }).where(and(eq(sessions.id, id), isNull(sessions.revokedAt)))
+  }
+}
+
+export type Conversation = typeof conversations.$inferSelect
+export type Message = typeof messages.$inferSelect
+
+export class ConversationRepository {
+  constructor(readonly db: Db) {}
+
+  async list(userId: string) {
+    return this.db.select().from(conversations).where(eq(conversations.userId, userId))
+      .orderBy(sql`${conversations.updatedAt} DESC`)
+  }
+  async get(userId: string, id: string) {
+    const [conversation] = await this.db.select().from(conversations)
+      .where(and(eq(conversations.id, id), eq(conversations.userId, userId)))
+    if (!conversation) return undefined
+    const rows = await this.db.select().from(messages).where(eq(messages.conversationId, id))
+      .orderBy(sql`${messages.createdAt} ASC`, sql`${messages.id} ASC`)
+    return { ...conversation, messages: rows }
+  }
+
+  async lockOwned(userId: string, id: string) {
+    const [conversation] = await this.db
+      .select()
+      .from(conversations)
+      .where(and(eq(conversations.id, id), eq(conversations.userId, userId)))
+      .for('update')
+    return conversation
+  }
+  async create(userId: string, title: string) {
+    const [row] = await this.db.insert(conversations).values({ userId, title }).returning()
+    return row
+  }
+  async delete(userId: string, id: string) {
+    const [row] = await this.db.delete(conversations).where(and(eq(conversations.id, id), eq(conversations.userId, userId))).returning()
+    return row
+  }
+  async active(id: string) {
+    const [row] = await this.db.select({ id: messages.id }).from(messages)
+      .where(and(eq(messages.conversationId, id), eq(messages.role, 'assistant'), eq(messages.status, 'streaming')))
+    return row
+  }
+  async addTurn(conversationId: string, userContent: string, options: { model: string; reasoningEffort: string; speed: string }) {
+    const active = await this.active(conversationId)
+    if (active) throw new Error('conversation_active')
+    const createdAt = new Date()
+    const [user] = await this.db.insert(messages).values({
+      conversationId,
+      role: 'user',
+      content: userContent,
+      status: 'completed',
+      createdAt,
+      updatedAt: createdAt,
+    }).returning()
+    const assistantCreatedAt = new Date(createdAt.getTime() + 1)
+    const [assistant] = await this.db.insert(messages).values({
+      conversationId,
+      role: 'assistant',
+      status: 'streaming',
+      model: options.model,
+      reasoningEffort: options.reasoningEffort,
+      speed: options.speed,
+      createdAt: assistantCreatedAt,
+      updatedAt: assistantCreatedAt,
+    }).returning()
+    const [conversation] = await this.db
+      .update(conversations)
+      .set({ updatedAt: createdAt })
+      .where(eq(conversations.id, conversationId))
+      .returning()
+    return { conversation, user, assistant }
+  }
+  async updateAssistant(id: string, patch: Partial<Pick<Message, 'content' | 'reasoning' | 'status' | 'errorMessage' | 'activities'>>) {
+    const [row] = await this.db.update(messages).set({ ...patch, updatedAt: new Date() }).where(eq(messages.id, id)).returning()
+    if (row) {
+      await this.db
+        .update(conversations)
+        .set({ updatedAt: new Date() })
+        .where(eq(conversations.id, row.conversationId))
+    }
+    return row
+  }
+  async transcript(id: string) {
+    return this.db.select({ role: messages.role, content: messages.content }).from(messages)
+      .where(and(
+        eq(messages.conversationId, id),
+        sql`${messages.content} <> ''`,
+        or(eq(messages.role, 'user'), eq(messages.status, 'completed')),
+      ))
+      .orderBy(sql`${messages.createdAt} ASC`, sql`${messages.id} ASC`)
   }
 }

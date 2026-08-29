@@ -51,6 +51,28 @@ const columns: Record<string, ColumnContract[]> = {
     { name: 'revoked_at', type: 'timestamp with time zone', length: null, nullable: true, defaultValue: null },
     { name: 'last_seen_at', type: 'timestamp with time zone', length: null, nullable: true, defaultValue: null },
   ],
+  conversations: [
+    { name: 'id', type: 'uuid', length: null, nullable: false, defaultValue: 'gen_random_uuid()' },
+    { name: 'user_id', type: 'uuid', length: null, nullable: false, defaultValue: null },
+    { name: 'title', type: 'character varying', length: 120, nullable: false, defaultValue: null },
+    { name: 'created_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
+    { name: 'updated_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
+  ],
+  messages: [
+    { name: 'id', type: 'uuid', length: null, nullable: false, defaultValue: 'gen_random_uuid()' },
+    { name: 'conversation_id', type: 'uuid', length: null, nullable: false, defaultValue: null },
+    { name: 'role', type: 'character varying', length: 20, nullable: false, defaultValue: null },
+    { name: 'content', type: 'text', length: null, nullable: false, defaultValue: "''::text" },
+    { name: 'reasoning', type: 'text', length: null, nullable: true, defaultValue: null },
+    { name: 'status', type: 'character varying', length: 20, nullable: false, defaultValue: null },
+    { name: 'error_message', type: 'text', length: null, nullable: true, defaultValue: null },
+    { name: 'model', type: 'character varying', length: 20, nullable: true, defaultValue: null },
+    { name: 'reasoning_effort', type: 'character varying', length: 20, nullable: true, defaultValue: null },
+    { name: 'speed', type: 'character varying', length: 20, nullable: true, defaultValue: null },
+    { name: 'activities', type: 'jsonb', length: null, nullable: false, defaultValue: "'[]'::jsonb" },
+    { name: 'created_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
+    { name: 'updated_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
+  ],
 }
 
 const constraints: ConstraintContract[] = [
@@ -66,6 +88,10 @@ const constraints: ConstraintContract[] = [
   { table: 'sessions', name: '', type: 'p', definition: 'PRIMARY KEY (id)' },
   { table: 'sessions', name: 'fk_sessions_user_id_users', type: 'f', definition: 'FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE' },
   { table: 'sessions', name: 'uq_sessions_token_hash', type: 'u', definition: 'UNIQUE (token_hash)' },
+  { table: 'conversations', name: '', type: 'p', definition: 'PRIMARY KEY (id)' },
+  { table: 'conversations', name: 'conversations_user_id_users_id_fk', type: 'f', definition: 'FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE' },
+  { table: 'messages', name: '', type: 'p', definition: 'PRIMARY KEY (id)' },
+  { table: 'messages', name: 'messages_conversation_id_conversations_id_fk', type: 'f', definition: 'FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE' },
 ]
 
 const indexes: IndexContract[] = [
@@ -75,6 +101,9 @@ const indexes: IndexContract[] = [
   { table: 'sessions', name: 'ix_sessions_expires_at_revoked_at', definition: 'CREATE INDEX ix_sessions_expires_at_revoked_at ON public.sessions USING btree (expires_at, revoked_at)' },
   { table: 'sessions', name: 'ix_sessions_user_id', definition: 'CREATE INDEX ix_sessions_user_id ON public.sessions USING btree (user_id)' },
   { table: 'sessions', name: 'uq_sessions_token_hash', definition: 'CREATE UNIQUE INDEX uq_sessions_token_hash ON public.sessions USING btree (token_hash)' },
+  { table: 'conversations', name: 'ix_conversations_user_id_updated_at', definition: 'CREATE INDEX ix_conversations_user_id_updated_at ON public.conversations USING btree (user_id, updated_at)' },
+  { table: 'messages', name: 'ix_messages_conversation_id_created_at', definition: 'CREATE INDEX ix_messages_conversation_id_created_at ON public.messages USING btree (conversation_id, created_at)' },
+  { table: 'messages', name: 'uq_messages_one_streaming_assistant', definition: "CREATE UNIQUE INDEX uq_messages_one_streaming_assistant ON public.messages USING btree (conversation_id) WHERE (((role)::text = 'assistant'::text) AND ((status)::text = 'streaming'::text))" },
 ]
 
 const normalizeSql = (value: string) => value.toLowerCase()
@@ -116,7 +145,13 @@ export function validateConstraintContract(rows: readonly ConstraintRow[]) {
   )
 }
 
-const tableOrder = (table: string) => table === 'users' ? 1 : table === 'oauth_identities' ? 2 : 3
+const tableOrder = (table: string) => {
+  if (table === 'users') return 1
+  if (table === 'oauth_identities') return 2
+  if (table === 'sessions') return 3
+  if (table === 'conversations') return 4
+  return 5
+}
 const indexKey = (row: IndexContract) => `${tableOrder(row.table)}|${row.name}|${row.definition}`
 
 export function validateIndexContract(rows: readonly IndexRow[]) {
@@ -146,7 +181,8 @@ export async function checkDatabase(databaseUrl = loadSettings().databaseUrl) {
       select table_name, column_name, data_type, character_maximum_length,
              is_nullable, column_default, ordinal_position
       from information_schema.columns
-      where table_schema = 'public' and table_name in ('users', 'oauth_identities', 'sessions')
+      where table_schema = 'public'
+        and table_name in ('users', 'oauth_identities', 'sessions', 'conversations', 'messages')
       order by table_name, ordinal_position
     `)).rows
     for (const [table, expected] of Object.entries(columns)) {
@@ -170,9 +206,11 @@ export async function checkDatabase(databaseUrl = loadSettings().databaseUrl) {
       from pg_constraint c
       join pg_namespace n on n.oid = c.connamespace
       where n.nspname = 'public' and c.contype <> 'n'
-        and c.conrelid::regclass::text in ('users', 'oauth_identities', 'sessions')
+        and c.conrelid::regclass::text in (
+          'users', 'oauth_identities', 'sessions', 'conversations', 'messages'
+        )
     `)).rows
-    if (!validateConstraintContract(constraintRows)) throw new Error('invalid auth constraint contract')
+    if (!validateConstraintContract(constraintRows)) throw new Error('invalid database constraint contract')
 
     const indexRows = (await client.query<IndexRow>(`
       select p.tablename as table_name, p.indexname, p.indexdef, i.indisprimary as is_primary
@@ -181,10 +219,16 @@ export async function checkDatabase(databaseUrl = loadSettings().databaseUrl) {
       join pg_namespace index_namespace on index_namespace.oid = index_class.relnamespace
       join pg_index i on i.indexrelid = index_class.oid
       where p.schemaname = 'public' and index_namespace.nspname = 'public'
-        and p.tablename in ('users', 'oauth_identities', 'sessions')
-      order by case p.tablename when 'users' then 1 when 'oauth_identities' then 2 else 3 end, p.indexname
+        and p.tablename in ('users', 'oauth_identities', 'sessions', 'conversations', 'messages')
+      order by case p.tablename
+        when 'users' then 1
+        when 'oauth_identities' then 2
+        when 'sessions' then 3
+        when 'conversations' then 4
+        else 5
+      end, p.indexname
     `)).rows
-    if (!validateIndexContract(indexRows)) throw new Error('invalid auth index contract')
+    if (!validateIndexContract(indexRows)) throw new Error('invalid database index contract')
 
     const migrationTable = (await client.query(`
       select 1 from information_schema.tables
@@ -202,7 +246,7 @@ export async function checkDatabase(databaseUrl = loadSettings().databaseUrl) {
       hash: String(row.hash), createdAt: row.createdAt as string | number | bigint,
     })))
     if (!migrationResult.ok) throw new Error(migrationResult.message)
-    console.log('auth schema and migration record OK')
+    console.log('database schema and migration record OK')
   } finally {
     await client.end()
   }

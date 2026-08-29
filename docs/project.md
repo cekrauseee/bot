@@ -9,17 +9,19 @@ myBot is a portfolio project for an AI agent inspired by the clarity and restrai
 The current implementation includes:
 
 - a Vite and React frontend;
-- lazy-loaded public login and protected root pages;
+- lazy-loaded public login and protected conversation routes;
 - light and dark appearances with the system preference as the default;
 - beUI inputs, buttons, and theme transition installed through its shadcn registry;
-- an Elysia application API with health and authentication endpoints;
-- an independent FastAPI boundary for future model capabilities;
+- an Elysia application API with health, authentication, conversation, and streaming endpoints;
+- an authenticated FastAPI boundary using LangChain and OpenAI Responses;
 - passwordless email OTP and Google OpenID Connect login;
 - PostgreSQL user, identity, and session persistence;
 - Redis-backed OTP challenges and abuse limits;
-- a repository-owned React Email component rendered locally and sent through Resend.
+- a repository-owned React Email component rendered locally and sent through Resend;
+- persistent multi-conversation text chat with reasoning summaries, web search, and Markdown responses;
+- GPT-5.6 Sol and GPT-5.6 Luna with selectable reasoning effort and processing speed.
 
-Agent conversations, model integration, and production deployment are not implemented yet.
+Production deployment is not implemented yet. A real model request also requires a server-side `OPENAI_API_KEY`.
 
 ## Core Concepts
 

@@ -12,17 +12,17 @@ The repository contains independently managed product services under `apps/` and
 | `apps/api` | Node.js HTTP API, authentication, and server-side product capabilities |
 | `apps/ai` | Python service boundary for model providers and AI workloads |
 | `packages/email` | React Email components, local previews, and the consumable email package |
-| PostgreSQL | Users, OAuth identities, and revocable sessions |
+| PostgreSQL | Users, OAuth identities, sessions, conversations, and messages |
 | Redis | Short-lived OTP challenges, OAuth state, and rate limits |
 | Root workspace | Shared commands, repository rules, and canonical documentation |
 
-The web application uses React Router Data Mode. The router is created outside the React tree and lazy-loads the public login and protected root pages. Pages compose authentication and chat features and beUI components. Hooks own interaction and session state; feature services own HTTP calls.
+The web application uses React Router Data Mode. The router is created outside the React tree and lazy-loads the public login page and one persistent chat layout for `/` and `/conversations/:conversationId`. Pages compose authentication and the public chat feature. Hooks own interaction and session state; feature services own HTTP and SSE parsing.
 
-The chat feature is application-owned under `apps/web/src/features/chat`. Its public entrypoint (`features/chat/index.ts`) re-exports the feature container, which owns temporary fixture state; `HomePage` adapts `AuthUser` to the page-owned user view model. `model.ts` and `fixtures/` contain serializable data only. `components/` owns the presentational shell, workspace, sidebar, messages, activity, tools, and composer; renderers adapt model blocks to interactive components. Chat components expose callbacks for navigation and composer actions and do not invent API event formats or persistence.
+The chat feature is application-owned under `apps/web/src/features/chat`. Its public entrypoint re-exports the feature container. The conversation service loads durable data, parses the versioned SSE protocol, reconciles optimistic message IDs, and owns cancellation. Presentational components compose the existing beUI shell, sidebar, message scroller, activity, streaming response, citations, code block, and composer. Fixture and future approval, plan, task, and tool components remain available but are not part of the current conversation flow.
 
-The application API uses an Elysia application factory with the official Node.js adapter, typed runtime schemas, and OpenAPI documentation. Framework-independent feature services own PostgreSQL, Redis, OTP, OAuth, email, and session behavior. Drizzle defines the relational schema and versioned migrations.
+The application API uses an Elysia application factory with the official Node.js adapter, typed runtime schemas, and OpenAPI documentation. It is the only browser-facing backend. It authenticates users, owns conversations and messages in PostgreSQL, and proxies the AI stream while persisting partial and final output. Drizzle defines the relational schema and versioned migrations.
 
-The AI service uses a FastAPI application factory in `my_bot_ai.main`. It is independently runnable and currently exposes only its typed health contract. Product authentication and persistence do not depend on the AI process.
+The AI service uses a FastAPI application factory in `my_bot_ai.main`. It accepts only bearer-authenticated service requests from the application API. LangChain owns the agent graph, OpenAI Responses provides reasoning and built-in web search, and the service emits provider-neutral SSE events. It does not own browser authentication or persistence.
 
 ## Data Flow
 
@@ -39,6 +39,15 @@ Google login uses Authorization Code, PKCE, state, nonce, and the `openid email 
 
 The API runs on its own subdomain and does not add an `/api` path prefix. Credentialed CORS accepts only the configured web origin. State-changing browser requests validate that origin.
 
+The conversation flow is:
+
+1. The browser sends a new message to Elysia with its session cookie and selected model settings.
+2. Elysia verifies ownership and stores the user message plus a streaming assistant placeholder.
+3. Elysia calls FastAPI with the local text transcript and an internal bearer token.
+4. FastAPI runs the LangChain agent with `store=false` and streams normalized reasoning, text, and real web-search events.
+5. Elysia validates and retransmits the SSE sequence while accumulating safe summaries, sources, and response text.
+6. Completion, failure, or cancellation updates the assistant message before the terminal browser event is emitted.
+
 ## Invariants
 
 - Page modules remain lazy-loaded through the router.
@@ -49,6 +58,8 @@ The API runs on its own subdomain and does not add an `/api` path prefix. Creden
 - API behavior is exposed through routers and covered by tests.
 - Product routes, authentication, and relational data remain owned by `apps/api`.
 - Model-provider integrations and AI execution remain owned by `apps/ai`.
+- The browser never receives OpenAI credentials or provider-native event payloads.
+- OpenAI response storage stays disabled; PostgreSQL is the conversation source of truth.
 - Authentication secrets and raw OTP or session tokens never enter persistent storage or logs.
 - Account lookup behavior does not reveal whether an email already exists.
 - The repository contains no Harness metadata or session state.

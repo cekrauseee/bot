@@ -5,18 +5,28 @@ import { Elysia, ParseError, t, ValidationError } from 'elysia'
 import { isIP } from 'node:net'
 import type { Settings } from './config.js'
 import { AuthError, authDetail } from './errors.js'
-import { AuthRepository, normalizeEmail } from './db/repository.js'
+import { AuthRepository, ConversationRepository, normalizeEmail } from './db/repository.js'
 import type { Database } from './db/database.js'
 import { GoogleOAuthService } from './modules/auth/oauth.js'
 import { OtpService } from './modules/auth/otp.js'
 import { SessionManager } from './modules/auth/sessions.js'
 import { signValue, verifySignedValue } from './security.js'
+import {
+  conversationTitle,
+  createAiClient,
+  publicConversation,
+  publicMessage,
+  streamTurn,
+  type AiClient,
+  type TurnOptions,
+} from './modules/conversations.js'
 
 export type Services = {
   database: Database
   otp: OtpService
   sessions: SessionManager
   google: GoogleOAuthService
+  ai?: AiClient
 }
 
 export type PeerResolver = (request: Request) => string | undefined
@@ -372,7 +382,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     .use(cors({
       origin: settings.webOrigin,
       credentials: true,
-      methods: ['GET', 'POST'],
+      methods: ['GET', 'POST', 'DELETE'],
       allowedHeaders: ['Content-Type'],
     }))
     .use(openapi({ documentation: { info: { title: 'myBot API', version: '0.1.0' } } }))
@@ -507,6 +517,137 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     }
     return new Response(null, { status: 204, headers: { 'Set-Cookie': services.sessions.clearCookie() } })
   }, { response: { 204: t.Void(), 403: detailSchema } })
+
+  const conversationParams = t.Object({
+    conversationId: t.String({ format: 'uuid' }),
+  })
+  const turnBody = t.Object({
+    message: t.String({ minLength: 1, maxLength: 1_048_576 }),
+    model: t.Union([t.Literal('gpt-5.6-sol'), t.Literal('gpt-5.6-luna')]),
+    reasoning_effort: t.Union([
+      t.Literal('low'),
+      t.Literal('medium'),
+      t.Literal('high'),
+      t.Literal('xhigh'),
+      t.Literal('max'),
+    ]),
+    speed: t.Union([t.Literal('standard'), t.Literal('fast')]),
+  })
+  const sessionUser = async (request: Request) => {
+    const token = cookieValue(request, settings.sessionCookieName)
+    return services.database.transaction(async (db) => {
+      const active = await services.sessions.resolve(new AuthRepository(db), token)
+      if (!active) throw new AuthError('unauthorized', 'Sign in to continue.', 401)
+      return active.user!
+    })
+  }
+  app.get('/conversations', async ({ request }) => {
+    const user = await sessionUser(request)
+    return services.database.transaction(async (db) => ({
+      conversations: (await new ConversationRepository(db).list(user.id)).map(publicConversation),
+    }))
+  })
+
+  app.get('/conversations/:conversationId', async ({ request, params, set }) => {
+    const user = await sessionUser(request)
+    const result = await services.database.transaction(async (db) =>
+      new ConversationRepository(db).get(user.id, params.conversationId))
+    if (!result) {
+      set.status = 404
+      return { detail: { code: 'not_found', message: 'Not Found' } }
+    }
+    return { ...publicConversation(result), messages: result.messages.map(publicMessage) }
+  }, { params: conversationParams })
+
+  app.delete('/conversations/:conversationId', async ({ request, params, set }) => {
+    browserOrigin(request)
+    const user = await sessionUser(request)
+    const deleted = await services.database.transaction(async (db) => {
+      const repository = new ConversationRepository(db)
+      const owned = await repository.lockOwned(user.id, params.conversationId)
+      if (!owned) return undefined
+      if (await repository.active(owned.id)) {
+        throw new AuthError(
+          'conversation_active',
+          'This conversation has an active turn.',
+          409,
+        )
+      }
+      return repository.delete(user.id, owned.id)
+    })
+    if (!deleted) {
+      set.status = 404
+      return { detail: { code: 'not_found', message: 'Not Found' } }
+    }
+    return new Response(null, { status: 204 })
+  }, { params: conversationParams })
+
+  const constraintName = (error: unknown): string => {
+    if (!error || typeof error !== 'object') return ''
+    const candidate = error as { constraint?: unknown; cause?: unknown }
+    if (candidate.constraint) return String(candidate.constraint)
+    return constraintName(candidate.cause)
+  }
+
+  const beginTurn = async (
+    request: Request,
+    userId: string,
+    options: TurnOptions,
+    conversationId?: string,
+  ) => {
+    const message = options.message.trim()
+    if (!message) throw new AuthError('invalid_message', 'Enter a message to continue.', 400)
+    try {
+      const result = await services.database.transaction(async (db) => {
+        const repository = new ConversationRepository(db)
+        const conversation = conversationId
+          ? await repository.lockOwned(userId, conversationId)
+          : await repository.create(userId, conversationTitle(message))
+        if (!conversation) throw new AuthError('not_found', 'Not Found', 404)
+        const created = await repository.addTurn(conversation.id, message, {
+          model: options.model,
+          reasoningEffort: options.reasoning_effort,
+          speed: options.speed,
+        })
+        return { conversation: created.conversation ?? conversation, created }
+      })
+      return streamTurn(
+        new ConversationRepository(services.database.handle),
+        result.conversation,
+        userId,
+        crypto.randomUUID(),
+        { ...options, message },
+        services.ai ?? createAiClient(settings),
+        request,
+        result.created,
+      )
+    } catch (error) {
+      if (error instanceof AuthError) throw error
+      if (
+        constraintName(error) === 'uq_messages_one_streaming_assistant' ||
+        (error instanceof Error && error.message === 'conversation_active')
+      ) {
+        throw new AuthError(
+          'conversation_active',
+          'This conversation has an active turn.',
+          409,
+        )
+      }
+      throw error
+    }
+  }
+
+  app.post('/conversations/turns', async ({ request, body }) => {
+    browserOrigin(request)
+    const user = await sessionUser(request)
+    return beginTurn(request, user.id, body)
+  }, { body: turnBody })
+
+  app.post('/conversations/:conversationId/turns', async ({ request, params, body }) => {
+    browserOrigin(request)
+    const user = await sessionUser(request)
+    return beginTurn(request, user.id, body, params.conversationId)
+  }, { body: turnBody, params: conversationParams })
 
   return app
 }

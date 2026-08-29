@@ -7,8 +7,11 @@ import {
   pgTable,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   varchar,
+  text,
+  jsonb,
 } from 'drizzle-orm/pg-core'
 
 export const users = pgTable(
@@ -76,4 +79,28 @@ export const sessions = pgTable(
   ],
 )
 
-export const schema = { users, oauthIdentities, sessions }
+export const conversations = pgTable('conversations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  title: varchar('title', { length: 120 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index('ix_conversations_user_id_updated_at').on(table.userId, table.updatedAt)])
+
+export const messages = pgTable('messages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  conversationId: uuid('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  role: varchar('role', { length: 20 }).notNull(),
+  content: text('content').notNull().default(''),
+  reasoning: text('reasoning'),
+  status: varchar('status', { length: 20 }).notNull(),
+  errorMessage: text('error_message'),
+  model: varchar('model', { length: 20 }),
+  reasoningEffort: varchar('reasoning_effort', { length: 20 }),
+  speed: varchar('speed', { length: 20 }),
+  activities: jsonb('activities').notNull().default([]),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index('ix_messages_conversation_id_created_at').on(table.conversationId, table.createdAt), uniqueIndex('uq_messages_one_streaming_assistant').on(table.conversationId).where(sql`${table.role} = 'assistant' AND ${table.status} = 'streaming'`)])
+
+export const schema = { users, oauthIdentities, sessions, conversations, messages }

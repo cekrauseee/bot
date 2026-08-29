@@ -19,7 +19,7 @@ async function filesUnder(directory) {
 }
 
 test('pages consume only the public chat feature entrypoint', async () => {
-  const homePage = await readFile(`${webSource}/pages/home/page.tsx`, 'utf8')
+  const homePage = await readFile(`${webSource}/pages/chat/page.tsx`, 'utf8')
 
   assert.match(homePage, /from ['"]@\/features\/chat['"]/)
   assert.doesNotMatch(homePage, /from ['"]@\/features\/chat\//)
@@ -39,8 +39,10 @@ test('chat models and fixtures remain serializable and presentation-independent'
   }
 })
 
-test('vendor-style chat structure and names cannot return', async () => {
-  await assert.rejects(access(`${webSource}/components/agents`))
+test('registry-owned agent primitives stay isolated from page composition', async () => {
+  await access(`${webSource}/components/agents`)
+  const chatPage = await readFile(`${webSource}/pages/chat/page.tsx`, 'utf8')
+  assert.doesNotMatch(chatPage, /@\/components\/agents/)
 
   const chatFiles = await filesUnder(chatFeature)
   for (const file of chatFiles) {

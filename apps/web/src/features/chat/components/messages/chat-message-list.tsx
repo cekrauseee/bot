@@ -50,6 +50,12 @@ export function ChatMessageList({
                     key={block.id}
                     block={block}
                     onApprovalDecision={onApprovalDecision}
+                    responseStatus={message.status}
+                    sources={message.blocks.flatMap((messageBlock) =>
+                      messageBlock.type === "activity"
+                        ? messageBlock.items.flatMap((item) =>
+                            item.type === "search" ? item.results ?? [] : [])
+                        : [])}
                   />
                 ),
               )}

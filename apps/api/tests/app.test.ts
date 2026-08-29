@@ -51,6 +51,7 @@ describe('HTTP contract', () => {
       SESSION_SECRET: 'session-secret-that-is-at-least-32-characters-long',
       OTP_PEPPER: 'otp-pepper-that-is-at-least-32-characters-long',
       RATE_LIMIT_PEPPER: 'rate-limit-pepper-that-is-at-least-32-characters',
+      AI_SERVICE_TOKEN: 'ai-service-token-that-is-at-least-32-characters',
       GOOGLE_CLIENT_ID: 'client.apps.googleusercontent.com',
       GOOGLE_CLIENT_SECRET: 'google-client-secret',
       RESEND_API_KEY: 're_live_valid-key',
@@ -189,6 +190,11 @@ describe('HTTP contract', () => {
     expect(verify.requestBody.content['application/json'].schema.properties.code.pattern).toBe('^\\d{6}$')
     expect(verify.responses['200']).toBeDefined()
     expect(verify.responses['422']).toBeDefined()
+    expect(document.paths['/conversations']).toBeDefined()
+    expect(document.paths['/conversations/{conversationId}']).toBeDefined()
+    const turn = document.paths['/conversations/{conversationId}/turns'].post
+    expect(turn.requestBody.content['application/json'].schema.properties.model.enum)
+      .toEqual(['gpt-5.6-sol', 'gpt-5.6-luna'])
   })
 
   it('returns redirect and state cookie for Google start', async () => {

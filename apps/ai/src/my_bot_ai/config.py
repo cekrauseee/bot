@@ -31,6 +31,8 @@ class Settings(BaseSettings):
 
     environment: Literal["development", "test", "production"] = "development"
     service_name: Literal["ai"] = "ai"
+    openai_api_key: str | None = None
+    ai_service_token: str = "dev-ai-service-token"
 
 
 @lru_cache

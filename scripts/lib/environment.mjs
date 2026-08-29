@@ -4,7 +4,12 @@ import path from 'node:path'
 
 import { projectRoot } from './project.mjs'
 
-const LOCAL_SECRET_KEYS = ['SESSION_SECRET', 'OTP_PEPPER', 'RATE_LIMIT_PEPPER']
+const LOCAL_SECRET_KEYS = [
+  'SESSION_SECRET',
+  'OTP_PEPPER',
+  'RATE_LIMIT_PEPPER',
+  'AI_SERVICE_TOKEN',
+]
 const GOOGLE_CONFIG_KEYS = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET']
 const RESEND_CONFIG_KEYS = ['RESEND_API_KEY']
 const DEFAULT_SENDER = 'myBot <mybot@cekrause.eu>'
@@ -70,7 +75,7 @@ function createUniqueSecret(createSecret, usedSecrets) {
     }
   }
 
-  throw new Error('Unable to generate three independent local authentication secrets')
+  throw new Error('Unable to generate independent local service secrets')
 }
 
 async function copyIfMissing(source, destination) {
@@ -172,7 +177,7 @@ export function printEnvironmentSummary(result) {
   if (result.createdWebEnv) console.log('✓ Created apps/web/.env')
   if (result.generatedSecretKeys.length > 0) {
     console.log(
-      `✓ Generated ${result.generatedSecretKeys.length} independent local auth secrets`,
+      `✓ Generated ${result.generatedSecretKeys.length} independent local service secrets`,
     )
   }
 

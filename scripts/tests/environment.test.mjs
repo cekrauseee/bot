@@ -13,6 +13,7 @@ import {
 const example = `SESSION_SECRET=replace-with-session
 OTP_PEPPER=replace-with-otp
 RATE_LIMIT_PEPPER=replace-with-rate
+AI_SERVICE_TOKEN=replace-with-ai-service-token
 GOOGLE_CLIENT_ID=example.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=replace-with-google-client-secret
 RESEND_API_KEY=re_example
@@ -42,6 +43,7 @@ test('prepareEnvironment creates files and generates independent local secrets',
     values.get('SESSION_SECRET'),
     values.get('OTP_PEPPER'),
     values.get('RATE_LIMIT_PEPPER'),
+    values.get('AI_SERVICE_TOKEN'),
   ]
 
   assert.equal(result.createdEnv, true)
@@ -50,8 +52,9 @@ test('prepareEnvironment creates files and generates independent local secrets',
     'SESSION_SECRET',
     'OTP_PEPPER',
     'RATE_LIMIT_PEPPER',
+    'AI_SERVICE_TOKEN',
   ])
-  assert.equal(new Set(generatedValues).size, 3)
+  assert.equal(new Set(generatedValues).size, 4)
   assert.equal(values.get('RESEND_FROM'), 'myBot <mybot@cekrause.eu>')
   assert.equal((await stat(path.join(root, '.env'))).mode & 0o777, 0o600)
 })
@@ -78,7 +81,7 @@ test('prepareEnvironment rejects repeated or weak generated values', async (cont
 
   await assert.rejects(
     prepareEnvironment(root, { createSecret: () => 'repeated-but-long-secret'.padEnd(40, '-') }),
-    /independent local authentication secrets/,
+    /independent local service secrets/,
   )
 })
 

@@ -13,6 +13,13 @@ import type {
   ChatToolApproval,
 } from "@/features/chat/model";
 import type { ToolApprovalParameter } from "@/features/chat/components/tools/tool-approval";
+import type { SearchSource } from "@/features/chat/model";
+import { lazy, Suspense } from "react";
+
+const MarkdownResponse = lazy(async () => {
+  const module = await import("./markdown-response");
+  return { default: module.MarkdownResponse };
+});
 
 function activityItem(item: ChatActivityItem): AgentActivityItem {
   switch (item.type) {
@@ -73,19 +80,37 @@ function approvalParameter(
 export function MessageBlockRenderer({
   block,
   onApprovalDecision,
+  responseStatus = "complete",
+  sources = [],
 }: {
   block: ChatMessageBlock;
   onApprovalDecision?: (
     blockId: string,
     decision: ChatApprovalDecision,
   ) => void;
+  responseStatus?: "streaming" | "complete" | "error";
+  sources?: SearchSource[];
 }) {
   switch (block.type) {
+    case "reasoning":
+      return (
+        <AgentActivity items={[{ id: block.id, type: "text", content: block.content }]} status={block.status ?? "complete"} summary="Reasoning" defaultOpen collapseOnComplete={false} className="max-w-xl" />
+      );
     case "text":
       return (
-        <p className="max-w-xl px-1 text-sm leading-5 text-foreground/85">
-          {block.content}
-        </p>
+        <Suspense
+          fallback={
+            <p className="max-w-xl whitespace-pre-wrap px-1 text-sm leading-6 text-foreground/90">
+              {block.content}
+            </p>
+          }
+        >
+          <MarkdownResponse
+            content={block.content}
+            status={responseStatus}
+            sources={sources}
+          />
+        </Suspense>
       );
     case "activity":
       return (

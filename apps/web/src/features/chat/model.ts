@@ -28,12 +28,7 @@ export type ChatActivityItem =
       id: string;
       type: "search";
       query: string;
-      results?: Array<{
-        id: string;
-        title: string;
-        domain?: string;
-        url?: string;
-      }>;
+      results?: SearchSource[];
       moreCount?: number;
     }
   | {
@@ -73,6 +68,7 @@ export type ChatApprovalDecision = "approve" | "always-allow" | "deny";
 
 export type ChatMessageBlock =
   | { id: string; type: "text"; content: string }
+  | { id: string; type: "reasoning"; content: string; status?: "working" | "complete" }
   | {
       id: string;
       type: "activity";
@@ -99,6 +95,36 @@ export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   blocks: ChatMessageBlock[];
+  status?: "streaming" | "complete" | "error";
+};
+
+export type SearchSource = {
+  id: string;
+  title: string;
+  domain?: string;
+  url?: string;
+};
+
+export type ConversationSummary = {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ApiConversationMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  reasoning?: string | null;
+  status?: string | null;
+  error_message?: string | null;
+  model?: string | null;
+  reasoning_effort?: string | null;
+  speed?: string | null;
+  activities?: unknown;
+  created_at: string;
+  updated_at: string;
 };
 
 export type ChatModelOption = { value: string; label: string };

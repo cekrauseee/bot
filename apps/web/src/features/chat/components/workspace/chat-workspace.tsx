@@ -1,67 +1,96 @@
-import type { ButtonState } from "@/components/motion/button/stateful";
-import { AnimatedSidebarInset } from "@/components/motion/animated-sidebar";
+import type { ButtonState } from '@/components/motion/button/stateful'
+import { AnimatedSidebarInset } from '@/components/motion/animated-sidebar'
+import { Button } from '@/components/motion/button/base'
 import type {
-  ChatApprovalDecision,
-  ChatResource,
+  ChatMessage,
+  ChatModelOption,
+  ChatReasoningOption,
   ChatUserView,
-  ChatWorkspaceData,
-} from "@/features/chat/model";
-import { ChatComposer } from "../composer/chat-composer";
-import { ChatMessageList } from "../messages/chat-message-list";
-import { ChatSidebar } from "../sidebar/chat-sidebar";
-import { ChatHeader } from "./chat-header";
-import { ChatShell } from "./chat-shell";
+  ConversationSummary,
+} from '@/features/chat/model'
+import { ChatComposer } from '../composer/chat-composer'
+import { ChatMessageList } from '../messages/chat-message-list'
+import { ChatSidebar } from '../sidebar/chat-sidebar'
+import { ChatHeader } from './chat-header'
+import { ChatShell } from './chat-shell'
 
 export type ChatWorkspaceProps = {
-  data: ChatWorkspaceData;
-  resources: ChatResource[];
-  user: ChatUserView;
-  activeResourceId: string | null;
-  reasoningEffort: string;
-  fastMode: boolean;
-  signOutError: string;
-  signOutStatus: ButtonState;
-  composerLoading: boolean;
-  onResourceSelect: (id: string) => void;
-  onResourcesChange: (resources: ChatResource[]) => void;
-  onNewTask?: () => void;
-  onSearch?: () => void;
-  onRuns?: () => void;
-  onComposerSubmit?: (value: string, model?: string) => void | Promise<void>;
-  onComposerStop?: () => void;
-  onModelChange?: (model: string) => void;
-  onApprovalDecision?: (
-    blockId: string,
-    decision: ChatApprovalDecision,
-  ) => void;
-  onReasoningChange: (value: string) => void;
-  onSpeedChange: (value: boolean) => void;
-  onSignOut: () => void;
-};
+  title: string
+  messages: ChatMessage[]
+  models: ChatModelOption[]
+  reasoningOptions: ChatReasoningOption[]
+  user: ChatUserView
+  reasoningEffort: string
+  model: string
+  fastMode: boolean
+  signOutError: string
+  signOutStatus: ButtonState
+  loading: boolean
+  streaming: boolean
+  status: string
+  loadError: string
+  turnError: string
+  conversations: ConversationSummary[]
+  activeConversationId?: string
+  onRetryLoad: () => void
+  onNewTask: () => void
+  onConversationSelect: (id: string) => void
+  onConversationDelete: (id: string) => Promise<void>
+  onComposerSubmit: (value: string, model?: string) => void | Promise<void>
+  onComposerStop: () => void
+  onReasoningChange: (value: string) => void
+  onModelChange: (value: string) => void
+  onSpeedChange: (value: boolean) => void
+  onSignOut: () => void
+}
 
 export function ChatWorkspace({
-  data,
-  resources,
+  title,
+  messages,
+  models,
+  reasoningOptions,
   user,
-  activeResourceId,
   reasoningEffort,
+  model,
   fastMode,
   signOutError,
   signOutStatus,
-  composerLoading,
-  onResourceSelect,
-  onResourcesChange,
+  loading,
+  streaming,
+  status,
+  loadError,
+  turnError,
+  conversations,
+  activeConversationId,
+  onRetryLoad,
   onNewTask,
-  onSearch,
-  onRuns,
+  onConversationSelect,
+  onConversationDelete,
   onComposerSubmit,
   onComposerStop,
-  onModelChange,
-  onApprovalDecision,
   onReasoningChange,
+  onModelChange,
   onSpeedChange,
   onSignOut,
 }: ChatWorkspaceProps) {
+  const empty = !loading && !loadError && messages.length === 0
+  const composer = (
+    <ChatComposer
+      models={models}
+      reasoningOptions={reasoningOptions}
+      reasoningEffort={reasoningEffort}
+      model={model}
+      fastMode={fastMode}
+      loading={streaming}
+      centered={empty}
+      onSubmit={onComposerSubmit}
+      onStop={onComposerStop}
+      onReasoningChange={onReasoningChange}
+      onModelChange={onModelChange}
+      onSpeedChange={onSpeedChange}
+    />
+  )
+
   return (
     <main className="min-h-svh bg-background">
       <ChatShell
@@ -70,47 +99,54 @@ export function ChatWorkspace({
         className="min-h-svh rounded-none border-0"
       >
         <ChatSidebar
-          resources={resources}
-          activeResourceId={activeResourceId}
-          expandedResourceIds={data.expandedResourceIds}
           user={user}
           signOutError={signOutError}
           signOutStatus={signOutStatus}
-          onResourceSelect={onResourceSelect}
-          onResourcesChange={onResourcesChange}
+          conversations={conversations}
+          activeConversationId={activeConversationId}
           onNewTask={onNewTask}
-          onSearch={onSearch}
-          onRuns={onRuns}
+          onConversationSelect={onConversationSelect}
+          onConversationDelete={onConversationDelete}
           onSignOut={onSignOut}
         />
         <AnimatedSidebarInset className="h-svh min-h-0">
-          <ChatHeader
-            title={data.title}
-            subtitle={data.subtitle}
-            connection={data.connection}
-          />
+          <ChatHeader title={title} />
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div className="min-h-0 flex-1">
-              <ChatMessageList
-                messages={data.messages}
-                onApprovalDecision={onApprovalDecision}
-              />
-            </div>
-            <ChatComposer
-              models={data.models}
-              reasoningOptions={data.reasoningOptions}
-              reasoningEffort={reasoningEffort}
-              fastMode={fastMode}
-              loading={composerLoading}
-              onSubmit={onComposerSubmit}
-              onStop={onComposerStop}
-              onModelChange={onModelChange}
-              onReasoningChange={onReasoningChange}
-              onSpeedChange={onSpeedChange}
-            />
+            <span aria-live="polite" className="sr-only">{status}</span>
+            {loading ? (
+              <div className="grid min-h-0 flex-1 place-items-center" aria-busy="true">
+                <p role="status" className="text-sm text-muted-foreground">
+                  Loading conversation…
+                </p>
+              </div>
+            ) : loadError ? (
+              <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-5 text-center">
+                <p role="alert" className="text-sm text-destructive">{loadError}</p>
+                <Button onClick={onRetryLoad}>Try again</Button>
+              </div>
+            ) : empty ? (
+              <div className="flex min-h-0 flex-1 items-center justify-center px-4 pb-12">
+                {composer}
+              </div>
+            ) : (
+              <>
+                <div className="min-h-0 flex-1">
+                  <ChatMessageList messages={messages} />
+                </div>
+                {turnError ? (
+                  <p
+                    role="alert"
+                    className="mx-auto w-full max-w-2xl px-6 pb-2 text-sm text-destructive"
+                  >
+                    {turnError}
+                  </p>
+                ) : null}
+                {composer}
+              </>
+            )}
           </div>
         </AnimatedSidebarInset>
       </ChatShell>
     </main>
-  );
+  )
 }

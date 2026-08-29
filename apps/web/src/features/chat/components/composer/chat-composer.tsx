@@ -6,10 +6,12 @@ import type {
   ChatModelOption,
   ChatReasoningOption,
 } from "@/features/chat/model";
+import { cn } from "@/lib/utils";
 
 export type ChatComposerProps = {
   models: ChatModelOption[];
   reasoningOptions: ChatReasoningOption[];
+  model: string;
   reasoningEffort: string;
   fastMode: boolean;
   loading: boolean;
@@ -18,11 +20,13 @@ export type ChatComposerProps = {
   onModelChange?: (model: string) => void;
   onReasoningChange: (value: string) => void;
   onSpeedChange: (value: boolean) => void;
+  centered?: boolean;
 };
 
 export function ChatComposer({
   models,
   reasoningOptions,
+  model,
   reasoningEffort,
   fastMode,
   loading,
@@ -31,19 +35,31 @@ export function ChatComposer({
   onModelChange,
   onReasoningChange,
   onSpeedChange,
+  centered = false,
 }: ChatComposerProps) {
   return (
-    <div className="shrink-0 border-t border-border/60 bg-background px-4 pb-4 pt-4 sm:px-8 sm:pb-6">
+    <div className={cn(
+      "w-full bg-background px-4",
+      centered
+        ? "max-w-2xl"
+        : "shrink-0 border-t border-border/60 pb-4 pt-4 sm:px-8 sm:pb-6",
+    )}>
       <div className="mx-auto w-full max-w-2xl">
+        {centered ? (
+          <p className="mb-4 text-center text-xl font-medium tracking-tight text-foreground text-balance">
+            What are we working on?
+          </p>
+        ) : null}
         <PromptInput
           models={models.map((model) => ({
             ...model,
             icon: <OpenAIIcon aria-hidden="true" />,
           }))}
+          model={model}
           minRows={2}
           maxRows={6}
           className="rounded-2xl p-2"
-          placeholder="Ask the agent to continue…"
+          placeholder={centered ? "Ask the agent anything…" : "Ask the agent to continue…"}
           aria-label="Prompt"
           loading={loading}
           onSubmit={onSubmit}

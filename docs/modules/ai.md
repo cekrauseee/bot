@@ -2,13 +2,14 @@
 
 ## Responsibility
 
-`apps/ai` is the Python boundary for model providers, inference orchestration, and future AI-specific workloads. It does not own browser authentication, user persistence, sessions, transactional email, or product HTTP contracts.
+`apps/ai` is the Python boundary for model providers and agent execution. It does not own browser authentication, user persistence, sessions, transactional email, or product HTTP contracts.
 
 ## Structure
 
 - `src/my_bot_ai/main.py`: FastAPI application factory and exported ASGI app.
 - `src/my_bot_ai/config.py`: typed service configuration.
 - `src/my_bot_ai/features`: feature-owned routers and future model integrations.
+- `src/my_bot_ai/features/agent`: authenticated agent request schema, LangChain model factory, event normalization, and SSE framing.
 - `tests`: isolated service tests.
 
 ## Current Contract
@@ -19,8 +20,14 @@
 {"status": "ok", "service": "ai"}
 ```
 
-The service runs on port `8001` in local development. The application API does not call it yet, so it can evolve without coupling product authentication or storage to a model runtime.
+The service runs on port `8001` in local development and is called only by the application API.
+
+`POST /agent/stream` accepts only `Authorization: Bearer <AI_SERVICE_TOKEN>`. Its strict request includes the text transcript, conversation and turn identifiers, model, reasoning effort, and speed. The response protocol contains `turn.started`, reasoning and text deltas, real web-search step updates, and terminal completion or failure events.
+
+The current model factory supports `gpt-5.6-sol` and `gpt-5.6-luna`. It uses LangChain's compiled agent graph, OpenAI Responses, built-in web search, reasoning summaries, `store=false`, and standard or Fast processing. Provider-native blocks are normalized before crossing the service boundary. Raw chain-of-thought, credentials, provider errors, and prompt contents are not logged or returned.
+
+`OPENAI_API_KEY` is optional at process startup in development. A real turn returns a safe service-unavailable response until the key exists. Production startup requires both a strong `AI_SERVICE_TOKEN` and a configured `OPENAI_API_KEY`.
 
 ## Dependency Management
 
-`pyproject.toml` defines the Python 3.14 runtime and development dependencies. `uv.lock` records the resolved environment. Keep product-neutral AI libraries here; dependencies used only by the Node application API belong to `apps/api`. The minimal `package.json` is a Turbo discovery wrapper: its `dev`, `lint`, and `test` scripts delegate to `uv`; it does not duplicate Python dependencies in npm.
+`pyproject.toml` defines Python, FastAPI, LangChain, and `langchain-openai` dependencies. `uv.lock` records the resolved environment. The minimal `package.json` is a Turbo discovery wrapper: its scripts delegate to `uv`; it does not duplicate Python dependencies in npm.

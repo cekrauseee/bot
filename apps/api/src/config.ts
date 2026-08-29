@@ -37,6 +37,8 @@ export type Settings = {
   secureCookies: boolean
   webOrigin: string
   apiOrigin: string
+  aiBaseUrl: string
+  aiServiceToken: string
 }
 
 const developmentSecrets = {
@@ -129,6 +131,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
   const redisUrl = parseRedisUrl(env.REDIS_URL ?? 'redis://localhost:6380/0')
   const webOrigin = normalizeOrigin(env.WEB_BASE_URL ?? 'http://localhost:5173', 'WEB_BASE_URL')
   const apiOrigin = normalizeOrigin(env.API_BASE_URL ?? 'http://localhost:8000', 'API_BASE_URL')
+  const aiBaseUrl = normalizeOrigin(env.AI_BASE_URL ?? 'http://localhost:8001', 'AI_BASE_URL')
   const redirectValue = env.GOOGLE_REDIRECT_URI ?? `${apiOrigin}/auth/google/callback`
   const redirectUri = parseHttpUrl(redirectValue, 'GOOGLE_REDIRECT_URI', false)
   if (redirectUri.username || redirectUri.password || redirectUri.search || redirectUri.hash) {
@@ -155,6 +158,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
       throw new Error('Google OAuth credentials are required in production')
     }
     if (!env.RESEND_API_KEY || isPlaceholder(env.RESEND_API_KEY)) throw new Error('RESEND_API_KEY is required in production')
+    if (!env.AI_SERVICE_TOKEN || env.AI_SERVICE_TOKEN.length < 32 || isPlaceholder(env.AI_SERVICE_TOKEN)) throw new Error('AI_SERVICE_TOKEN is required in production')
     if (new URL(webOrigin).protocol !== 'https:' || new URL(apiOrigin).protocol !== 'https:' || redirectUri.protocol !== 'https:') {
       throw new Error('production web, API, and Google redirect URLs must use HTTPS')
     }
@@ -181,5 +185,6 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     resendApiKey: env.RESEND_API_KEY ?? '', resendFrom: env.RESEND_FROM ?? 'myBot <mybot@cekrause.eu>',
     sessionCookieName: environment === 'production' ? '__Host-mybot_session' : 'mybot_session',
     secureCookies: environment === 'production', webOrigin, apiOrigin,
+    aiBaseUrl, aiServiceToken: env.AI_SERVICE_TOKEN ?? '',
   }
 }

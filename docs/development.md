@@ -21,11 +21,11 @@ The setup script:
 - installs the npm workspace and Python AI lockfiles. A marker under `node_modules` records a fingerprint of the root npm lockfile, Turbo configuration, npm workspace manifests, and `apps/ai/pyproject.toml`, `apps/ai/uv.lock`, and `apps/ai/.python-version` only after both installs succeed; changing any of these dependency inputs invalidates readiness and reruns installation;
 - builds the `@my-bot/email` workspace package consumed by the API;
 - creates `.env` and `apps/web/.env` only when absent;
-- generates three independent local authentication secrets without printing or replacing existing values;
+- generates independent local authentication and AI service secrets without printing or replacing existing values;
 - starts the dedicated PostgreSQL and Redis services;
 - applies all database migrations.
 
-It reports the remaining Google and Resend variables without blocking local UI development. Add those provider credentials to `.env`, register `http://localhost:8000/auth/google/callback`, then run `npm run auth:check`. React Email templates are previewed locally; the API sends the component directly through Resend, which renders it in Node, so no hosted template configuration is required.
+It reports the remaining Google and Resend variables without blocking local UI development. Add those provider credentials to `.env`, register `http://localhost:8000/auth/google/callback`, then run `npm run auth:check`. Set `OPENAI_API_KEY` in the same server-only file when real agent responses are needed. The setup script never provisions or prints that provider key.
 
 ## Daily Development
 
@@ -67,11 +67,16 @@ Operational commands:
 | `npm run db:generate` | Generate a migration from the Drizzle schema |
 | `npm run db:migrate` | Apply pending database migrations |
 | `npm run db:check` | Check migration history and the required database contract |
+| `npm run db:seed` | Seed complete local conversations and Markdown examples |
 | `npm run infra:start` | Start the dedicated PostgreSQL and Redis containers |
 | `npm run infra:stop` | Stop local PostgreSQL and Redis containers without deleting data |
 | `npm run infra:reset` | Recreate local PostgreSQL and Redis containers and delete their data |
 
 `infra:reset` is destructive for local infrastructure: it removes this Compose project's containers, volumes, and orphan containers before starting PostgreSQL and Redis again. It does not remove Docker images or repository files.
+
+`npm run db:seed` is development-only and idempotent. It seeds five complete conversations across the sidebar date groups, including rich Markdown, reasoning summaries, searches, steps, tool activity, and trace examples. The data is assigned to the most recently active local user, the only existing user, or a dedicated `demo@mybot.local` user in that order. Set `MYBOT_SEED_USER_EMAIL` for an explicit account. Re-running the command refreshes the curated seeded messages without deleting later turns.
+
+Seeded UUIDs are application database identifiers only. Conversation continuations are rebuilt from ordered `role` and `content` pairs, and the AI service keeps provider storage disabled; seeded IDs are never sent as OpenAI response or message references.
 
 Project-specific commands remain available for focused development and diagnosis:
 
@@ -79,7 +84,7 @@ Project-specific commands remain available for focused development and diagnosis
 | --- | --- | --- | --- |
 | API | `api:dev` | `api:lint`, `api:typecheck`, `api:test`, `api:test:integration` | `api:build` |
 | AI | `ai:dev` | `ai:lint`, `ai:test` | — |
-| Web | `web:dev` | `web:lint`, `web:typecheck` | `web:build` |
+| Web | `web:dev` | `web:lint`, `web:typecheck`, `web:test` | `web:build` |
 | Email | `email:dev` | `email:typecheck` | `email:build` |
 | Automation | — | `scripts:lint`, `scripts:test` | — |
 
@@ -106,7 +111,7 @@ npm run verify
 
 It prepares the runtime, runs cached Turbo unit checks and builds, executes the PostgreSQL and Redis authentication integration suite without caching, and checks the Drizzle migration history and relational contract. The focused `npm run api:test:integration` command builds `@my-bot/email` first and runs every `*.integration.test.ts` file; it requires the local Compose services.
 
-Interface work should also be checked in both appearances, at narrow widths, with keyboard navigation, and with reduced motion.
+The web quality commands also include `npm run web:test` for conversation protocol and temporal-grouping tests. Interface work should be checked in both appearances, at narrow widths, with keyboard navigation, and with reduced motion.
 
 ## Conventions
 

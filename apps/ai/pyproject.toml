@@ -5,6 +5,8 @@ description = "AI service boundary for myBot."
 requires-python = ">=3.14"
 dependencies = [
     "fastapi[standard]==0.141.1",
+    "langchain==1.3.18",
+    "langchain-openai==1.6.0",
     "pydantic-settings==2.15.0",
 ]
 

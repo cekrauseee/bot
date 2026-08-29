@@ -30,6 +30,8 @@ export class Database {
     return this.db.transaction(async (transaction) => callback(transaction as Db))
   }
 
+  get handle(): Db { return this.db }
+
   async close() {
     await this.client.end()
   }
