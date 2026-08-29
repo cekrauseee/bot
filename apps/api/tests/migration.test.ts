@@ -25,7 +25,7 @@ describe('compatibility migration', () => {
 
   it('derives ordered hashes from the journal and detects pending, mismatched, and out-of-order history', async () => {
     const expected = await readMigrationManifest(new URL('../drizzle/', import.meta.url))
-    expect(expected).toHaveLength(2)
+    expect(expected).toHaveLength(3)
     expect(compareMigrationHistory(expected, [])).toMatchObject({ ok: false, reason: 'pending' })
     expect(compareMigrationHistory(expected, [{ hash: 'wrong' }])).toMatchObject({ ok: false, reason: 'mismatch' })
     expect(compareMigrationHistory(expected, [{ hash: expected[0].hash }]))
@@ -70,8 +70,12 @@ describe('compatibility migration', () => {
       { table_name: 'sessions', conname: 'pk_sessions', contype: 'p', definition: 'PRIMARY KEY (id)' },
       { table_name: 'sessions', conname: 'fk_sessions_user_id_users', contype: 'f', definition: 'FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE' },
       { table_name: 'sessions', conname: 'uq_sessions_token_hash', contype: 'u', definition: 'UNIQUE (token_hash)' },
+      { table_name: 'projects', conname: 'projects_pkey', contype: 'p', definition: 'PRIMARY KEY (id)' },
+      { table_name: 'projects', conname: 'projects_user_id_users_id_fk', contype: 'f', definition: 'FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE' },
+      { table_name: 'projects', conname: 'uq_projects_user_id_slug', contype: 'u', definition: 'UNIQUE (user_id, slug)' },
       { table_name: 'conversations', conname: 'conversations_pkey', contype: 'p', definition: 'PRIMARY KEY (id)' },
       { table_name: 'conversations', conname: 'conversations_user_id_users_id_fk', contype: 'f', definition: 'FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE' },
+      { table_name: 'conversations', conname: 'conversations_project_id_projects_id_fk', contype: 'f', definition: 'FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL' },
       { table_name: 'messages', conname: 'messages_pkey', contype: 'p', definition: 'PRIMARY KEY (id)' },
       { table_name: 'messages', conname: 'messages_conversation_id_conversations_id_fk', contype: 'f', definition: 'FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE' },
       { table_name: 'users', conname: 'users_email_not_null', contype: 'n', definition: 'NOT NULL email' },
@@ -91,7 +95,11 @@ describe('compatibility migration', () => {
       { table_name: 'sessions', indexname: 'ix_sessions_expires_at_revoked_at', indexdef: 'CREATE INDEX ix_sessions_expires_at_revoked_at ON public.sessions USING btree (expires_at, revoked_at)', is_primary: false },
       { table_name: 'sessions', indexname: 'ix_sessions_user_id', indexdef: 'CREATE INDEX ix_sessions_user_id ON public.sessions USING btree (user_id)', is_primary: false },
       { table_name: 'sessions', indexname: 'uq_sessions_token_hash', indexdef: 'CREATE UNIQUE INDEX uq_sessions_token_hash ON public.sessions USING btree (token_hash)', is_primary: false },
+      primary('projects'),
+      { table_name: 'projects', indexname: 'ix_projects_user_id_created_at', indexdef: 'CREATE INDEX ix_projects_user_id_created_at ON public.projects USING btree (user_id, created_at)', is_primary: false },
+      { table_name: 'projects', indexname: 'uq_projects_user_id_slug', indexdef: 'CREATE UNIQUE INDEX uq_projects_user_id_slug ON public.projects USING btree (user_id, slug)', is_primary: false },
       primary('conversations'),
+      { table_name: 'conversations', indexname: 'ix_conversations_project_id_updated_at', indexdef: 'CREATE INDEX ix_conversations_project_id_updated_at ON public.conversations USING btree (project_id, updated_at)', is_primary: false },
       { table_name: 'conversations', indexname: 'ix_conversations_user_id_updated_at', indexdef: 'CREATE INDEX ix_conversations_user_id_updated_at ON public.conversations USING btree (user_id, updated_at)', is_primary: false },
       primary('messages'),
       { table_name: 'messages', indexname: 'ix_messages_conversation_id_created_at', indexdef: 'CREATE INDEX ix_messages_conversation_id_created_at ON public.messages USING btree (conversation_id, created_at)', is_primary: false },

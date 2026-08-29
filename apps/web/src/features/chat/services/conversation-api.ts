@@ -5,6 +5,7 @@ import type {
   ChatMessage,
   ChatMessageBlock,
   ConversationSummary,
+  ProjectSummary,
   SearchSource,
 } from '../model'
 
@@ -70,6 +71,7 @@ type StreamEvent =
 
 export type ConversationState = {
   conversations: ConversationSummary[]
+  projects: ProjectSummary[]
   messages: ChatMessage[]
   title: string
   loading: boolean
@@ -83,6 +85,7 @@ export type ConversationState = {
 
 export const initialConversationState: ConversationState = {
   conversations: [],
+  projects: [],
   messages: [],
   title: 'New conversation',
   loading: true,
@@ -190,7 +193,11 @@ const parseError = async (response: Response, fallback: string) => {
   return fallback
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  fallback = 'Unable to load conversations.',
+): Promise<T> {
   const headers = new Headers(init?.headers)
   if (init?.body) headers.set('content-type', 'application/json')
   const response = await fetch(`${apiBase}${path}`, {
@@ -198,7 +205,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     credentials: 'include',
     headers,
   })
-  if (!response.ok) throw new Error(await parseError(response, 'Unable to load conversations.'))
+  if (!response.ok) throw new Error(await parseError(response, fallback))
   return response.status === 204 ? undefined as T : response.json() as Promise<T>
 }
 
@@ -472,8 +479,11 @@ export function useConversation(
     loadAbortRef.current = controller
     setState((current) => ({ ...current, loading: true, loadError: '', turnError: '' }))
     try {
-      const [list, detail] = await Promise.all([
+      const [list, projects, detail] = await Promise.all([
         request<{ conversations: ConversationSummary[] }>('/conversations', {
+          signal: controller.signal,
+        }),
+        request<{ projects: ProjectSummary[] }>('/projects', {
           signal: controller.signal,
         }),
         id
@@ -484,6 +494,7 @@ export function useConversation(
       setState((current) => ({
         ...current,
         conversations: list.conversations,
+        projects: projects.projects,
         messages: detail?.messages.map(mapApiMessage) ?? [],
         title: detail?.title ?? 'New conversation',
         loading: false,
@@ -620,5 +631,42 @@ export function useConversation(
     }))
   }, [])
 
-  return { ...state, send, stop, remove, reload: () => load() }
+  const createProject = useCallback(async (name: string) => {
+    const project = await request<ProjectSummary>('/projects', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }, 'Unable to create the project. Try again.')
+    setState((current) => ({
+      ...current,
+      projects: [project, ...current.projects],
+    }))
+    return project
+  }, [])
+
+  const moveToProject = useCallback(async (conversationId: string, projectId: string) => {
+    const updated = await request<ConversationSummary>(
+      `/conversations/${conversationId}/project`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ project_id: projectId }),
+      },
+      'Unable to move the conversation. Try again.',
+    )
+    setState((current) => ({
+      ...current,
+      conversations: current.conversations.map((conversation) =>
+        conversation.id === conversationId ? updated : conversation),
+    }))
+    return updated
+  }, [])
+
+  return {
+    ...state,
+    send,
+    stop,
+    remove,
+    createProject,
+    moveToProject,
+    reload: () => load(),
+  }
 }

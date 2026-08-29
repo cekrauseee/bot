@@ -7,6 +7,7 @@ import type {
   ChatModelOption,
   ChatReasoningOption,
   ChatUserView,
+  ConversationSummary,
 } from './model'
 
 const models: ChatModelOption[] = [
@@ -29,9 +30,10 @@ export type ChatFeatureProps = {
   signOutError: string
   signOutStatus: ButtonState
   conversationId?: string
+  projectSlug?: string
   onNewTask: () => void
   onConversationStarted: (id: string) => void
-  onConversationSelect: (id: string) => void
+  onConversationSelect: (id: string, projectSlug?: string, replace?: boolean) => void
   onConversationDelete: (id: string) => void
   onSignOut: () => void
 }
@@ -41,6 +43,7 @@ export function ChatFeature({
   signOutError,
   signOutStatus,
   conversationId,
+  projectSlug,
   onNewTask,
   onConversationStarted,
   onConversationSelect,
@@ -66,6 +69,24 @@ export function ChatFeature({
     }
   }, [fastMode])
 
+  useEffect(() => {
+    if (conversation.loading || !conversationId) return
+    const active = conversation.conversations.find((item) => item.id === conversationId)
+    if (!active) return
+    const actualProjectSlug = conversation.projects.find((project) =>
+      project.id === active.project_id)?.slug
+    if (actualProjectSlug !== projectSlug) {
+      onConversationSelect(conversationId, actualProjectSlug, true)
+    }
+  }, [
+    conversation.loading,
+    conversation.conversations,
+    conversation.projects,
+    conversationId,
+    projectSlug,
+    onConversationSelect,
+  ])
+
   const leaveCurrentConversation = (navigate: () => void) => {
     if (conversation.streaming) conversation.stop()
     navigate()
@@ -89,11 +110,24 @@ export function ChatFeature({
       loadError={conversation.loadError}
       turnError={conversation.turnError}
       conversations={conversation.conversations}
+      projects={conversation.projects}
       activeConversationId={conversationId}
       onRetryLoad={conversation.reload}
       onNewTask={() => leaveCurrentConversation(onNewTask)}
-      onConversationSelect={(id) =>
-        leaveCurrentConversation(() => onConversationSelect(id))}
+      onProjectCreate={conversation.createProject}
+      onConversationSelect={(selected: ConversationSummary) => {
+        const selectedProject = conversation.projects.find((project) =>
+          project.id === selected.project_id)
+        leaveCurrentConversation(() =>
+          onConversationSelect(selected.id, selectedProject?.slug))
+      }}
+      onConversationMove={async (id, projectId) => {
+        await conversation.moveToProject(id, projectId)
+        if (id === conversationId) {
+          const target = conversation.projects.find((project) => project.id === projectId)
+          onConversationSelect(id, target?.slug, true)
+        }
+      }}
       onConversationDelete={async (id) => {
         await conversation.remove(id)
         onConversationDelete(id)

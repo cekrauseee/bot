@@ -7,6 +7,7 @@ import type {
   ChatReasoningOption,
   ChatUserView,
   ConversationSummary,
+  ProjectSummary,
 } from '@/features/chat/model'
 import { ChatComposer } from '../composer/chat-composer'
 import { ChatMessageList } from '../messages/chat-message-list'
@@ -31,10 +32,13 @@ export type ChatWorkspaceProps = {
   loadError: string
   turnError: string
   conversations: ConversationSummary[]
+  projects: ProjectSummary[]
   activeConversationId?: string
   onRetryLoad: () => void
   onNewTask: () => void
-  onConversationSelect: (id: string) => void
+  onProjectCreate: (name: string) => Promise<ProjectSummary>
+  onConversationSelect: (conversation: ConversationSummary) => void
+  onConversationMove: (conversationId: string, projectId: string) => Promise<void>
   onConversationDelete: (id: string) => Promise<void>
   onComposerSubmit: (value: string, model?: string) => void | Promise<void>
   onComposerStop: () => void
@@ -61,10 +65,13 @@ export function ChatWorkspace({
   loadError,
   turnError,
   conversations,
+  projects,
   activeConversationId,
   onRetryLoad,
   onNewTask,
+  onProjectCreate,
   onConversationSelect,
+  onConversationMove,
   onConversationDelete,
   onComposerSubmit,
   onComposerStop,
@@ -103,9 +110,12 @@ export function ChatWorkspace({
           signOutError={signOutError}
           signOutStatus={signOutStatus}
           conversations={conversations}
+          projects={projects}
           activeConversationId={activeConversationId}
           onNewTask={onNewTask}
+          onProjectCreate={onProjectCreate}
           onConversationSelect={onConversationSelect}
+          onConversationMove={onConversationMove}
           onConversationDelete={onConversationDelete}
           onSignOut={onSignOut}
         />
