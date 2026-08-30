@@ -51,12 +51,21 @@ const columns: Record<string, ColumnContract[]> = {
     { name: 'revoked_at', type: 'timestamp with time zone', length: null, nullable: true, defaultValue: null },
     { name: 'last_seen_at', type: 'timestamp with time zone', length: null, nullable: true, defaultValue: null },
   ],
+  projects: [
+    { name: 'id', type: 'uuid', length: null, nullable: false, defaultValue: 'gen_random_uuid()' },
+    { name: 'user_id', type: 'uuid', length: null, nullable: false, defaultValue: null },
+    { name: 'name', type: 'character varying', length: 80, nullable: false, defaultValue: null },
+    { name: 'slug', type: 'character varying', length: 100, nullable: false, defaultValue: null },
+    { name: 'created_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
+    { name: 'updated_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
+  ],
   conversations: [
     { name: 'id', type: 'uuid', length: null, nullable: false, defaultValue: 'gen_random_uuid()' },
     { name: 'user_id', type: 'uuid', length: null, nullable: false, defaultValue: null },
     { name: 'title', type: 'character varying', length: 120, nullable: false, defaultValue: null },
     { name: 'created_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
     { name: 'updated_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
+    { name: 'project_id', type: 'uuid', length: null, nullable: true, defaultValue: null },
   ],
   messages: [
     { name: 'id', type: 'uuid', length: null, nullable: false, defaultValue: 'gen_random_uuid()' },
@@ -88,8 +97,12 @@ const constraints: ConstraintContract[] = [
   { table: 'sessions', name: '', type: 'p', definition: 'PRIMARY KEY (id)' },
   { table: 'sessions', name: 'fk_sessions_user_id_users', type: 'f', definition: 'FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE' },
   { table: 'sessions', name: 'uq_sessions_token_hash', type: 'u', definition: 'UNIQUE (token_hash)' },
+  { table: 'projects', name: '', type: 'p', definition: 'PRIMARY KEY (id)' },
+  { table: 'projects', name: 'projects_user_id_users_id_fk', type: 'f', definition: 'FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE' },
+  { table: 'projects', name: 'uq_projects_user_id_slug', type: 'u', definition: 'UNIQUE (user_id, slug)' },
   { table: 'conversations', name: '', type: 'p', definition: 'PRIMARY KEY (id)' },
   { table: 'conversations', name: 'conversations_user_id_users_id_fk', type: 'f', definition: 'FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE' },
+  { table: 'conversations', name: 'conversations_project_id_projects_id_fk', type: 'f', definition: 'FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL' },
   { table: 'messages', name: '', type: 'p', definition: 'PRIMARY KEY (id)' },
   { table: 'messages', name: 'messages_conversation_id_conversations_id_fk', type: 'f', definition: 'FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE' },
 ]
@@ -101,6 +114,9 @@ const indexes: IndexContract[] = [
   { table: 'sessions', name: 'ix_sessions_expires_at_revoked_at', definition: 'CREATE INDEX ix_sessions_expires_at_revoked_at ON public.sessions USING btree (expires_at, revoked_at)' },
   { table: 'sessions', name: 'ix_sessions_user_id', definition: 'CREATE INDEX ix_sessions_user_id ON public.sessions USING btree (user_id)' },
   { table: 'sessions', name: 'uq_sessions_token_hash', definition: 'CREATE UNIQUE INDEX uq_sessions_token_hash ON public.sessions USING btree (token_hash)' },
+  { table: 'projects', name: 'ix_projects_user_id_created_at', definition: 'CREATE INDEX ix_projects_user_id_created_at ON public.projects USING btree (user_id, created_at)' },
+  { table: 'projects', name: 'uq_projects_user_id_slug', definition: 'CREATE UNIQUE INDEX uq_projects_user_id_slug ON public.projects USING btree (user_id, slug)' },
+  { table: 'conversations', name: 'ix_conversations_project_id_updated_at', definition: 'CREATE INDEX ix_conversations_project_id_updated_at ON public.conversations USING btree (project_id, updated_at)' },
   { table: 'conversations', name: 'ix_conversations_user_id_updated_at', definition: 'CREATE INDEX ix_conversations_user_id_updated_at ON public.conversations USING btree (user_id, updated_at)' },
   { table: 'messages', name: 'ix_messages_conversation_id_created_at', definition: 'CREATE INDEX ix_messages_conversation_id_created_at ON public.messages USING btree (conversation_id, created_at)' },
   { table: 'messages', name: 'uq_messages_one_streaming_assistant', definition: "CREATE UNIQUE INDEX uq_messages_one_streaming_assistant ON public.messages USING btree (conversation_id) WHERE (((role)::text = 'assistant'::text) AND ((status)::text = 'streaming'::text))" },
@@ -149,8 +165,9 @@ const tableOrder = (table: string) => {
   if (table === 'users') return 1
   if (table === 'oauth_identities') return 2
   if (table === 'sessions') return 3
-  if (table === 'conversations') return 4
-  return 5
+  if (table === 'projects') return 4
+  if (table === 'conversations') return 5
+  return 6
 }
 const indexKey = (row: IndexContract) => `${tableOrder(row.table)}|${row.name}|${row.definition}`
 
@@ -182,7 +199,7 @@ export async function checkDatabase(databaseUrl = loadSettings().databaseUrl) {
              is_nullable, column_default, ordinal_position
       from information_schema.columns
       where table_schema = 'public'
-        and table_name in ('users', 'oauth_identities', 'sessions', 'conversations', 'messages')
+        and table_name in ('users', 'oauth_identities', 'sessions', 'projects', 'conversations', 'messages')
       order by table_name, ordinal_position
     `)).rows
     for (const [table, expected] of Object.entries(columns)) {
@@ -207,7 +224,7 @@ export async function checkDatabase(databaseUrl = loadSettings().databaseUrl) {
       join pg_namespace n on n.oid = c.connamespace
       where n.nspname = 'public' and c.contype <> 'n'
         and c.conrelid::regclass::text in (
-          'users', 'oauth_identities', 'sessions', 'conversations', 'messages'
+          'users', 'oauth_identities', 'sessions', 'projects', 'conversations', 'messages'
         )
     `)).rows
     if (!validateConstraintContract(constraintRows)) throw new Error('invalid database constraint contract')
@@ -219,13 +236,14 @@ export async function checkDatabase(databaseUrl = loadSettings().databaseUrl) {
       join pg_namespace index_namespace on index_namespace.oid = index_class.relnamespace
       join pg_index i on i.indexrelid = index_class.oid
       where p.schemaname = 'public' and index_namespace.nspname = 'public'
-        and p.tablename in ('users', 'oauth_identities', 'sessions', 'conversations', 'messages')
+        and p.tablename in ('users', 'oauth_identities', 'sessions', 'projects', 'conversations', 'messages')
       order by case p.tablename
         when 'users' then 1
         when 'oauth_identities' then 2
         when 'sessions' then 3
-        when 'conversations' then 4
-        else 5
+        when 'projects' then 4
+        when 'conversations' then 5
+        else 6
       end, p.indexname
     `)).rows
     if (!validateIndexContract(indexRows)) throw new Error('invalid database index contract')

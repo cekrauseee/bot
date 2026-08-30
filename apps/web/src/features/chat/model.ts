@@ -114,6 +114,15 @@ export type SearchSource = {
 export type ConversationSummary = {
   id: string;
   title: string;
+  project_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectSummary = {
+  id: string;
+  name: string;
+  slug: string;
   created_at: string;
   updated_at: string;
 };

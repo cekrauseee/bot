@@ -79,13 +79,29 @@ export const sessions = pgTable(
   ],
 )
 
+export const projects = pgTable('projects', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  name: varchar('name', { length: 80 }).notNull(),
+  slug: varchar('slug', { length: 100 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  unique('uq_projects_user_id_slug').on(table.userId, table.slug),
+  index('ix_projects_user_id_created_at').on(table.userId, table.createdAt),
+])
+
 export const conversations = pgTable('conversations', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   title: varchar('title', { length: 120 }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [index('ix_conversations_user_id_updated_at').on(table.userId, table.updatedAt)])
+  projectId: uuid('project_id').references(() => projects.id, { onDelete: 'set null' }),
+}, (table) => [
+  index('ix_conversations_user_id_updated_at').on(table.userId, table.updatedAt),
+  index('ix_conversations_project_id_updated_at').on(table.projectId, table.updatedAt),
+])
 
 export const messages = pgTable('messages', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -103,4 +119,4 @@ export const messages = pgTable('messages', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [index('ix_messages_conversation_id_created_at').on(table.conversationId, table.createdAt), uniqueIndex('uq_messages_one_streaming_assistant').on(table.conversationId).where(sql`${table.role} = 'assistant' AND ${table.status} = 'streaming'`)])
 
-export const schema = { users, oauthIdentities, sessions, conversations, messages }
+export const schema = { users, oauthIdentities, sessions, projects, conversations, messages }

@@ -228,6 +228,114 @@ describe('PostgreSQL conversation flow', () => {
     }
   })
 
+  it('creates user-owned projects and moves conversations between them', async () => {
+    const owner = await authenticatedUser('project-owner')
+    const other = await authenticatedUser('project-other')
+    const app = createApp(settings, {
+      database,
+      sessions: new SessionManager(settings),
+      ai,
+      otp: {} as never,
+      google: {} as never,
+    })
+
+    try {
+      expect((await app.handle(new Request('http://localhost/projects'))).status).toBe(401)
+
+      const started = await app.handle(new Request('http://localhost/conversations/turns', {
+        method: 'POST',
+        headers: {
+          cookie: owner.cookie,
+          origin: settings.webOrigin,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: 'Conversation ready to group',
+          model: 'gpt-5.6-sol',
+          reasoning_effort: 'medium',
+          speed: 'standard',
+        }),
+      }))
+      const conversation = (await parseEvents(started))[0].data.conversation as {
+        id: string
+        project_id: string | null
+      }
+      expect(conversation.project_id).toBeNull()
+
+      const create = (name: string, cookie = owner.cookie) => app.handle(new Request(
+        'http://localhost/projects',
+        {
+          method: 'POST',
+          headers: {
+            cookie,
+            origin: settings.webOrigin,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ name }),
+        },
+      ))
+      const firstResponse = await create('  Résumé   Review  ')
+      expect(firstResponse.status).toBe(201)
+      const first = await firstResponse.json() as { id: string; name: string; slug: string }
+      expect(first).toMatchObject({ name: 'Résumé Review', slug: 'resume-review' })
+      expect((await create('Résumé Review')).status).toBe(409)
+
+      const otherProjectResponse = await create('Private project', other.cookie)
+      const otherProject = await otherProjectResponse.json() as { id: string }
+
+      const assign = (projectId: string | null) => app.handle(new Request(
+        `http://localhost/conversations/${conversation.id}/project`,
+        {
+          method: 'PATCH',
+          headers: {
+            cookie: owner.cookie,
+            origin: settings.webOrigin,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ project_id: projectId }),
+        },
+      ))
+
+      expect((await assign(otherProject.id)).status).toBe(404)
+      const firstMove = await assign(first.id)
+      expect(firstMove.status).toBe(200)
+      expect(await firstMove.json()).toMatchObject({
+        id: conversation.id,
+        project_id: first.id,
+      })
+
+      const secondResponse = await create('Release planning')
+      const second = await secondResponse.json() as { id: string }
+      const secondMove = await assign(second.id)
+      expect(secondMove.status).toBe(200)
+      expect(await secondMove.json()).toMatchObject({ project_id: second.id })
+
+      const recentMove = await assign(null)
+      expect(recentMove.status).toBe(200)
+      expect(await recentMove.json()).toMatchObject({ project_id: null })
+
+      const projects = await app.handle(new Request('http://localhost/projects', {
+        headers: { cookie: owner.cookie },
+      }))
+      expect(projects.status).toBe(200)
+      expect(await projects.json()).toMatchObject({
+        projects: [
+          { id: second.id, name: 'Release planning', slug: 'release-planning' },
+          { id: first.id, name: 'Résumé Review', slug: 'resume-review' },
+        ],
+      })
+
+      const conversations = await app.handle(new Request('http://localhost/conversations', {
+        headers: { cookie: owner.cookie },
+      }))
+      expect(await conversations.json()).toMatchObject({
+        conversations: [{ id: conversation.id, project_id: null }],
+      })
+    } finally {
+      await pool.query('delete from users where id = any($1::uuid[])', [[owner.id, other.id]])
+    }
+  })
+
   it('seeds idempotently and continues without sending local IDs to the AI service', async () => {
     const owner = await authenticatedUser('seed-owner')
     const now = new Date()

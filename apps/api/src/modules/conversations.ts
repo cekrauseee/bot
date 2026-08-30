@@ -79,6 +79,7 @@ const iso = (value: Date | string) =>
 export const publicConversation = (conversation: Conversation) => ({
   id: conversation.id,
   title: conversation.title,
+  project_id: conversation.projectId,
   created_at: iso(conversation.createdAt),
   updated_at: iso(conversation.updatedAt),
 })

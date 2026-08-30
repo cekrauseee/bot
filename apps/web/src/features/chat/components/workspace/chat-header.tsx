@@ -1,13 +1,15 @@
-import { PanelLeft } from 'lucide-react'
+import { Folder, PanelLeft } from 'lucide-react'
 
 import { AnimatedSidebarTrigger } from '@/components/motion/animated-sidebar'
 import { cn } from '@/lib/utils'
 
 export function ChatHeader({
   title,
+  projectName,
   mobileOnly = false,
 }: {
   title: string
+  projectName?: string
   mobileOnly?: boolean
 }) {
   return (
@@ -26,9 +28,23 @@ export function ChatHeader({
         <PanelLeft aria-hidden="true" className="size-4" />
       </AnimatedSidebarTrigger>
       {!mobileOnly ? (
-        <h1 className="min-w-0 truncate text-sm font-medium text-foreground">
-          {title}
-        </h1>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          {projectName ? (
+            <>
+              <span
+                className="inline-flex max-w-28 shrink-0 items-center gap-1.5 text-xs text-muted-foreground sm:max-w-48"
+                title={projectName}
+              >
+                <Folder aria-hidden="true" className="size-3.5 shrink-0" strokeWidth={1.5} />
+                <span className="truncate">{projectName}</span>
+              </span>
+              <span aria-hidden="true" className="text-xs text-border">/</span>
+            </>
+          ) : null}
+          <h1 className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+            {title}
+          </h1>
+        </div>
       ) : null}
     </header>
   )

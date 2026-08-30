@@ -1,5 +1,5 @@
 import { and, eq, gt, isNull, lte, or, sql } from 'drizzle-orm'
-import { conversations, messages, oauthIdentities, sessions, users } from './schema.js'
+import { conversations, messages, oauthIdentities, projects, sessions, users } from './schema.js'
 import type { Db } from './database.js'
 
 export type User = typeof users.$inferSelect
@@ -166,6 +166,30 @@ export class AuthRepository {
 
 export type Conversation = typeof conversations.$inferSelect
 export type Message = typeof messages.$inferSelect
+export type Project = typeof projects.$inferSelect
+
+export class ProjectRepository {
+  constructor(readonly db: Db) {}
+
+  async list(userId: string) {
+    return this.db.select().from(projects).where(eq(projects.userId, userId))
+      .orderBy(sql`${projects.createdAt} DESC`, sql`${projects.id} DESC`)
+  }
+
+  async get(userId: string, id: string) {
+    const [project] = await this.db.select().from(projects)
+      .where(and(eq(projects.id, id), eq(projects.userId, userId)))
+    return project
+  }
+
+  async create(userId: string, name: string, slug: string) {
+    const [project] = await this.db.insert(projects)
+      .values({ userId, name, slug })
+      .onConflictDoNothing({ target: [projects.userId, projects.slug] })
+      .returning()
+    return project
+  }
+}
 
 export class ConversationRepository {
   constructor(readonly db: Db) {}
@@ -197,6 +221,13 @@ export class ConversationRepository {
   }
   async delete(userId: string, id: string) {
     const [row] = await this.db.delete(conversations).where(and(eq(conversations.id, id), eq(conversations.userId, userId))).returning()
+    return row
+  }
+  async assignProject(userId: string, id: string, projectId: string | null) {
+    const [row] = await this.db.update(conversations)
+      .set({ projectId })
+      .where(and(eq(conversations.id, id), eq(conversations.userId, userId)))
+      .returning()
     return row
   }
   async active(id: string) {

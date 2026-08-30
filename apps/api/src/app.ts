@@ -5,7 +5,12 @@ import { Elysia, ParseError, t, ValidationError } from 'elysia'
 import { isIP } from 'node:net'
 import type { Settings } from './config.js'
 import { AuthError, authDetail } from './errors.js'
-import { AuthRepository, ConversationRepository, normalizeEmail } from './db/repository.js'
+import {
+  AuthRepository,
+  ConversationRepository,
+  ProjectRepository,
+  normalizeEmail,
+} from './db/repository.js'
 import type { Database } from './db/database.js'
 import { GoogleOAuthService } from './modules/auth/oauth.js'
 import { OtpService } from './modules/auth/otp.js'
@@ -20,6 +25,11 @@ import {
   type AiClient,
   type TurnOptions,
 } from './modules/conversations.js'
+import {
+  normalizeProjectName,
+  projectSlug,
+  publicProject,
+} from './modules/projects.js'
 
 export type Services = {
   database: Database
@@ -382,7 +392,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     .use(cors({
       origin: settings.webOrigin,
       credentials: true,
-      methods: ['GET', 'POST', 'DELETE'],
+      methods: ['GET', 'POST', 'PATCH', 'DELETE'],
       allowedHeaders: ['Content-Type'],
     }))
     .use(openapi({ documentation: { info: { title: 'myBot API', version: '0.1.0' } } }))
@@ -521,6 +531,12 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   const conversationParams = t.Object({
     conversationId: t.String({ format: 'uuid' }),
   })
+  const projectBody = t.Object({
+    name: t.String({ minLength: 1, maxLength: 80 }),
+  })
+  const assignProjectBody = t.Object({
+    project_id: t.Union([t.String({ format: 'uuid' }), t.Null()]),
+  })
   const turnBody = t.Object({
     message: t.String({ minLength: 1, maxLength: 1_048_576 }),
     model: t.Union([t.Literal('gpt-5.6-sol'), t.Literal('gpt-5.6-luna')]),
@@ -541,6 +557,39 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       return active.user!
     })
   }
+
+  app.get('/projects', async ({ request }) => {
+    const user = await sessionUser(request)
+    return services.database.transaction(async (db) => ({
+      projects: (await new ProjectRepository(db).list(user.id)).map(publicProject),
+    }))
+  })
+
+  app.post('/projects', async ({ request, body, set }) => {
+    browserOrigin(request)
+    const user = await sessionUser(request)
+    const name = normalizeProjectName(body.name)
+    const slug = projectSlug(name)
+    if (!slug) {
+      throw new AuthError(
+        'invalid_project_name',
+        'Use at least one letter or number in the project name.',
+        400,
+      )
+    }
+    const project = await services.database.transaction((db) =>
+      new ProjectRepository(db).create(user.id, name, slug))
+    if (!project) {
+      throw new AuthError(
+        'project_exists',
+        'A project with this name already exists.',
+        409,
+      )
+    }
+    set.status = 201
+    return publicProject(project)
+  }, { body: projectBody })
+
   app.get('/conversations', async ({ request }) => {
     const user = await sessionUser(request)
     return services.database.transaction(async (db) => ({
@@ -581,6 +630,25 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     }
     return new Response(null, { status: 204 })
   }, { params: conversationParams })
+
+  app.patch('/conversations/:conversationId/project', async ({ request, params, body, set }) => {
+    browserOrigin(request)
+    const user = await sessionUser(request)
+    const conversation = await services.database.transaction(async (db) => {
+      const projectRepository = new ProjectRepository(db)
+      const conversationRepository = new ConversationRepository(db)
+      const projectId = body.project_id
+      if (projectId !== null && !await projectRepository.get(user.id, projectId)) {
+        return undefined
+      }
+      return conversationRepository.assignProject(user.id, params.conversationId, projectId)
+    })
+    if (!conversation) {
+      set.status = 404
+      return { detail: { code: 'not_found', message: 'Not Found' } }
+    }
+    return publicConversation(conversation)
+  }, { params: conversationParams, body: assignProjectBody })
 
   const constraintName = (error: unknown): string => {
     if (!error || typeof error !== 'object') return ''

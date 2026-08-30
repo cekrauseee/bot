@@ -9,7 +9,7 @@ import { ChatFeature } from '@/features/chat'
 
 export function ChatPage() {
   const navigate = useNavigate()
-  const { conversationId } = useParams()
+  const { conversationId, projectId } = useParams()
   const { error, isLoading, isUnauthorized, user } = useSession()
   const [signOutStatus, setSignOutStatus] = useState<ButtonState>('idle')
   const [signOutError, setSignOutError] = useState('')
@@ -50,6 +50,7 @@ export function ChatPage() {
     <>
       <ChatFeature
         conversationId={conversationId}
+        projectSlug={projectId}
         user={{
           displayName: [user.first_name, user.last_name].filter(Boolean).join(' ') || 'You',
           email: user.email,
@@ -61,7 +62,12 @@ export function ChatPage() {
         onNewTask={() => navigate('/')}
         onConversationStarted={(id) =>
           navigate(`/conversations/${id}`, { replace: true })}
-        onConversationSelect={(id) => navigate(`/conversations/${id}`)}
+        onConversationSelect={(id, projectSlug, replace = false) => navigate(
+          projectSlug
+            ? `/projects/${encodeURIComponent(projectSlug)}/${id}`
+            : `/conversations/${id}`,
+          { replace },
+        )}
         onConversationDelete={(id) => {
           if (id === conversationId) navigate('/', { replace: true })
         }}

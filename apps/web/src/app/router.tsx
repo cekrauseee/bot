@@ -12,6 +12,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, Component: () => null },
       { path: 'conversations/:conversationId', Component: () => null },
+      { path: 'projects/:projectId/:conversationId', Component: () => null },
     ],
   },
   {
