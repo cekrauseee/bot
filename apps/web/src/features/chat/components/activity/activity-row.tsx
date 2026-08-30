@@ -3,15 +3,16 @@ import {
   Circle,
   FileText,
   Globe2,
-  ImageIcon,
   MessageSquare,
   PencilLine,
   Search,
   Sparkles,
   SquareTerminal,
+  Waypoints,
   Wrench,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import type { ReactNode } from "react";
 import { EASE_OUT, SPRING_LAYOUT } from "@/lib/ease";
 import { cn } from "@/lib/utils";
 import type {
@@ -24,50 +25,86 @@ import type {
   AgentSearchResult,
 } from "./types";
 
-function StepRow({ item }: { item: AgentActivityStep }) {
-  const state = item.status ?? "complete";
-
+function ActivityRowLayout({
+  icon,
+  label,
+  detail,
+  trailing,
+  labelClassName,
+  detailClassName,
+}: {
+  icon: ReactNode;
+  label: ReactNode;
+  detail?: ReactNode;
+  trailing?: ReactNode;
+  labelClassName?: string;
+  detailClassName?: string;
+}) {
   return (
-    <div className="flex min-h-7 items-start gap-2.5 rounded-md px-1.5 py-1">
+    <div className="grid min-h-7 min-w-0 grid-cols-[1rem_minmax(0,1fr)] items-start gap-x-2.5 rounded-md px-1.5 py-1">
       <span
         aria-hidden="true"
-        className="mt-0.5 grid size-4 shrink-0 place-items-center text-muted-foreground/70"
+        className="mt-0.5 grid size-4 place-items-center text-muted-foreground/65"
       >
-        {state === "complete" ? (
-          <Check className="size-4" strokeWidth={1.8} />
-        ) : state === "active" ? (
-          <span className="relative grid size-3 place-items-center">
-            <motion.span
-              className="absolute inset-0 rounded-full bg-foreground/10"
-              animate={{ opacity: [0.35, 0.8, 0.35] }}
-              transition={{ duration: 1.5, repeat: Number.POSITIVE_INFINITY }}
-            />
-            <span className="size-1.5 rounded-full bg-foreground/60" />
+        {icon}
+      </span>
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-baseline gap-2 leading-5">
+          <span className={cn("min-w-0 text-foreground/85", labelClassName)}>
+            {label}
           </span>
-        ) : (
-          <Circle className="size-3" strokeWidth={1.5} />
-        )}
-      </span>
-      <span
-        className={cn(
-          "min-w-0 flex-1 leading-5",
-          state === "pending" ? "text-muted-foreground/55" : "text-foreground/90",
-        )}
-      >
-        {item.label}
-      </span>
-      {item.meta ? (
-        <span className="shrink-0 leading-5 text-muted-foreground/55">
-          {item.meta}
-        </span>
-      ) : null}
+          {trailing ? <span className="ml-auto shrink-0">{trailing}</span> : null}
+        </div>
+        {detail ? (
+          <div
+            className={cn(
+              "mt-0.5 break-words text-xs leading-4 text-muted-foreground/65",
+              detailClassName,
+            )}
+          >
+            {detail}
+          </div>
+        ) : null}
+      </div>
     </div>
+  );
+}
+
+function StepRow({ item }: { item: AgentActivityStep }) {
+  const state = item.status ?? "complete";
+  const reduce = useReducedMotion() ?? false;
+  const icon = state === "complete" ? (
+    <Check className="size-4" strokeWidth={1.8} />
+  ) : state === "active" ? (
+    <span className="relative grid size-3 place-items-center">
+      <motion.span
+        className="absolute inset-0 rounded-full bg-foreground/10"
+        animate={reduce ? { opacity: 0.55 } : { opacity: [0.35, 0.8, 0.35] }}
+        transition={
+          reduce
+            ? { duration: 0 }
+            : { duration: 1.5, repeat: Number.POSITIVE_INFINITY }
+        }
+      />
+      <span className="size-1.5 rounded-full bg-foreground/60" />
+    </span>
+  ) : (
+    <Circle className="size-3" strokeWidth={1.5} />
+  );
+
+  return (
+    <ActivityRowLayout
+      icon={icon}
+      label={item.label}
+      detail={item.meta}
+      labelClassName={state === "pending" ? "text-muted-foreground/55" : undefined}
+    />
   );
 }
 
 function TextRow({ item }: { item: AgentActivityText }) {
   return (
-    <div className="rounded-md px-1.5 py-1 leading-5 text-foreground/80">
+    <div className="rounded-md py-1 ps-8 pe-1.5 leading-5 text-foreground/75">
       {item.content}
     </div>
   );
@@ -86,14 +123,14 @@ function SearchResultRow({
       >
         {result.icon ?? <Globe2 className="size-3" strokeWidth={2} />}
       </span>
-      <span className="min-w-0 truncate font-medium text-foreground/90">
-        {result.title}
+      <span className="min-w-0">
+        <span className="block truncate text-foreground/85">{result.title}</span>
+        {result.domain ? (
+          <span className="block truncate text-xs leading-4 text-muted-foreground/55">
+            {result.domain}
+          </span>
+        ) : null}
       </span>
-      {result.domain ? (
-        <span className="min-w-0 truncate text-muted-foreground/55">
-          {result.domain}
-        </span>
-      ) : null}
     </>
   );
   const className = cn(
@@ -166,70 +203,66 @@ function SearchRow({ item }: { item: AgentActivitySearch }) {
 }
 
 function ActionIcon({ action }: { action: string }) {
-  if (action === "read") return <FileText className="size-4" />;
-  if (action === "edit" || action === "write") {
+  const normalized = action.toLowerCase();
+  if (normalized === "read") return <FileText className="size-4" />;
+  if (
+    normalized === "edit" ||
+    normalized === "write" ||
+    normalized === "updated"
+  ) {
     return <PencilLine className="size-4" />;
   }
-  if (action === "run") return <SquareTerminal className="size-4" />;
+  if (normalized === "run" || normalized === "executed") {
+    return <SquareTerminal className="size-4" />;
+  }
   return <Wrench className="size-4" />;
 }
 
 function ToolRow({ item }: { item: AgentActivityTool }) {
   const action = item.action.charAt(0).toUpperCase() + item.action.slice(1);
+  const changes =
+    typeof item.additions === "number" || typeof item.deletions === "number" ? (
+      <span className="flex items-center gap-2 font-mono text-xs tabular-nums">
+        {typeof item.additions === "number" ? (
+          <span className="text-success">+{item.additions}</span>
+        ) : null}
+        {typeof item.deletions === "number" ? (
+          <span className="text-destructive">−{item.deletions}</span>
+        ) : null}
+      </span>
+    ) : undefined;
 
   return (
-    <div className="flex min-h-8 min-w-0 items-center gap-2.5 rounded-md px-1.5 py-0.5 leading-5">
-      <span
-        aria-hidden="true"
-        className="grid size-4 shrink-0 place-items-center text-muted-foreground/70"
-      >
-        <ActionIcon action={item.action} />
-      </span>
-      <span className="shrink-0 font-medium text-foreground/90">{action}</span>
-      <span className="min-w-0 flex-1 truncate rounded-lg bg-muted/80 px-2.5 py-1 font-mono text-xs text-muted-foreground/70">
-        {item.target}
-      </span>
-      {typeof item.additions === "number" || typeof item.deletions === "number" ? (
-        <span className="flex shrink-0 items-center gap-2 font-mono tabular-nums">
-          {typeof item.additions === "number" ? (
-            <span className="text-success">+{item.additions}</span>
-          ) : null}
-          {typeof item.deletions === "number" ? (
-            <span className="text-destructive">−{item.deletions}</span>
-          ) : null}
-        </span>
-      ) : null}
-    </div>
+    <ActivityRowLayout
+      icon={<ActionIcon action={item.action} />}
+      label={action}
+      detail={item.target}
+      trailing={changes}
+      labelClassName="font-medium"
+      detailClassName="break-all font-mono"
+    />
   );
 }
 
 function TraceIcon({ kind }: { kind: AgentActivityTrace["kind"] }) {
   if (kind === "thinking") return <Sparkles className="size-4" />;
-  if (kind === "message") return <MessageSquare className="size-4" />;
+  if (kind === "message" || kind === "request") {
+    return <MessageSquare className="size-4" />;
+  }
   if (kind === "write") return <PencilLine className="size-4" />;
   if (kind === "run") return <SquareTerminal className="size-4" />;
-  if (kind === "read") return <ImageIcon className="size-4" />;
-  return <Wrench className="size-4" />;
+  if (kind === "read") return <FileText className="size-4" />;
+  return <Waypoints className="size-4" />;
 }
 
 function TraceRow({ item }: { item: AgentActivityTrace }) {
   return (
-    <div className="grid min-h-8 grid-cols-[1rem_auto_minmax(0,1fr)] items-center gap-2.5 rounded-md px-1.5 py-0.5">
-      <span
-        aria-hidden="true"
-        className="grid size-4 place-items-center text-muted-foreground/70"
-      >
-        {item.icon ?? <TraceIcon kind={item.kind} />}
-      </span>
-      <span className="font-medium text-foreground/90">{item.label}</span>
-      {item.detail ? (
-        <span className="min-w-0 truncate rounded-lg bg-muted/80 px-2.5 py-1 font-mono text-xs text-muted-foreground/70">
-          {item.detail}
-        </span>
-      ) : (
-        <span />
-      )}
-    </div>
+    <ActivityRowLayout
+      icon={item.icon ?? <TraceIcon kind={item.kind} />}
+      label={item.label}
+      detail={item.detail}
+      labelClassName="font-medium"
+    />
   );
 }
 

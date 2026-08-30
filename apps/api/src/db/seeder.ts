@@ -1,11 +1,42 @@
 import { createHash } from 'node:crypto'
-import { and, desc, eq, gt, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm'
 import { AuthRepository, normalizeEmail, type User } from './repository.js'
 import { conversations, messages, sessions, users } from './schema.js'
 import { seedConversations, seedMessageCount } from './seed-data.js'
 import type { Db } from './database.js'
 
 const DEMO_EMAIL = 'demo@mybot.local'
+
+const LEGACY_SEED_MESSAGES: Record<string, string[]> = {
+  'markdown-reference': [
+    'request-reference',
+    'reference-response',
+    'request-structured-examples',
+    'structured-response',
+  ],
+  'research-summary': [
+    'request-research',
+    'research-response',
+    'request-risk',
+    'risk-response',
+  ],
+  'release-plan': [
+    'request-release-plan',
+    'release-plan-response',
+    'request-release-gate',
+    'release-gate-response',
+  ],
+  'database-review': [
+    'request-database-review',
+    'database-review-response',
+    'request-database-order',
+    'database-order-response',
+  ],
+  'project-brief': [
+    'request-project-brief',
+    'project-brief-response',
+  ],
+}
 
 export type SeedTarget = 'active-session' | 'explicit-email' | 'only-user' | 'demo-user'
 
@@ -71,6 +102,42 @@ const timestamp = (
   return value
 }
 
+async function removeLegacySeedRows(db: Db, userId: string) {
+  const activeConversationKeys = new Set(seedConversations.map(({ key }) => key))
+
+  for (const [conversationKey, messageKeys] of Object.entries(LEGACY_SEED_MESSAGES)) {
+    const conversationId = seedUuid(
+      'mybot-seed-v1',
+      userId,
+      'conversation',
+      conversationKey,
+    )
+    const messageIds = messageKeys.map((messageKey) => seedUuid(
+      'mybot-seed-v1',
+      userId,
+      'message',
+      conversationKey,
+      messageKey,
+    ))
+
+    await db.delete(messages).where(and(
+      eq(messages.conversationId, conversationId),
+      inArray(messages.id, messageIds),
+    ))
+
+    if (!activeConversationKeys.has(conversationKey)) {
+      const [remaining] = await db
+        .select({ id: messages.id })
+        .from(messages)
+        .where(eq(messages.conversationId, conversationId))
+        .limit(1)
+      if (!remaining) {
+        await db.delete(conversations).where(eq(conversations.id, conversationId))
+      }
+    }
+  }
+}
+
 export async function seedApplication(
   db: Db,
   options: { email?: string; now?: Date } = {},
@@ -79,6 +146,8 @@ export async function seedApplication(
   if (Number.isNaN(now.getTime())) throw new Error('Seed date must be valid')
   const { user, target } = await resolveSeedUser(db, options.email)
   const conversationIds: Record<string, string> = {}
+
+  await removeLegacySeedRows(db, user.id)
 
   for (const fixture of seedConversations) {
     const conversationId = seedUuid('mybot-seed-v1', user.id, 'conversation', fixture.key)
@@ -90,17 +159,25 @@ export async function seedApplication(
       fixture.messages[0].minuteOffset,
       lastMinuteOffset,
     )
+    const lastFixtureMessage = fixture.messages.at(-1)!
     const lastMessageAt = timestamp(now, fixture.daysAgo, lastMinuteOffset, lastMinuteOffset)
+    const lastUpdatedAt = new Date(
+      lastMessageAt.getTime() + (lastFixtureMessage.durationSeconds ?? 0) * 1_000,
+    )
 
     await db.insert(conversations).values({
       id: conversationId,
       userId: user.id,
       title: fixture.title,
       createdAt: new Date(firstMessageAt.getTime() - 60_000),
-      updatedAt: lastMessageAt,
+      updatedAt: lastUpdatedAt,
     }).onConflictDoUpdate({
       target: conversations.id,
-      set: { title: fixture.title },
+      set: {
+        title: fixture.title,
+        createdAt: new Date(firstMessageAt.getTime() - 60_000),
+        updatedAt: lastUpdatedAt,
+      },
     })
 
     for (const fixtureMessage of fixture.messages) {
@@ -118,6 +195,9 @@ export async function seedApplication(
         lastMinuteOffset,
       )
       const assistant = fixtureMessage.role === 'assistant'
+      const messageUpdatedAt = new Date(
+        messageAt.getTime() + (assistant ? fixtureMessage.durationSeconds ?? 1 : 0) * 1_000,
+      )
       const values = {
         id: messageId,
         conversationId,
@@ -131,7 +211,7 @@ export async function seedApplication(
         speed: assistant ? fixtureMessage.speed ?? 'standard' : null,
         activities: fixtureMessage.activities ?? [],
         createdAt: messageAt,
-        updatedAt: messageAt,
+        updatedAt: messageUpdatedAt,
       }
       await db.insert(messages).values(values).onConflictDoUpdate({
         target: messages.id,
@@ -144,6 +224,8 @@ export async function seedApplication(
           reasoningEffort: values.reasoningEffort,
           speed: values.speed,
           activities: values.activities,
+          createdAt: values.createdAt,
+          updatedAt: values.updatedAt,
         },
       })
     }

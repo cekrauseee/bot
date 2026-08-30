@@ -1,5 +1,4 @@
 import { AgentActivity } from "@/features/chat/components/activity";
-import type { AgentActivityItem } from "@/features/chat/components/activity";
 import {
   TaskList,
   type TaskItem,
@@ -7,7 +6,6 @@ import {
 import { ToolApproval } from "@/features/chat/components/tools/tool-approval";
 import type {
   ChatApprovalDecision,
-  ChatActivityItem,
   ChatMessageBlock,
   ChatTodo,
   ChatToolApproval,
@@ -15,51 +13,12 @@ import type {
 import type { ToolApprovalParameter } from "@/features/chat/components/tools/tool-approval";
 import type { SearchSource } from "@/features/chat/model";
 import { lazy, Suspense } from "react";
+import { toAgentActivityItem } from "./response-process-model";
 
 const MarkdownResponse = lazy(async () => {
   const module = await import("./markdown-response");
   return { default: module.MarkdownResponse };
 });
-
-function activityItem(item: ChatActivityItem): AgentActivityItem {
-  switch (item.type) {
-    case "step":
-      return {
-        id: item.id,
-        type: "step",
-        label: item.label,
-        status: item.status,
-        meta: item.meta,
-      };
-    case "text":
-      return { id: item.id, type: "text", content: item.content };
-    case "search":
-      return {
-        id: item.id,
-        type: "search",
-        query: item.query,
-        moreCount: item.moreCount,
-        results: item.results?.map((result) => ({ ...result })),
-      };
-    case "tool":
-      return {
-        id: item.id,
-        type: "tool",
-        action: item.action,
-        target: item.target,
-        additions: item.additions,
-        deletions: item.deletions,
-      };
-    case "trace":
-      return {
-        id: item.id,
-        type: "trace",
-        kind: item.kind,
-        label: item.label,
-        detail: item.detail,
-      };
-  }
-}
 
 function taskItem(item: ChatTodo): TaskItem {
   return {
@@ -115,7 +74,7 @@ export function MessageBlockRenderer({
     case "activity":
       return (
         <AgentActivity
-          items={block.items.map(activityItem)}
+          items={block.items.map(toAgentActivityItem)}
           status={block.status ?? "working"}
           duration={block.duration}
           summary={block.summary}

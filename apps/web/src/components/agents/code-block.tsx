@@ -34,6 +34,8 @@ export interface CodeBlockProps {
   maxHeight?: number;
   wrap?: boolean;
   copyable?: boolean;
+  /** Hides the agent execution state for static document code blocks. */
+  showStatus?: boolean;
   onCopy?: () => void | Promise<void>;
   className?: string;
 }
@@ -48,6 +50,7 @@ export function CodeBlock({
   maxHeight = 280,
   wrap = false,
   copyable = true,
+  showStatus = true,
   onCopy,
   className,
 }: CodeBlockProps) {
@@ -121,19 +124,23 @@ export function CodeBlock({
         <span className="text-[10px] font-medium text-muted-foreground/55">
           {language}
         </span>
-        <span
-          className={cn(
-            "ml-auto inline-flex shrink-0 items-center gap-1 text-[10px] font-medium",
-            streaming ? "text-reasoning-fill" : "text-success",
-          )}
-        >
-          {streaming ? (
-            <LoaderCircle className={cn("size-3", !reduce && "animate-spin")} />
-          ) : (
-            <Check className="size-3" />
-          )}
-          {streaming ? "Writing" : "Ready"}
-        </span>
+        {showStatus ? (
+          <span
+            className={cn(
+              "ml-auto inline-flex shrink-0 items-center gap-1 text-[10px] font-medium",
+              streaming ? "text-reasoning-fill" : "text-success",
+            )}
+          >
+            {streaming ? (
+              <LoaderCircle className={cn("size-3", !reduce && "animate-spin")} />
+            ) : (
+              <Check className="size-3" />
+            )}
+            {streaming ? "Writing" : "Ready"}
+          </span>
+        ) : (
+          <span className="ml-auto" />
+        )}
         {copyable || onCopy ? (
           <motion.button
             type="button"

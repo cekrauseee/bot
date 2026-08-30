@@ -135,6 +135,18 @@ const isActivityItem = (value: unknown): value is ChatActivityItem => {
   return typeof item.id === 'string' && typeof item.type === 'string'
 }
 
+const defaultProcessBlock = (messageId: string): ChatMessageBlock => ({
+  id: `${messageId}-activity`,
+  type: 'activity',
+  status: 'complete',
+  items: [{
+    id: `${messageId}-generated-response`,
+    type: 'step',
+    label: 'Generated the response',
+    status: 'complete',
+  }],
+})
+
 const messageBlocks = (message: ApiConversationMessage): ChatMessageBlock[] => {
   const blocks: ChatMessageBlock[] = []
   const working = message.status === 'streaming'
@@ -160,22 +172,43 @@ const messageBlocks = (message: ApiConversationMessage): ChatMessageBlock[] => {
   if (message.content) {
     blocks.push({ id: `${message.id}-text`, type: 'text', content: message.content })
   }
+  if (
+    message.role === 'assistant' &&
+    message.content &&
+    !blocks.some((block) => block.type === 'activity' || block.type === 'reasoning')
+  ) {
+    blocks.unshift(defaultProcessBlock(message.id))
+  }
   if (!blocks.length && message.error_message) {
     blocks.push({ id: `${message.id}-error`, type: 'text', content: message.error_message })
   }
   return blocks
 }
 
-export const mapApiMessage = (message: ApiConversationMessage): ChatMessage => ({
-  id: message.id,
-  role: message.role,
-  blocks: messageBlocks(message),
-  status: message.status === 'streaming'
-    ? 'streaming'
-    : message.status === 'failed'
-      ? 'error'
-      : 'complete',
-})
+const persistedProcessDuration = (message: ApiConversationMessage) => {
+  const startedAt = Date.parse(message.created_at)
+  const completedAt = Date.parse(message.updated_at)
+  if (!Number.isFinite(startedAt) || !Number.isFinite(completedAt)) return undefined
+  return Math.max(1, Math.round((completedAt - startedAt) / 1000))
+}
+
+export const mapApiMessage = (message: ApiConversationMessage): ChatMessage => {
+  const blocks = messageBlocks(message)
+  const hasProcess = blocks.some(
+    (block) => block.type === 'activity' || block.type === 'reasoning',
+  )
+  return {
+    id: message.id,
+    role: message.role,
+    blocks,
+    status: message.status === 'streaming'
+      ? 'streaming'
+      : message.status === 'failed'
+        ? 'error'
+        : 'complete',
+    ...(hasProcess ? { processDuration: persistedProcessDuration(message) } : {}),
+  }
+}
 
 const parseError = async (response: Response, fallback: string) => {
   try {
@@ -300,6 +333,11 @@ const terminalBlocks = (blocks: ChatMessageBlock[]) => blocks.map((block) =>
     ? { ...block, status: 'complete' as const }
     : block)
 
+const elapsedProcessDuration = (message: ChatMessage) =>
+  message.processStartedAt
+    ? Math.max(1, Math.round((Date.now() - message.processStartedAt) / 1000))
+    : message.processDuration
+
 const updateAssistant = (
   messages: ChatMessage[],
   assistantId: string | undefined,
@@ -325,7 +363,15 @@ export const applyStreamEvent = (
     const userIndex = messages.length - 2
     const assistantIndex = messages.length - 1
     if (userIndex >= 0) messages[userIndex] = mapApiMessage(event.data.user_message)
-    if (assistantIndex >= 0) messages[assistantIndex] = mapApiMessage(event.data.assistant_message)
+    if (assistantIndex >= 0) {
+      const optimisticAssistant = messages[assistantIndex]
+      messages[assistantIndex] = {
+        ...mapApiMessage(event.data.assistant_message),
+        processLabel: 'Thinking…',
+        processStartedAt: optimisticAssistant.processStartedAt ?? Date.now(),
+        processDuration: undefined,
+      }
+    }
     return {
       ...state,
       conversations: upsertConversation(state.conversations, event.data.conversation),
@@ -346,6 +392,7 @@ export const applyStreamEvent = (
         const existing = assistant.blocks.find((block) => block.type === 'reasoning')
         return {
           ...assistant,
+          processLabel: 'Thinking…',
           blocks: existing
             ? assistant.blocks.map((block) => block.type === 'reasoning'
               ? { ...block, content: block.content + event.data.delta }
@@ -370,17 +417,28 @@ export const applyStreamEvent = (
       ...state,
       messages: updateAssistant(state.messages, state.activeAssistantId, (assistant) => {
         const existing = assistant.blocks.find((block) => block.type === 'text')
+        const completedProcess = terminalBlocks(assistant.blocks)
+        const hasProcess = completedProcess.some(
+          (block) => block.type === 'activity' || block.type === 'reasoning',
+        )
         return {
           ...assistant,
+          processLabel: undefined,
+          processDuration: elapsedProcessDuration(assistant),
           blocks: existing
             ? assistant.blocks.map((block) => block.type === 'text'
               ? { ...block, content: block.content + event.data.delta }
               : block)
-            : [...assistant.blocks, {
-                id: `${assistant.id}-text`,
-                type: 'text',
-                content: event.data.delta,
-              }],
+            : [
+                ...(hasProcess
+                  ? completedProcess
+                  : [defaultProcessBlock(assistant.id)]),
+                {
+                  id: `${assistant.id}-text`,
+                  type: 'text',
+                  content: event.data.delta,
+                },
+              ],
         }
       }),
     }
@@ -398,6 +456,9 @@ export const applyStreamEvent = (
         const existing = assistant.blocks.find((block) => block.type === 'activity')
         return {
           ...assistant,
+          processLabel: event.type === 'step.completed'
+            ? 'Thinking…'
+            : 'Searching the web…',
           blocks: existing && existing.type === 'activity'
             ? assistant.blocks.map((block) => block.type === 'activity'
               ? {
@@ -432,6 +493,9 @@ export const applyStreamEvent = (
       ...assistant,
       blocks: terminalBlocks(assistant.blocks),
       status: failed ? 'error' : 'complete',
+      processLabel: undefined,
+      processStartedAt: undefined,
+      processDuration: elapsedProcessDuration(assistant),
     })),
     streaming: false,
     status: '',
@@ -538,6 +602,8 @@ export function useConversation(
       role: 'assistant',
       blocks: [],
       status: 'streaming',
+      processLabel: 'Thinking…',
+      processStartedAt: Date.now(),
     }
     setState((current) => ({
       ...current,
@@ -581,6 +647,9 @@ export function useConversation(
           ...assistant,
           blocks: terminalBlocks(assistant.blocks),
           status: cancelled ? 'complete' : 'error',
+          processLabel: undefined,
+          processStartedAt: undefined,
+          processDuration: elapsedProcessDuration(assistant),
         })),
         streaming: false,
         status: '',
@@ -604,6 +673,9 @@ export function useConversation(
         ...assistant,
         blocks: terminalBlocks(assistant.blocks),
         status: 'complete',
+        processLabel: undefined,
+        processStartedAt: undefined,
+        processDuration: elapsedProcessDuration(assistant),
       })),
       streaming: false,
       status: '',

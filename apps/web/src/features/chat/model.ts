@@ -96,6 +96,12 @@ export type ChatMessage = {
   role: "user" | "assistant";
   blocks: ChatMessageBlock[];
   status?: "streaming" | "complete" | "error";
+  /** Ephemeral label for the operation currently producing this response. */
+  processLabel?: string;
+  /** Client timestamp used only while the pre-answer process is active. */
+  processStartedAt?: number;
+  /** Completed pre-answer processing time in seconds. */
+  processDuration?: number;
 };
 
 export type SearchSource = {
