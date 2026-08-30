@@ -228,7 +228,7 @@ export function MarkdownResponse({
       copyText={content}
       sources={sources}
       announce={false}
-      className="max-w-2xl"
+      className="max-w-3xl"
       contentClassName="text-sm leading-6 text-foreground/90 [&_.contains-task-list]:ps-0 [&_.katex-display]:my-5 [&_.katex-display]:overflow-x-auto [&_.katex-display]:py-1"
       actionsClassName="mt-1"
     >

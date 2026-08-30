@@ -53,13 +53,13 @@ export function MessageBlockRenderer({
   switch (block.type) {
     case "reasoning":
       return (
-        <AgentActivity items={[{ id: block.id, type: "text", content: block.content }]} status={block.status ?? "complete"} summary="Reasoning" defaultOpen collapseOnComplete={false} className="max-w-xl" />
+        <AgentActivity items={[{ id: block.id, type: "text", content: block.content }]} status={block.status ?? "complete"} summary="Reasoning" defaultOpen collapseOnComplete={false} className="max-w-3xl" />
       );
     case "text":
       return (
         <Suspense
           fallback={
-            <p className="max-w-xl whitespace-pre-wrap px-1 text-sm leading-6 text-foreground/90">
+            <p className="max-w-3xl whitespace-pre-wrap px-1 text-sm leading-6 text-foreground/90">
               {block.content}
             </p>
           }
@@ -80,7 +80,7 @@ export function MessageBlockRenderer({
           summary={block.summary}
           defaultOpen
           collapseOnComplete={false}
-          className="max-w-xl text-xs leading-4 text-foreground/80"
+          className="max-w-3xl text-xs leading-4 text-foreground/80"
         />
       );
     case "todo-list":

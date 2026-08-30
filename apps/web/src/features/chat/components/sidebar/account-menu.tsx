@@ -67,7 +67,11 @@ export function AccountMenu({
     .slice(0, 2)
     .toUpperCase();
   return (
-    <MorphPopover open={menuOpen} onOpenChange={setMenuOpen} className="w-full">
+    <MorphPopover
+      open={menuOpen}
+      onOpenChange={setMenuOpen}
+      className="w-full"
+    >
       <AnimatedSidebarMenu>
         <AnimatedSidebarMenuItem>
           <AnimatedSidebarMenuButton
@@ -92,7 +96,7 @@ export function AccountMenu({
         align="start"
         sideOffset={8}
         radius={12}
-        className="w-56 p-1.5"
+        className="w-[15.5rem] max-w-[calc(100vw-1rem)] p-1.5"
       >
         <div className="flex flex-col gap-1">
           <div className="px-2.5 py-2">

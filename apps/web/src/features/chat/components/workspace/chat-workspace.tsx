@@ -154,7 +154,7 @@ export function ChatWorkspace({
                 {turnError ? (
                   <p
                     role="alert"
-                    className="mx-auto w-full max-w-2xl px-6 pb-2 text-sm text-destructive"
+                    className="mx-auto w-full max-w-3xl px-6 pb-2 text-sm text-destructive"
                   >
                     {turnError}
                   </p>

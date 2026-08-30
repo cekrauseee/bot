@@ -41,16 +41,16 @@ function ActivityRowLayout({
   detailClassName?: string;
 }) {
   return (
-    <div className="grid min-h-7 min-w-0 grid-cols-[1rem_minmax(0,1fr)] items-start gap-x-2.5 rounded-md px-1.5 py-1">
+    <div className="grid min-h-6 min-w-0 max-w-full grid-cols-[1rem_minmax(0,1fr)] items-start gap-x-2 rounded-md px-1.5 py-0.5">
       <span
         aria-hidden="true"
-        className="mt-0.5 grid size-4 place-items-center text-muted-foreground/65"
+        className="mt-0.5 grid size-3.5 place-items-center text-muted-foreground/65 [&_svg]:size-3.5"
       >
         {icon}
       </span>
-      <div className="min-w-0">
-        <div className="flex min-w-0 items-baseline gap-2 leading-5">
-          <span className={cn("min-w-0 text-foreground/85", labelClassName)}>
+      <div className="min-w-0 max-w-full">
+        <div className="flex min-w-0 items-baseline gap-1.5 leading-4">
+          <span className={cn("min-w-0 flex-1 [overflow-wrap:anywhere] text-foreground/85", labelClassName)}>
             {label}
           </span>
           {trailing ? <span className="ml-auto shrink-0">{trailing}</span> : null}
@@ -58,7 +58,7 @@ function ActivityRowLayout({
         {detail ? (
           <div
             className={cn(
-              "mt-0.5 break-words text-xs leading-4 text-muted-foreground/65",
+              "mt-1 break-words [overflow-wrap:anywhere] text-[11px] leading-4 text-muted-foreground/65",
               detailClassName,
             )}
           >
@@ -104,7 +104,7 @@ function StepRow({ item }: { item: AgentActivityStep }) {
 
 function TextRow({ item }: { item: AgentActivityText }) {
   return (
-    <div className="rounded-md py-1 ps-8 pe-1.5 leading-5 text-foreground/75">
+    <div className="max-w-full rounded-md py-0.5 ps-7 pe-1.5 leading-4 [overflow-wrap:anywhere] text-foreground/75">
       {item.content}
     </div>
   );
@@ -119,7 +119,7 @@ function SearchResultRow({
     <>
       <span
         aria-hidden="true"
-        className="grid size-5 shrink-0 place-items-center text-muted-foreground"
+        className="grid size-4 shrink-0 place-items-center text-muted-foreground"
       >
         {result.icon ?? <Globe2 className="size-3" strokeWidth={2} />}
       </span>
@@ -134,7 +134,7 @@ function SearchResultRow({
     </>
   );
   const className = cn(
-    "flex min-h-7 items-center gap-2 rounded-md px-1.5 py-1 text-left outline-none transition-colors",
+    "flex min-h-6 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left outline-none transition-colors",
     result.url && "focus-visible:ring-2 focus-visible:ring-ring",
   );
 
@@ -161,9 +161,9 @@ function SearchRow({ item }: { item: AgentActivitySearch }) {
       };
 
   return (
-    <div className="flex flex-col gap-0.5">
-      <div className="flex min-h-7 items-center gap-2.5 rounded-md px-1.5 py-1 text-foreground/80">
-        <Search aria-hidden="true" className="size-4 shrink-0" strokeWidth={1.7} />
+    <div className="flex min-w-0 max-w-full flex-col gap-0.5">
+      <div className="flex min-h-6 min-w-0 max-w-full items-center gap-2 rounded-md px-1.5 py-0.5 text-foreground/80">
+        <Search aria-hidden="true" className="size-3.5 shrink-0" strokeWidth={1.7} />
         <span className="min-w-0 truncate">{item.query}</span>
       </div>
       {item.results?.length ? (
@@ -192,7 +192,7 @@ function SearchRow({ item }: { item: AgentActivitySearch }) {
             animate={visible}
             exit={exit}
             transition={transition}
-            className="px-1.5 py-1 pl-8 text-muted-foreground/55"
+            className="px-1.5 py-0.5 pl-7 text-muted-foreground/55"
           >
             +{item.moreCount} more
           </motion.div>

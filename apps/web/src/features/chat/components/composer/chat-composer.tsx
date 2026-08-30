@@ -41,10 +41,10 @@ export function ChatComposer({
     <div className={cn(
       "w-full bg-background px-4",
       centered
-        ? "max-w-2xl"
+        ? "max-w-3xl"
         : "shrink-0 border-t border-border/60 pb-4 pt-4 sm:px-8 sm:pb-6",
     )}>
-      <div className="mx-auto w-full max-w-2xl">
+      <div className="mx-auto w-full max-w-3xl">
         {centered ? (
           <p className="mb-4 text-center text-xl font-medium tracking-tight text-foreground text-balance">
             What are we working on?

@@ -70,29 +70,31 @@ export function CreateProjectDialog({ trigger, onCreate }: CreateProjectDialogPr
       <Tooltip content="Create project" side={sidebar.isMobile ? 'bottom' : 'right'}>
         <DialogTrigger render={trigger} />
       </Tooltip>
-      <DialogContent>
-        <DialogHeader>
+      <DialogContent showCloseButton={false} className="gap-3 p-5 sm:max-w-[25rem]">
+        <DialogHeader className="gap-1.5">
           <DialogTitle>Create project</DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="text-xs leading-5">
             Group related conversations in the sidebar.
           </DialogDescription>
         </DialogHeader>
-        <form className="flex flex-col gap-4" onSubmit={(event) => void submit(event)}>
+        <form className="flex flex-col gap-3" onSubmit={(event) => void submit(event)}>
           <Input
             id="project-name"
             label="Project name"
             name="projectName"
+            placeholder="e.g. Website redesign"
             value={name}
             maxLength={80}
             autoComplete="off"
             error={error}
             disabled={creating}
+            classNames={{ field: "h-10" }}
             onChange={(value) => {
               setName(value)
               if (error) setError('')
             }}
           />
-          <DialogFooter className="mt-1">
+          <DialogFooter className="-mx-5 -mb-5 mt-1 p-3">
             <Button
               variant="ghost"
               size="sm"

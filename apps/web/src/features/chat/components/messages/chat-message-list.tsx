@@ -6,6 +6,7 @@ import type { ChatApprovalDecision, ChatMessage } from "@/features/chat/model";
 import { ResponseProcess } from "./response-process";
 import { isResponseProcessBlock } from "./response-process-model";
 import { cn } from "@/lib/utils";
+import { useState } from "react";
 
 export function ChatMessageList({
   messages,
@@ -17,6 +18,9 @@ export function ChatMessageList({
     decision: ChatApprovalDecision,
   ) => void;
 }) {
+  const [initialMessageIds] = useState(
+    () => new Set(messages.map((message) => message.id)),
+  );
   const messageLabel = (role: ChatMessage["role"]) =>
     role === "user" ? "User message" : "Assistant message";
 
@@ -27,7 +31,7 @@ export function ChatMessageList({
       navigationLabel="Message navigation"
       className="h-full"
       viewportClassName="h-full min-h-0 px-4 sm:px-8"
-      contentClassName="mx-auto flex min-h-full w-full max-w-2xl flex-col justify-end gap-6 py-6 pb-6 sm:py-8"
+      contentClassName="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-end gap-6 py-6 pb-6 sm:py-8"
     >
       <MessageGroup spacing="default" className="gap-7">
         {messages.map((message) => {
@@ -78,7 +82,11 @@ export function ChatMessageList({
                   }
 
                   return message.role === "user" && block.type === "text" ? (
-                    <MessageBubble key={block.id} variant="tint" animateIn>
+                    <MessageBubble
+                      key={block.id}
+                      variant="solid"
+                      animateIn={!initialMessageIds.has(message.id)}
+                    >
                       <MessageBubbleContent className="max-w-full text-sm leading-5">
                         {block.content}
                       </MessageBubbleContent>

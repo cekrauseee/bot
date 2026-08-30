@@ -526,7 +526,7 @@ export const AnimatedSidebar = forwardRef<HTMLElement, AnimatedSidebarProps>(
         }
         style={style}
         className={cn(
-          "group/sidebar relative hidden h-auto shrink-0 md:block will-change-[width]",
+          "group/sidebar relative hidden h-auto shrink-0 overflow-hidden md:block will-change-[width]",
           "peer",
           side === "right" && "order-last",
           className,
@@ -542,8 +542,10 @@ export const AnimatedSidebar = forwardRef<HTMLElement, AnimatedSidebarProps>(
             context.reduce ? REDUCED_TRANSITION : PANEL_TRANSITION
           }
           className={cn(
-            "sticky top-0 flex h-svh w-full flex-col overflow-hidden bg-background",
-            collapsible === "offcanvas" && "w-[var(--sidebar-width)]",
+            // Keep the panel's useful layout at its expanded width while the
+            // outer rail animates. This prevents labels and controls from
+            // reflowing through intermediate widths during collapse/open.
+            "sticky top-0 flex h-svh w-[var(--sidebar-width)] min-w-[var(--sidebar-width)] flex-col overflow-hidden bg-background",
             variant === "sidebar" &&
               (side === "left" ? "border-border border-r" : "border-border border-l"),
             variant === "floating" &&
@@ -721,7 +723,7 @@ export const AnimatedSidebarContent = forwardRef<
       ref={forwardedRef}
       data-slot="sidebar-content"
       className={cn(
-        "flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden overscroll-contain px-2 py-2",
+        "flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden overscroll-none px-2 py-2",
         className,
       )}
     />

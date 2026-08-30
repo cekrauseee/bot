@@ -196,7 +196,7 @@ export function AgentActivity({
       data-state={working ? "working" : expanded ? "open" : "closed"}
       data-content={contentType}
       aria-busy={working}
-      className={cn("w-full text-xs leading-4", className)}
+      className={cn("w-full min-w-0 max-w-full overflow-x-hidden text-xs leading-4", className)}
     >
       {working ? (
         <div
@@ -239,12 +239,15 @@ export function AgentActivity({
         aria-labelledby={triggerId}
         open={expanded}
         openHeight={viewportHeight}
+        className={cn("min-w-0 max-w-full", expanded && "mt-1")}
       >
         <div
           ref={viewportRef}
           className={cn(
-            "scrollbar-hide pr-1",
-            capped && expanded && !working ? "overflow-y-auto" : "overflow-y-hidden",
+            "scrollbar-hide min-w-0 max-w-full overflow-x-hidden pr-1",
+            capped && expanded && !working
+              ? "overflow-y-auto overscroll-none"
+              : "overflow-y-hidden",
           )}
           style={{ height: viewportHeight, maskImage, WebkitMaskImage: maskImage }}
         >
@@ -254,7 +257,7 @@ export function AgentActivity({
             initial={false}
             animate={{ y: streamOffset }}
             transition={reduce ? { duration: 0 } : SPRING_LAYOUT}
-            className={cn("flex flex-col gap-0.5 py-2", contentClassName)}
+            className={cn("flex min-w-0 max-w-full flex-col gap-1 py-2", contentClassName)}
           >
             <AnimatePresence mode="popLayout">
               {items.map((item) => (

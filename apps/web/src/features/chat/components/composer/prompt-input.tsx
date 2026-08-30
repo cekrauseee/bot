@@ -281,15 +281,15 @@ export function PromptInput({
                   key={option.value}
                   value={option.value}
                   disabled={option.disabled}
-                  className="py-2"
+                  className="py-1.5"
                 >
-                  <span className="flex min-w-0 items-center gap-2">
+                  <span className="flex min-w-0 items-center gap-1.5">
                     {option.icon ? (
-                      <span className="grid size-5 shrink-0 place-items-center text-muted-foreground [&_svg]:size-4">
+                      <span className="grid size-4 shrink-0 place-items-center text-muted-foreground [&_svg]:size-3.5">
                         {option.icon}
                       </span>
                     ) : null}
-                    <span className="min-w-0 truncate text-sm text-foreground">
+                    <span className="min-w-0 truncate text-xs text-foreground">
                       {option.label}
                     </span>
                   </span>

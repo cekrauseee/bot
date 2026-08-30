@@ -43,20 +43,20 @@ export function ResponseProcess({
       defaultOpen={false}
       collapseOnComplete
       maxHeight={320}
-      className="max-w-2xl py-1 text-sm leading-5"
-      contentClassName="gap-1 pb-2"
+      className="w-full min-w-0 max-w-3xl border-b border-border/70 pt-0.5 pb-3 text-xs leading-4"
+      contentClassName="gap-1.5 pb-1.5"
       renderWorkingStatus={({ label }) => (
-        <span className="flex min-w-0 items-center gap-2 text-sm">
+        <span className="flex min-w-0 items-center gap-1.5 text-xs">
           {searching ? (
             <Search
               aria-hidden="true"
-              className="size-4 shrink-0"
+              className="size-3.5 shrink-0"
               strokeWidth={1.7}
             />
           ) : (
             <Sparkles
               aria-hidden="true"
-              className="size-4 shrink-0"
+              className="size-3.5 shrink-0"
               strokeWidth={1.7}
             />
           )}
@@ -66,10 +66,10 @@ export function ResponseProcess({
         </span>
       )}
       renderCompletedStatus={({ summary }) => (
-        <span className="flex min-w-0 items-center gap-2 text-sm font-normal">
+        <span className="flex min-w-0 items-center gap-1.5 text-xs font-normal">
           <BookOpenText
             aria-hidden="true"
-            className="size-4 shrink-0"
+            className="size-3.5 shrink-0"
             strokeWidth={1.7}
           />
           <span className="truncate">{summary}</span>

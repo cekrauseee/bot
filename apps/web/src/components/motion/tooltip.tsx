@@ -260,7 +260,15 @@ export function Tooltip({
         onPointerLeave={(event: PointerEvent) => {
           if (hover.leave(event)) hide();
         }}
-        onFocus={show}
+        onFocus={(event) => {
+          // Pointer activation (and focus restored by the activated control)
+          // can produce focus without keyboard intent. Only focus-visible
+          // focus should open the label; taps still use the explicit gesture
+          // path below, while keyboard users retain the accessible tooltip.
+          if (event.target instanceof Element && event.target.matches(":focus-visible")) {
+            show();
+          }
+        }}
         onBlur={hide}
         onPointerDown={(event: PointerEvent) => {
           if (disabled) tap.drop();

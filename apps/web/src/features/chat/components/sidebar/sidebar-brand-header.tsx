@@ -1,6 +1,6 @@
 import { Orbit, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { motion } from 'motion/react'
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 
 import { AnimatedSidebarTrigger } from '@/components/motion/animated-sidebar'
 import { useAnimatedSidebar } from '@/components/motion/animated-sidebar-context'
@@ -13,12 +13,10 @@ export function SidebarBrandHeader() {
   const [hovered, setHovered] = useState(false)
   const [focusVisible, setFocusVisible] = useState(false)
   const [suppressCollapsedHover, setSuppressCollapsedHover] = useState(false)
-  const [closing, setClosing] = useState(false)
-  const closeTimer = useRef<number | null>(null)
-  const showToggle = !closing && (
+  const showToggle = (
     expanded || focusVisible || (hovered && !suppressCollapsedHover)
   )
-  const showWordmark = expanded && !closing
+  const showWordmark = expanded
   const fadeTransition = sidebar.reduce
     ? { duration: 0 }
     : { duration: 0.14, ease: 'easeOut' as const }
@@ -32,10 +30,6 @@ export function SidebarBrandHeader() {
     : expanded
       ? { duration: 0.08, ease: 'easeOut' as const }
       : { duration: 0.14, ease: 'easeOut' as const }
-
-  useEffect(() => () => {
-    if (closeTimer.current !== null) window.clearTimeout(closeTimer.current)
-  }, [])
 
   return (
     <div
@@ -81,22 +75,9 @@ export function SidebarBrandHeader() {
           onClick={(event) => {
             if (!sidebar.isMobile && expanded) {
               event.preventDefault()
-              if (closing) return
               setHovered(false)
               setSuppressCollapsedHover(true)
-              setClosing(true)
-
-              if (sidebar.reduce) {
-                sidebar.setOpen(false)
-                setClosing(false)
-                return
-              }
-
-              closeTimer.current = window.setTimeout(() => {
-                sidebar.setOpen(false)
-                setClosing(false)
-                closeTimer.current = null
-              }, 100)
+              sidebar.setOpen(false)
             }
           }}
           onFocus={(event) => {
