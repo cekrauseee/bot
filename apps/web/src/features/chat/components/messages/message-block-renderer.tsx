@@ -4,9 +4,12 @@ import {
   type TaskItem,
 } from "@/features/chat/components/tasks/task-list";
 import { ToolApproval } from "@/features/chat/components/tools/tool-approval";
+import { AskUserQuestion } from "@/features/chat/components/questions/ask-user-question";
 import type {
   ChatApprovalDecision,
   ChatMessageBlock,
+  ChatQuestionAnswers,
+  ChatQuestionRequest,
   ChatTodo,
   ChatToolApproval,
 } from "@/features/chat/model";
@@ -39,6 +42,7 @@ function approvalParameter(
 export function MessageBlockRenderer({
   block,
   onApprovalDecision,
+  onQuestionSubmit,
   responseStatus = "complete",
   sources = [],
 }: {
@@ -46,6 +50,10 @@ export function MessageBlockRenderer({
   onApprovalDecision?: (
     blockId: string,
     decision: ChatApprovalDecision,
+  ) => void;
+  onQuestionSubmit?: (
+    request: ChatQuestionRequest,
+    answers: ChatQuestionAnswers,
   ) => void;
   responseStatus?: "streaming" | "complete" | "error";
   sources?: SearchSource[];
@@ -112,6 +120,15 @@ export function MessageBlockRenderer({
               : undefined
           }
           defaultOpen={block.defaultOpen}
+        />
+      );
+    case "question":
+      return (
+        <AskUserQuestion
+          request={block.request}
+          onSubmit={onQuestionSubmit
+            ? (answers) => onQuestionSubmit(block.request, answers)
+            : undefined}
         />
       );
   }

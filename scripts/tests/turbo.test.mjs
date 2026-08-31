@@ -22,6 +22,7 @@ test('npm discovers applications and packages through the workspace globs', asyn
   assert.match(stdout, /@my-bot\/ai apps\/ai/)
   assert.match(stdout, /@my-bot\/api apps\/api/)
   assert.match(stdout, /@my-bot\/email packages\/email/)
+  assert.match(stdout, /@my-bot\/runtime apps\/runtime/)
   assert.match(stdout, /@my-bot\/web apps\/web/)
 })
 
@@ -33,6 +34,10 @@ test('Turbo keeps internal builds topological and external tasks uncached', asyn
   assert.equal(turbo.tasks['db:seed'].cache, false)
   assert.ok(turbo.tasks.test.env.includes('REDIS_URL'))
   assert.ok(turbo.tasks.test.env.includes('DATABASE_URL'))
+  assert.ok(turbo.tasks.dev.env.includes('RUNTIME_BASE_URL'))
+  assert.ok(turbo.tasks.dev.env.includes('RUNTIME_PORT'))
+  assert.ok(turbo.tasks.dev.passThroughEnv.includes('RUNTIME_SERVICE_TOKEN'))
+  assert.ok(turbo.tasks.dev.passThroughEnv.includes('VERCEL_OIDC_TOKEN'))
   assert.ok(turbo.tasks['db:check'].passThroughEnv.includes('ENVIRONMENT'))
   assert.ok(turbo.tasks['db:check'].passThroughEnv.includes('DATABASE_URL'))
   assert.ok(turbo.tasks['db:check'].passThroughEnv.includes('NEON_WS_PROXY'))
@@ -52,6 +57,20 @@ test('the AI package is a uv-only Turbo discovery wrapper', async () => {
   assert.ok(!Object.values(ai.scripts).some((command) => command.includes('--env-file')))
   assert.deepEqual(ai.dependencies, undefined)
   assert.deepEqual(ai.devDependencies, undefined)
+})
+
+test('the runtime package exposes the complete service lifecycle', async () => {
+  const runtime = await jsonFile('apps/runtime/package.json')
+  assert.deepEqual(Object.keys(runtime.scripts), [
+    'dev',
+    'build',
+    'start',
+    'typecheck',
+    'lint',
+    'test',
+  ])
+  assert.match(runtime.scripts.dev, /--env-file-if-exists=\.\.\/\.\.\/\.env/)
+  assert.match(runtime.scripts.start, /--env-file-if-exists=\.\.\/\.\.\/\.env/)
 })
 
 test('development uses the Turbo TUI after the shared preflight', async () => {

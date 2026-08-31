@@ -49,6 +49,41 @@ export type ChatTodo = {
   detail?: string;
 };
 
+export type ChatQuestionOption = {
+  value: string;
+  label: string;
+  description?: string;
+  disabled?: boolean;
+};
+
+export type ChatQuestion = {
+  id: string;
+  title: string;
+  description?: string;
+  options?: ChatQuestionOption[];
+  multiple?: boolean;
+  allowCustom?: boolean;
+  customPlaceholder?: string;
+};
+
+export type ChatQuestionAnswer = {
+  selected: string[];
+  custom?: string;
+};
+
+export type ChatQuestionAnswers = Record<string, ChatQuestionAnswer>;
+
+export type ChatQuestionRequest = {
+  id: string;
+  runId: string;
+  title: string;
+  description?: string;
+  questions: ChatQuestion[];
+  status: "pending" | "submitting" | "answered" | "cancelled" | "error";
+  answers?: ChatQuestionAnswers;
+  result?: string;
+};
+
 export type ChatToolApproval = {
   tool: string;
   title: string;
@@ -89,6 +124,11 @@ export type ChatMessageBlock =
       type: "tool-approval";
       approval: ChatToolApproval;
       defaultOpen?: boolean;
+    }
+  | {
+      id: string;
+      type: "question";
+      request: ChatQuestionRequest;
     };
 
 export type ChatMessage = {
@@ -142,8 +182,50 @@ export type ApiConversationMessage = {
   updated_at: string;
 };
 
-export type ChatModelOption = { value: string; label: string };
-export type ChatReasoningOption = { value: string; label: string };
+export type ChatModelProvider = "openai" | "xai";
+export type ChatReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh" | "max";
+export type ChatProcessingMode = "standard" | "fast";
+export type ChatReasoningOption = { value: ChatReasoningEffort; label: string };
+export type ChatModelOption = {
+  value: string;
+  label: string;
+  provider: ChatModelProvider;
+  reasoningOptions: ChatReasoningOption[];
+  defaultReasoningEffort: ChatReasoningEffort;
+  processingModes: ChatProcessingMode[];
+  defaultProcessingMode: ChatProcessingMode;
+};
+
+export type ChatBrowserStatus =
+  | "opening"
+  | "active"
+  | "waiting-for-user"
+  | "user-control"
+  | "agent-control"
+  | "closed"
+  | "error";
+
+export type ChatBrowserCursor = {
+  x: number;
+  y: number;
+  label?: string;
+};
+
+export type ChatBrowserSession = {
+  id: string;
+  runId: string;
+  status: ChatBrowserStatus;
+  title?: string;
+  url?: string;
+  message?: string;
+  cursor?: ChatBrowserCursor;
+};
+
+/** Transient visual projection. It is intentionally not a message block. */
+export type ChatBrowserFrame = {
+  src: string;
+  alt?: string;
+};
 
 export type ChatWorkspaceData = {
   title: string;
@@ -157,5 +239,4 @@ export type ChatWorkspaceData = {
   activeResourceId: string | null;
   messages: ChatMessage[];
   models: ChatModelOption[];
-  reasoningOptions: ChatReasoningOption[];
 };

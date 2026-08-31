@@ -11,18 +11,21 @@ The repository contains independently managed product services under `apps/` and
 | `apps/web` | Browser application, routing, theming, and product interface |
 | `apps/api` | Node.js HTTP API, authentication, and server-side product capabilities |
 | `apps/ai` | Python service boundary for model providers and AI workloads |
+| `apps/runtime` | Private execution service for sandboxed files, processes, and browsers |
 | `packages/email` | React Email components, local previews, and the consumable email package |
-| PostgreSQL | Users, OAuth identities, sessions, conversations, and messages |
-| Redis | Short-lived OTP challenges, OAuth state, and rate limits |
+| PostgreSQL | Product data, durable agent runs and events, and LangGraph checkpoints |
+| Redis | Authentication state plus cross-instance event and frame fanout |
 | Root workspace | Shared commands, repository rules, and canonical documentation |
 
 The web application uses React Router Data Mode. The router is created outside the React tree and lazy-loads the public login page and one persistent chat layout for `/` and `/conversations/:conversationId`. Pages compose authentication and the public chat feature. Hooks own interaction and session state; feature services own HTTP and SSE parsing.
 
-The chat feature is application-owned under `apps/web/src/features/chat`. Its public entrypoint re-exports the feature container. The conversation service loads durable data, parses the versioned SSE protocol, reconciles optimistic message IDs, and owns cancellation. Presentational components compose the existing beUI shell, sidebar, message scroller, activity, streaming response, citations, code block, and composer. Fixture and future approval, plan, task, and tool components remain available but are not part of the current conversation flow.
+The chat feature is application-owned under `apps/web/src/features/chat`. Its conversation service hydrates active runs, consumes durable SSE and WebSocket events, resumes after navigation, and projects plans, questions, tool activity, and run-scoped browser previews. Presentational components compose the existing beUI shell, sidebar, message scroller, activity, streaming response, citations, code block, composer, and approval-card question surface.
 
-The application API uses an Elysia application factory with the official Node.js adapter, typed runtime schemas, and OpenAPI documentation. It is the only browser-facing backend. It authenticates users, owns conversations and messages in PostgreSQL, and proxies the AI stream while persisting partial and final output. Drizzle defines the relational schema and versioned migrations.
+The application API uses an Elysia application factory with the official Node.js adapter, typed runtime schemas, and OpenAPI documentation. It is the only browser-facing backend. It authenticates users and owns conversations, messages, one global agent workspace per user, agent runs, and normalized event history. PostgreSQL is the replay source of truth. Redis only distributes committed events and transient browser frames between API instances.
 
-The AI service uses a FastAPI application factory in `my_bot_ai.main`. It accepts only bearer-authenticated service requests from the application API. LangChain owns the agent graph, OpenAI Responses provides reasoning and built-in web search, and the service emits provider-neutral SSE events. It does not own browser authentication or persistence.
+The AI service uses a FastAPI application factory in `my_bot_ai.main`. It accepts only bearer-authenticated service requests from the application API. LangChain and LangGraph own the durable agent graph and child-agent delegation. OpenAI and xAI model adapters remain provider-specific behind one normalized event contract. PostgreSQL checkpoints are authoritative for recovery; the API event log is their browser-facing projection.
+
+The runtime maps each application workspace to a named persistent Vercel Sandbox. Files and shell state are global to that user workspace. Browsers are scoped to individual runs. A root-owned operation journal prevents duplicate external effects across process retries, while model-controlled commands run as an unprivileged Linux user.
 
 ## Data Flow
 
@@ -39,14 +42,15 @@ Google login uses Authorization Code, PKCE, state, nonce, and the `openid email 
 
 The API runs on its own subdomain and does not add an `/api` path prefix. Credentialed CORS accepts only the configured web origin. State-changing browser requests validate that origin.
 
-The conversation flow is:
+The durable agent flow is:
 
 1. The browser sends a new message to Elysia with its session cookie and selected model settings.
-2. Elysia verifies ownership and stores the user message plus a streaming assistant placeholder.
-3. Elysia calls FastAPI with the local text transcript and an internal bearer token.
-4. FastAPI runs the LangChain agent with `store=false` and streams normalized reasoning, text, and real web-search events.
-5. Elysia validates and retransmits the SSE sequence while accumulating safe summaries, sources, and response text.
-6. Completion, failure, or cancellation updates the assistant message before the terminal browser event is emitted.
+2. Elysia atomically stores the user message, assistant placeholder, run, workspace reference, and initial event.
+3. A leased executor calls FastAPI with the transcript and stable run ID. Other API instances may reclaim an expired lease.
+4. FastAPI inspects the LangGraph checkpoint before invoking. It submits the transcript only when no checkpoint exists, resumes a matching interrupt once, or continues runnable checkpoint state with `None`.
+5. LangChain streams provider-neutral text, safe reasoning summaries, plans, questions, tools, child agents, browser projections, and transient frames. Runtime tool calls carry deterministic operation IDs.
+6. Elysia fences writes with the execution token, stores each durable event, and updates the assistant and active-run projection in the same transaction. Checkpoint reconciliation replaces stale partial text before continuation.
+7. SSE serves the initiating request. WebSocket reconnects use a decimal cursor, bounded PostgreSQL replay, Redis live fanout, and explicit resynchronization through the active-run projection.
 
 ## Invariants
 
@@ -58,8 +62,12 @@ The conversation flow is:
 - API behavior is exposed through routers and covered by tests.
 - Product routes, authentication, and relational data remain owned by `apps/api`.
 - Model-provider integrations and AI execution remain owned by `apps/ai`.
+- Filesystem, shell, and browser execution remain owned by `apps/runtime`.
 - The browser never receives OpenAI credentials or provider-native event payloads.
-- OpenAI response storage stays disabled; PostgreSQL is the conversation source of truth.
+- Provider response storage stays disabled; PostgreSQL is the product and replay source of truth.
+- LangGraph checkpoints decide whether execution may advance; API rows never replay a transcript into an existing graph.
+- Runtime operation IDs prevent automatic repetition of ambiguous external effects.
+- Browser frames are transient and never enter PostgreSQL or the operation journal.
 - Authentication secrets and raw OTP or session tokens never enter persistent storage or logs.
 - Account lookup behavior does not reveal whether an email already exists.
 - The repository contains no Harness metadata or session state.

@@ -7,16 +7,22 @@ import {
   useCallback,
   useContext,
   useId,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import { SPRING_LAYOUT, SPRING_PRESS } from "@/lib/ease";
 import { cn } from "@/lib/utils";
+import { radioTargetIndex } from "./radio-keyboard";
 
 type RadioCtx = {
   value: string;
   setValue: (value: string) => void;
+  tabStopValue: string;
+  setTabStopValue: (value: string) => void;
   layoutId: string;
 };
 
@@ -49,9 +55,11 @@ export function RadioGroup({
 }: RadioGroupProps) {
   const [internal, setInternal] = useState(defaultValue);
   const layoutId = useId();
+  const groupRef = useRef<HTMLDivElement>(null);
   const reduce = useReducedMotion();
   const controlled = value !== undefined;
   const current = controlled ? value : internal;
+  const [tabStopValue, setTabStopValue] = useState(current);
   const setValue = useCallback(
     (next: string) => {
       if (!controlled) setInternal(next);
@@ -60,15 +68,43 @@ export function RadioGroup({
     [controlled, onValueChange],
   );
   const contextValue = useMemo(
-    () => ({ value: current, setValue, layoutId }),
-    [current, layoutId, setValue],
+    () => ({ value: current, setValue, tabStopValue, setTabStopValue, layoutId }),
+    [current, layoutId, setValue, tabStopValue],
   );
+
+  useLayoutEffect(() => {
+    const group = groupRef.current;
+    if (!group) return;
+    const items = enabledRadioItems(group);
+    const selected = items.find((item) => item.getAttribute("aria-checked") === "true");
+    const nextTabStop = selected?.dataset.radioValue ?? items[0]?.dataset.radioValue ?? "";
+    setTabStopValue((previous) => previous === nextTabStop ? previous : nextTabStop);
+  }, [children, current]);
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const items = enabledRadioItems(event.currentTarget);
+    const origin = event.target as HTMLElement;
+    const currentItem = origin.closest<HTMLButtonElement>('button[role="radio"]');
+    const currentIndex = currentItem ? items.indexOf(currentItem) : -1;
+    const targetIndex = radioTargetIndex(event.key, currentIndex, items.length);
+    if (targetIndex === undefined) return;
+
+    event.preventDefault();
+    const target = items[targetIndex];
+    const targetValue = target.dataset.radioValue;
+    if (targetValue) setTabStopValue(targetValue);
+    target.focus();
+    target.click();
+  };
 
   return (
     <MotionConfig transition={reduce ? { duration: 0 } : SPRING_LAYOUT}>
       <RadioCtx.Provider value={contextValue}>
         <div
+          ref={groupRef}
           role="radiogroup"
+          aria-orientation={orientation}
+          onKeyDown={handleKeyDown}
           className={cn(
             "flex gap-3",
             orientation === "vertical" ? "flex-col" : "flex-row flex-wrap",
@@ -88,7 +124,13 @@ export interface RadioGroupItemProps {
   disabled?: boolean;
   className?: string;
   id?: string;
+  "aria-describedby"?: string;
 }
+
+const enabledRadioItems = (group: HTMLElement) =>
+  Array.from(
+    group.querySelectorAll<HTMLButtonElement>('button[role="radio"]:not(:disabled)'),
+  ).filter((item) => item.closest('[role="radiogroup"]') === group);
 
 export function RadioGroupItem({
   value,
@@ -96,8 +138,15 @@ export function RadioGroupItem({
   disabled,
   className,
   id: idProp,
+  "aria-describedby": ariaDescribedBy,
 }: RadioGroupItemProps) {
-  const { value: groupValue, setValue, layoutId } = useRadioGroup();
+  const {
+    value: groupValue,
+    setValue,
+    tabStopValue,
+    setTabStopValue,
+    layoutId,
+  } = useRadioGroup();
   const autoId = useId();
   const id = idProp ?? autoId;
   const reduce = useReducedMotion();
@@ -117,8 +166,15 @@ export function RadioGroupItem({
         type="button"
         role="radio"
         aria-checked={selected}
+        aria-describedby={ariaDescribedBy}
+        tabIndex={disabled ? -1 : tabStopValue === value ? 0 : -1}
+        data-radio-value={value}
         disabled={disabled}
-        onClick={() => !disabled && setValue(value)}
+        onClick={() => {
+          if (disabled) return;
+          setTabStopValue(value);
+          setValue(value);
+        }}
         whileTap={reduce || disabled ? undefined : { scale: 0.92 }}
         transition={SPRING_PRESS}
         data-state={selected ? "checked" : "unchecked"}

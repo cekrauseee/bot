@@ -9,6 +9,7 @@ import {
 } from "motion/react";
 import {
   createContext,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   useCallback,
   useContext,
@@ -118,13 +119,18 @@ export function Select({
     [onOpenChange, openControlled],
   );
 
+  const focusTrigger = useCallback(() => {
+    rootRef.current?.querySelector<HTMLButtonElement>('button[aria-haspopup="listbox"]')?.focus();
+  }, []);
+
   const select = useCallback(
     (next: string) => {
       if (!controlled) setInternal(next);
       onValueChange?.(next);
       setOpen(false);
+      focusTrigger();
     },
-    [controlled, onValueChange, setOpen],
+    [controlled, focusTrigger, onValueChange, setOpen],
   );
 
   const register = useCallback((v: string, label: string) => {
@@ -142,7 +148,17 @@ export function Select({
   // close on outside pointer / escape
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const frame = requestAnimationFrame(() => {
+      const options = rootRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)');
+      const selected = Array.from(options ?? []).find((option) => option.getAttribute('aria-selected') === 'true');
+      (selected ?? options?.[0])?.focus();
+    });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      setOpen(false);
+      focusTrigger();
+    };
     const onPointer = (e: PointerEvent) => {
       if (rootRef.current && !rootRef.current.contains(e.target as Node))
         setOpen(false);
@@ -150,10 +166,29 @@ export function Select({
     window.addEventListener("keydown", onKey);
     window.addEventListener("pointerdown", onPointer);
     return () => {
+      cancelAnimationFrame(frame);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("pointerdown", onPointer);
     };
-  }, [open, setOpen]);
+  }, [focusTrigger, open, setOpen]);
+
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (disabled) return;
+    if (event.key === 'Tab' && open) {
+      setOpen(false);
+      focusTrigger();
+      return;
+    }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    if (!open) { setOpen(true); return; }
+    const options = Array.from(rootRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)') ?? []);
+    if (!options.length) return;
+    const currentIndex = options.indexOf(document.activeElement as HTMLButtonElement);
+    const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1
+      : (currentIndex + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;
+    options[nextIndex]?.focus();
+  };
 
   const ctx = useMemo<SelectContextValue>(
     () => ({
@@ -188,7 +223,7 @@ export function Select({
 
   return (
     <SelectContext.Provider value={ctx}>
-      <div ref={rootRef} className={cn("relative", className)}>
+      <div ref={rootRef} onKeyDown={onKeyDown} className={cn("relative", className)}>
         {children}
       </div>
     </SelectContext.Provider>
@@ -417,10 +452,11 @@ export function SelectItem({
   }, [register, unregister, value, label]);
 
   return (
-    <motion.li variants={ctx.reduce ? undefined : ITEM_VARIANTS}>
+    <motion.div role="presentation" variants={ctx.reduce ? undefined : ITEM_VARIANTS}>
       <button
         type="button"
         role="option"
+        tabIndex={-1}
         aria-selected={selected}
         disabled={disabled}
         onClick={() => ctx.select(value)}
@@ -436,6 +472,6 @@ export function SelectItem({
         {children}
         {selected ? <Check className="h-3.5 w-3.5 shrink-0" /> : null}
       </button>
-    </motion.li>
+    </motion.div>
   );
 }

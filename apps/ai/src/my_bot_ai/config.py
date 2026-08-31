@@ -31,8 +31,12 @@ class Settings(BaseSettings):
 
     environment: Literal["development", "test", "production"] = "development"
     service_name: Literal["ai"] = "ai"
+    database_url: str | None = None
     openai_api_key: str | None = None
+    xai_api_key: str | None = None
     ai_service_token: str = "dev-ai-service-token"
+    runtime_base_url: str = "http://localhost:8002"
+    runtime_service_token: str | None = None
 
 
 @lru_cache

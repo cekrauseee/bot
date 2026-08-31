@@ -11,17 +11,18 @@ import {
 import { RangeSlider } from '@/components/motion/range-slider'
 import { Button } from '@/components/motion/button'
 import { Tooltip } from '@/components/motion/tooltip'
+import type { ChatReasoningEffort } from '@/features/chat/model'
 
 export type ReasoningEffortOption = {
-  value: string
+  value: ChatReasoningEffort
   label: string
 }
 
 type ReasoningEffortProps = {
   options: ReasoningEffortOption[]
-  value?: string
-  defaultValue?: string
-  onValueChange?: (value: string) => void
+  value?: ChatReasoningEffort
+  defaultValue?: ChatReasoningEffort
+  onValueChange?: (value: ChatReasoningEffort) => void
   trailingAction?: ReactNode
   className?: string
 }

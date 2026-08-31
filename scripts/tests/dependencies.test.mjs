@@ -16,6 +16,7 @@ async function fixture(context) {
   await mkdir(path.join(root, 'node_modules'), { recursive: true })
   await mkdir(path.join(root, 'apps/api'), { recursive: true })
   await mkdir(path.join(root, 'apps/web'), { recursive: true })
+  await mkdir(path.join(root, 'apps/runtime'), { recursive: true })
   await mkdir(path.join(root, 'packages/email'), { recursive: true })
   await mkdir(path.join(root, 'apps/ai/.venv'), { recursive: true })
   await writeFile(
@@ -28,7 +29,7 @@ async function fixture(context) {
   await writeFile(path.join(root, 'apps/ai/uv.lock'), 'version = 1\n')
   await writeFile(path.join(root, 'apps/ai/.python-version'), '3.14\n')
   await writeFile(path.join(root, 'apps/ai/package.json'), '{"name":"ai-wrapper"}')
-  for (const workspace of ['apps/api', 'apps/web', 'packages/email']) {
+  for (const workspace of ['apps/api', 'apps/runtime', 'apps/web', 'packages/email']) {
     await writeFile(path.join(root, `${workspace}/package.json`), `{"name":"${workspace}"}`)
   }
   await writeFile(path.join(root, 'node_modules/.package-lock.json'), '{}')
@@ -56,7 +57,10 @@ test('workspace manifest changes invalidate the dependency marker', async (conte
   const markerPath = path.join(root, 'node_modules', dependencyMarkerName)
   await writeFile(markerPath, JSON.stringify({ fingerprint: await dependencyFingerprint(root) }))
 
-  await writeFile(path.join(root, 'apps/api/package.json'), '{"name":"api","changed":true}')
+  await writeFile(
+    path.join(root, 'apps/runtime/package.json'),
+    '{"name":"runtime","changed":true}',
+  )
   assert.notEqual(JSON.parse(await readFile(markerPath, 'utf8')).fingerprint, await dependencyFingerprint(root))
   assert.equal(await dependenciesAreInstalled(root), false)
 })

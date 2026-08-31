@@ -1,4 +1,5 @@
 import type { ChatWorkspaceData } from "@/features/chat/model";
+import { FALLBACK_MODEL_CATALOG } from "@/features/chat/model-catalog";
 
 export const releaseWorkspace: ChatWorkspaceData = {
   title: "Checkout release",
@@ -133,15 +134,5 @@ export const releaseWorkspace: ChatWorkspaceData = {
       ],
     },
   ],
-  models: [
-    { value: "gpt-5.6-sol", label: "GPT 5.6 Sol" },
-    { value: "gpt-5.6-luna", label: "GPT 5.6 Luna" },
-  ],
-  reasoningOptions: [
-    { value: "low", label: "Low" },
-    { value: "medium", label: "Medium" },
-    { value: "high", label: "High" },
-    { value: "xhigh", label: "Extra high" },
-    { value: "max", label: "Max" },
-  ],
+  models: FALLBACK_MODEL_CATALOG,
 };
