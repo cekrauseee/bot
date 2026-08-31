@@ -15,6 +15,7 @@ __pycache__/
 # Editors and local configuration
 .idea/
 .vscode/
+/plans/
 .env
 .env.*
 !.env.example

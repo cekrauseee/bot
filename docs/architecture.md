@@ -62,7 +62,7 @@ The conversation flow is:
 - OpenAI response storage stays disabled; PostgreSQL is the conversation source of truth.
 - Authentication secrets and raw OTP or session tokens never enter persistent storage or logs.
 - Account lookup behavior does not reveal whether an email already exists.
-- The repository contains no Harness metadata or session state.
+- The repository contains no Harness metadata, session state, or operational plans.
 - Pages do not import chat internals or vendor-style agent components.
 - Chat fixtures and model types do not import React or component types.
 - Chat workspace presentation receives data, view state, and callbacks from the feature container.
