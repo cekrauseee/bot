@@ -139,6 +139,7 @@ def test_missing_provider_is_safe() -> None:
             environment="test",
             ai_base_url="http://localhost:8001",
             ai_service_token="test-token",
+            openai_api_key=None,
         )
     )
     response = TestClient(application).post(
