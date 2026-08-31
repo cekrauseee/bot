@@ -4,7 +4,7 @@ export const commandSections = [
     commands: [
       ['help', 'Show this command guide'],
       ['setup', 'Prepare a fresh development environment'],
-      ['dev', 'Run the web, application API, and AI service together'],
+      ['dev', 'Run the web, API, AI, and runtime services together'],
     ],
   },
   {
@@ -44,6 +44,17 @@ export const commandSections = [
       ['ai:dev', 'Run the FastAPI AI service with reload'],
       ['ai:lint', 'Lint the Python AI service'],
       ['ai:test', 'Run AI service tests'],
+    ],
+  },
+  {
+    title: 'Runtime service',
+    commands: [
+      ['runtime:dev', 'Run the isolated runtime service with reload'],
+      ['runtime:lint', 'Lint the runtime service'],
+      ['runtime:typecheck', 'Type-check the runtime service'],
+      ['runtime:test', 'Run runtime service tests'],
+      ['runtime:build', 'Build the runtime service'],
+      ['runtime:start', 'Start the built runtime service'],
     ],
   },
   {
