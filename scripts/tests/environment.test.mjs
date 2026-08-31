@@ -15,6 +15,10 @@ const example = `SESSION_SECRET=replace-with-session
 OTP_PEPPER=replace-with-otp
 RATE_LIMIT_PEPPER=replace-with-rate
 AI_SERVICE_TOKEN=replace-with-ai-service-token
+RUNTIME_SERVICE_TOKEN=replace-with-runtime-service-token
+RUNTIME_BASE_URL=http://localhost:8002
+RUNTIME_PORT=8002
+RUNTIME_ENVIRONMENT=development
 GOOGLE_CLIENT_ID=example.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=replace-with-google-client-secret
 RESEND_API_KEY=re_example
@@ -40,6 +44,7 @@ test('prepareEnvironment creates files and generates independent local secrets',
     values.get('OTP_PEPPER'),
     values.get('RATE_LIMIT_PEPPER'),
     values.get('AI_SERVICE_TOKEN'),
+    values.get('RUNTIME_SERVICE_TOKEN'),
   ]
 
   assert.equal(result.createdEnv, true)
@@ -48,8 +53,10 @@ test('prepareEnvironment creates files and generates independent local secrets',
     'OTP_PEPPER',
     'RATE_LIMIT_PEPPER',
     'AI_SERVICE_TOKEN',
+    'RUNTIME_SERVICE_TOKEN',
   ])
-  assert.equal(new Set(generatedValues).size, 4)
+  assert.equal(new Set(generatedValues).size, 5)
+  assert.deepEqual(result.configuredDefaultKeys, [])
   assert.equal(values.get('RESEND_FROM'), 'myBot <mybot@cekrause.eu>')
   assert.equal((await stat(path.join(root, '.env'))).mode & 0o777, 0o600)
 })
@@ -89,6 +96,31 @@ test('alignEnvironment rejects undocumented variables without exposing values', 
     () => alignEnvironment('ENVIRONMENT=development\n', 'ENVIRONMENT=test\nSTALE_SETTING=secret\n'),
     /^Error: Unsupported \.env variables: STALE_SETTING$/,
   )
+})
+
+test('prepareEnvironment adds missing runtime defaults and preserves overrides', async (context) => {
+  const root = await fixture(context)
+  let counter = 0
+  await writeFile(
+    path.join(root, '.env'),
+    example
+      .replace('RUNTIME_BASE_URL=http://localhost:8002\n', '')
+      .replace('RUNTIME_PORT=8002\n', 'RUNTIME_PORT=9002\n')
+      .replace('RUNTIME_ENVIRONMENT=development\n', ''),
+  )
+
+  const result = await prepareEnvironment(root, {
+    createSecret: () => `runtime-default-secret-${++counter}`.padEnd(48, '-'),
+  })
+  const values = parseEnvironment(await readFile(path.join(root, '.env'), 'utf8'))
+
+  assert.deepEqual(result.configuredDefaultKeys, [
+    'RUNTIME_BASE_URL',
+    'RUNTIME_ENVIRONMENT',
+  ])
+  assert.equal(values.get('RUNTIME_BASE_URL'), 'http://localhost:8002')
+  assert.equal(values.get('RUNTIME_PORT'), '9002')
+  assert.equal(values.get('RUNTIME_ENVIRONMENT'), 'development')
 })
 
 test('prepareEnvironment rejects repeated or weak generated values', async (context) => {
