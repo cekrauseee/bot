@@ -57,6 +57,7 @@ test('development uses the Turbo TUI after the shared preflight', async () => {
   const source = await readFile(path.join(projectRoot, 'scripts/dev.mjs'), 'utf8')
   assert.ok(source.indexOf('await prepareEnvironment()') < source.indexOf('await assertDevelopmentPortsAvailable()'))
   assert.ok(source.indexOf('await prepareDevelopment({ environment })') < source.indexOf("'run', 'dev', '--ui=tui'"))
+  assert.doesNotMatch(source, /detached:/)
   assert.match(source, /stopChildren\(signal\)/)
   assert.match(source, /turboInvocation\(\)/)
   assert.deepEqual(turboInvocation('darwin'), { command: turboBin, args: [] })

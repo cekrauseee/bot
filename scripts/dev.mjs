@@ -9,6 +9,7 @@ import { projectRoot, turboInvocation } from './lib/project.mjs'
 const windows = process.platform === 'win32'
 const children = new Set()
 let shutdownPromise
+let shutdownSignal
 
 function start(command, args, label) {
   console.log(`→ Start ${label}`)
@@ -16,7 +17,6 @@ function start(command, args, label) {
     cwd: projectRoot,
     env: process.env,
     stdio: 'inherit',
-    detached: !windows,
   })
   children.add(child)
   const exited = new Promise((resolve) => {
@@ -51,6 +51,7 @@ try {
 
   for (const signal of ['SIGINT', 'SIGTERM']) {
     process.once(signal, () => {
+      shutdownSignal = signal
       void stopChildren(signal)
     })
   }
@@ -59,7 +60,7 @@ try {
   await stopChildren()
   if (result.error) console.error(`${result.label} failed to start: ${result.error.message}`)
 
-  process.exitCode = result.signal ? 1 : (result.code ?? 1)
+  process.exitCode = shutdownSignal ? 0 : result.signal ? 1 : (result.code ?? 1)
 } catch (error) {
   stopChildren()
   console.error(`\nDevelopment startup failed: ${error.message}`)

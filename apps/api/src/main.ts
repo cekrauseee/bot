@@ -6,7 +6,8 @@ import { ResendOtpEmailSender } from './email.js'
 import { GoogleOAuthService } from './modules/auth/oauth.js'
 import { OtpService } from './modules/auth/otp.js'
 import { SessionManager } from './modules/auth/sessions.js'
-import { createLogger } from './logger.js'
+import { createLogger, safeError } from './logger.js'
+import { createShutdown } from './shutdown.js'
 
 const settings = loadSettings()
 const logger = createLogger(settings)
@@ -27,11 +28,22 @@ const app = createApp(
 app.listen(Number(new URL(settings.apiOrigin).port || 8000))
 logger.info({ event: 'api_started' }, 'api_started')
 
-const close = async () => {
+const shutdown = createShutdown({
+  stopServer: () => app.server ? app.stop(true) : undefined,
+  closeResources: [() => redis.quit(), () => database.close()],
+})
+const close = () => {
   logger.info({ event: 'api_shutdown_started' }, 'api_shutdown_started')
-  await redis.quit()
-  await database.close()
-  process.exit(0)
+  void shutdown().then(
+    () => {
+      logger.info({ event: 'api_shutdown_completed' }, 'api_shutdown_completed')
+      process.exit(0)
+    },
+    (error) => {
+      logger.error({ ...safeError(error), event: 'api_shutdown_failed' }, 'api_shutdown_failed')
+      process.exit(1)
+    },
+  )
 }
 process.once('SIGINT', close)
 process.once('SIGTERM', close)
