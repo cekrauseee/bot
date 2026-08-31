@@ -13,15 +13,20 @@ import {
   parsePortOwners,
 } from '../lib/development-ports.mjs'
 
-test('port preflight uses API settings without requiring or creating an environment file', async (t) => {
+test('port preflight uses the canonical environment file and shell overrides', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'mybot-ports-'))
   t.after(() => rm(root, { recursive: true, force: true }))
-  assert.deepEqual((await developmentServices(root, {})).map(({ port }) => port), [5173, 8000, 8001])
+  await assert.rejects(developmentServices(root, {}), /ENOENT/)
 
-  await writeFile(path.join(root, '.env'), 'API_BASE_URL="http://localhost:8123" # local override\n')
-  assert.equal((await developmentServices(root, {}))[1].port, 8123)
+  await writeFile(path.join(root, '.env'), [
+    'WEB_BASE_URL=http://localhost:5173',
+    'API_BASE_URL=http://localhost:8123',
+    'AI_BASE_URL=http://localhost:8001',
+    '',
+  ].join('\n'))
+  assert.deepEqual((await developmentServices(root, {})).map(({ port }) => port), [5173, 8123, 8001])
   assert.equal((await developmentServices(root, { API_BASE_URL: 'http://localhost:8234' }))[1].port, 8234)
-  assert.equal((await developmentServices(root, { API_BASE_URL: 'http://localhost' }))[1].port, 8000)
+  assert.equal((await developmentServices(root, { API_BASE_URL: 'http://localhost' }))[1].port, 80)
 })
 
 for (const host of ['127.0.0.1', '::1']) {

@@ -35,7 +35,6 @@ test('Turbo keeps internal builds topological and external tasks uncached', asyn
   assert.ok(turbo.tasks.test.env.includes('DATABASE_URL'))
   assert.ok(turbo.tasks['db:check'].passThroughEnv.includes('ENVIRONMENT'))
   assert.ok(turbo.tasks['db:check'].passThroughEnv.includes('DATABASE_URL'))
-  assert.ok(turbo.tasks['db:check'].passThroughEnv.includes('NEON_WS_PROXY'))
   assert.ok(turbo.tasks['db:seed'].passThroughEnv.includes('MYBOT_SEED_USER_EMAIL'))
   assert.ok(turbo.globalDependencies.includes('.env'))
   assert.equal(turbo.tasks.dev.cache, false)
@@ -56,28 +55,25 @@ test('the AI package is a uv-only Turbo discovery wrapper', async () => {
 
 test('development uses the Turbo TUI after the shared preflight', async () => {
   const source = await readFile(path.join(projectRoot, 'scripts/dev.mjs'), 'utf8')
-  assert.ok(source.indexOf('await prepareDevelopment()') < source.indexOf("'run', 'dev', '--ui=tui'"))
+  assert.ok(source.indexOf('await prepareEnvironment()') < source.indexOf('await assertDevelopmentPortsAvailable()'))
+  assert.ok(source.indexOf('await prepareDevelopment({ environment })') < source.indexOf("'run', 'dev', '--ui=tui'"))
   assert.match(source, /stopChildren\(signal\)/)
   assert.match(source, /turboInvocation\(\)/)
   assert.deepEqual(turboInvocation('darwin'), { command: turboBin, args: [] })
   assert.deepEqual(turboInvocation('win32'), { command: process.execPath, args: [turboBin] })
 })
 
-test('web development is pinned to the documented port and refuses fallback', async () => {
+test('web development reads the canonical origin and refuses port fallback', async () => {
   const vite = await readFile(path.join(projectRoot, 'apps/web/vite.config.ts'), 'utf8')
-  assert.match(vite, /port:\s*5173/)
+  assert.match(vite, /WEB_BASE_URL/)
+  assert.match(vite, /loadEnv\(mode, envDir, ''\)/)
   assert.match(vite, /strictPort:\s*true/)
   const webTurbo = await jsonFile('apps/web/turbo.json')
   assert.deepEqual(webTurbo.extends, ['//'])
-  assert.ok(webTurbo.tasks.build.inputs.includes('.env*'))
+  assert.match(vite, /\benvDir,/)
 
-  const { stdout } = await exec(
-    path.join(projectRoot, 'node_modules/turbo/bin/turbo'),
-    ['run', 'build', '--filter=@my-bot/web', '--dry-run=json'],
-    { cwd: projectRoot },
-  )
-  const webBuild = JSON.parse(stdout).tasks.find((task) => task.taskId === '@my-bot/web#build')
-  assert.ok(webBuild.inputs['.env.example'])
+  const turbo = await jsonFile('turbo.json')
+  assert.ok(turbo.globalDependencies.includes('.env.example'))
 })
 
 test('root script tests hash the source trees their checks inspect', async () => {

@@ -6,7 +6,7 @@ import { hashOtp } from '../src/security.js'
 
 describe('development OTP delivery', () => {
   it('allows repeated development requests even when a cooldown key already exists', async () => {
-    const settings = loadSettings({ ENVIRONMENT: 'development' })
+    const settings = loadSettings({ ...process.env, ENVIRONMENT: 'development' })
     const acquireCooldown = vi.fn(async () => null)
     const redis = {
       set: acquireCooldown,
@@ -26,7 +26,7 @@ describe('development OTP delivery', () => {
   })
 
   it.each<Environment>(['test', 'production'])('still rejects an active cooldown in %s', async (environment) => {
-    const settings = { ...loadSettings({ ENVIRONMENT: 'test' }), environment }
+    const settings = { ...loadSettings({ ...process.env, ENVIRONMENT: 'test' }), environment }
     const redis = { set: vi.fn(async () => null), ttl: vi.fn(async () => 45) } as unknown as Redis
     const sendOtp = vi.fn(async () => {})
     await expect(new OtpService(redis, { sendOtp }, settings)
@@ -36,7 +36,7 @@ describe('development OTP delivery', () => {
 
   it.each<Environment>(['development', 'test', 'production'])(
     'uses the correct delivery path in %s', async (environment) => {
-      const settings = { ...loadSettings({ ENVIRONMENT: 'test' }), environment }
+      const settings = { ...loadSettings({ ...process.env, ENVIRONMENT: 'test' }), environment }
       const evaluate = vi.fn(async (script: string, ..._args: unknown[]) => {
         if (script.includes("return {'installed'}")) return ['installed']
         return [1, 60]

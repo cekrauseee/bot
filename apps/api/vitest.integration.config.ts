@@ -1,2 +1,9 @@
 import { defineConfig } from 'vitest/config'
-export default defineConfig({ test: { include: ['tests/**/*.integration.test.ts'], testTimeout: 30000 } })
+import { resolvedTestEnvironment } from './vitest.env.js'
+
+export default defineConfig({ test: {
+  env: resolvedTestEnvironment(),
+  fileParallelism: false,
+  include: ['tests/**/*.integration.test.ts'],
+  testTimeout: 30000,
+} })

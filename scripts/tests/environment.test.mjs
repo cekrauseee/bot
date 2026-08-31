@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
 import {
+  alignEnvironment,
   externalAuthenticationStatus,
   parseEnvironment,
   prepareEnvironment,
@@ -24,11 +25,6 @@ async function fixture(context) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'mybot-scripts-'))
   context.after(() => rm(root, { force: true, recursive: true }))
   await writeFile(path.join(root, '.env.example'), example)
-  await mkdir(path.join(root, 'apps/web'), { recursive: true })
-  await writeFile(
-    path.join(root, 'apps/web/.env.example'),
-    'VITE_API_BASE_URL=http://localhost:8000\n',
-  )
   return root
 }
 
@@ -47,7 +43,6 @@ test('prepareEnvironment creates files and generates independent local secrets',
   ]
 
   assert.equal(result.createdEnv, true)
-  assert.equal(result.createdWebEnv, true)
   assert.deepEqual(result.generatedSecretKeys, [
     'SESSION_SECRET',
     'OTP_PEPPER',
@@ -74,6 +69,26 @@ test('prepareEnvironment preserves existing secrets on repeated runs', async (co
 
   assert.equal(result.generatedSecretKeys.length, 0)
   assert.equal(after, before)
+})
+
+test('alignEnvironment follows the canonical template exactly', () => {
+  const aligned = alignEnvironment(
+    'ENVIRONMENT=development\nVITE_API_BASE_URL=http://localhost:8000\n',
+    'ENVIRONMENT=test\n',
+  )
+
+  assert.equal(aligned, [
+    'ENVIRONMENT=test',
+    'VITE_API_BASE_URL=http://localhost:8000',
+    '',
+  ].join('\n'))
+})
+
+test('alignEnvironment rejects undocumented variables without exposing values', () => {
+  assert.throws(
+    () => alignEnvironment('ENVIRONMENT=development\n', 'ENVIRONMENT=test\nSTALE_SETTING=secret\n'),
+    /^Error: Unsupported \.env variables: STALE_SETTING$/,
+  )
 })
 
 test('prepareEnvironment rejects repeated or weak generated values', async (context) => {

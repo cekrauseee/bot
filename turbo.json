@@ -1,6 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalDependencies": ["package-lock.json", "turbo.json", ".env", ".env.example", "apps/web/.env", "apps/web/.env.example", "apps/ai/.env"],
+  "globalDependencies": ["package-lock.json", "turbo.json", ".env", ".env.example"],
   "globalEnv": ["CI"],
   "tasks": {
     "build": {
@@ -8,8 +8,7 @@
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$", "!dist/**"],
       "outputs": ["dist/**"],
-      "env": ["NODE_ENV", "VITE_API_BASE_URL"],
-      "passThroughEnv": ["DATABASE_URL", "REDIS_URL", "SESSION_SECRET", "OTP_PEPPER", "RATE_LIMIT_PEPPER", "RESEND_API_KEY", "RESEND_FROM", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]
+      "env": ["NODE_ENV", "VITE_API_BASE_URL"]
     },
     "lint": {
       "description": "Lint package source without producing artifacts",
@@ -27,7 +26,7 @@
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$", "!dist/**"],
       "outputs": [],
-      "env": ["NODE_ENV", "ENVIRONMENT", "DATABASE_URL", "NEON_WS_PROXY", "REDIS_URL", "WEB_BASE_URL", "API_BASE_URL", "AI_BASE_URL", "GOOGLE_REDIRECT_URI", "TRUSTED_PROXY_HOSTS", "SESSION_SECRET", "OTP_PEPPER", "RATE_LIMIT_PEPPER", "AI_SERVICE_TOKEN", "OPENAI_API_KEY", "SESSION_TTL_SECONDS", "OTP_TTL_SECONDS", "OTP_RESEND_COOLDOWN_SECONDS", "OTP_MAX_ATTEMPTS", "OTP_EMAIL_REQUESTS_PER_WINDOW", "OTP_IP_REQUESTS_PER_WINDOW", "OTP_VERIFY_ATTEMPTS_PER_IP_WINDOW", "OTP_RATE_LIMIT_WINDOW_SECONDS", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "RESEND_API_KEY", "RESEND_FROM"],
+      "env": ["NODE_ENV", "ENVIRONMENT", "DATABASE_URL", "REDIS_URL", "WEB_BASE_URL", "API_BASE_URL", "VITE_API_BASE_URL", "AI_BASE_URL", "SESSION_SECRET", "OTP_PEPPER", "RATE_LIMIT_PEPPER", "AI_SERVICE_TOKEN", "OPENAI_API_KEY", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI", "RESEND_API_KEY", "RESEND_FROM"],
       "passThroughEnv": []
     },
     "test:integration": {
@@ -35,7 +34,7 @@
       "dependsOn": ["^build"],
       "cache": false,
       "outputs": [],
-      "env": ["ENVIRONMENT", "DATABASE_URL", "NEON_WS_PROXY", "REDIS_URL", "WEB_BASE_URL", "API_BASE_URL", "AI_BASE_URL", "GOOGLE_REDIRECT_URI", "TRUSTED_PROXY_HOSTS", "SESSION_SECRET", "OTP_PEPPER", "RATE_LIMIT_PEPPER", "AI_SERVICE_TOKEN", "OPENAI_API_KEY", "SESSION_TTL_SECONDS", "OTP_TTL_SECONDS", "OTP_RESEND_COOLDOWN_SECONDS", "OTP_MAX_ATTEMPTS", "OTP_EMAIL_REQUESTS_PER_WINDOW", "OTP_IP_REQUESTS_PER_WINDOW", "OTP_VERIFY_ATTEMPTS_PER_IP_WINDOW", "OTP_RATE_LIMIT_WINDOW_SECONDS", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "RESEND_API_KEY", "RESEND_FROM"],
+      "env": ["ENVIRONMENT", "DATABASE_URL", "REDIS_URL", "WEB_BASE_URL", "API_BASE_URL", "VITE_API_BASE_URL", "AI_BASE_URL", "SESSION_SECRET", "OTP_PEPPER", "RATE_LIMIT_PEPPER", "AI_SERVICE_TOKEN", "OPENAI_API_KEY", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI", "RESEND_API_KEY", "RESEND_FROM"],
       "passThroughEnv": []
     },
     "dev": {
@@ -43,7 +42,7 @@
       "cache": false,
       "persistent": true,
       "outputs": [],
-      "env": ["ENVIRONMENT", "DATABASE_URL", "NEON_WS_PROXY", "REDIS_URL", "WEB_BASE_URL", "API_BASE_URL", "AI_BASE_URL", "GOOGLE_REDIRECT_URI", "TRUSTED_PROXY_HOSTS", "SESSION_SECRET", "OTP_PEPPER", "RATE_LIMIT_PEPPER", "AI_SERVICE_TOKEN", "OPENAI_API_KEY", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "RESEND_API_KEY", "RESEND_FROM"]
+      "env": ["ENVIRONMENT", "DATABASE_URL", "REDIS_URL", "WEB_BASE_URL", "API_BASE_URL", "VITE_API_BASE_URL", "AI_BASE_URL", "SESSION_SECRET", "OTP_PEPPER", "RATE_LIMIT_PEPPER", "AI_SERVICE_TOKEN", "OPENAI_API_KEY", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI", "RESEND_API_KEY", "RESEND_FROM"]
     },
     "dev:preview": {
       "description": "Preview React Email templates",
@@ -55,25 +54,25 @@
       "description": "Generate a Drizzle migration from the API schema",
       "cache": false,
       "outputs": [],
-      "passThroughEnv": ["ENVIRONMENT", "DATABASE_URL", "NEON_WS_PROXY", "REDIS_URL", "WEB_BASE_URL", "API_BASE_URL", "GOOGLE_REDIRECT_URI", "TRUSTED_PROXY_HOSTS", "SESSION_SECRET", "OTP_PEPPER", "RATE_LIMIT_PEPPER", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "RESEND_API_KEY", "RESEND_FROM"]
+      "passThroughEnv": ["ENVIRONMENT", "DATABASE_URL", "REDIS_URL", "WEB_BASE_URL", "API_BASE_URL", "AI_BASE_URL", "SESSION_SECRET", "OTP_PEPPER", "RATE_LIMIT_PEPPER", "AI_SERVICE_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI", "RESEND_API_KEY", "RESEND_FROM"]
     },
     "db:migrate": {
       "description": "Apply pending database migrations",
       "cache": false,
       "outputs": [],
-      "passThroughEnv": ["ENVIRONMENT", "DATABASE_URL", "NEON_WS_PROXY", "REDIS_URL", "WEB_BASE_URL", "API_BASE_URL", "GOOGLE_REDIRECT_URI", "TRUSTED_PROXY_HOSTS", "SESSION_SECRET", "OTP_PEPPER", "RATE_LIMIT_PEPPER", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "RESEND_API_KEY", "RESEND_FROM"]
+      "passThroughEnv": ["ENVIRONMENT", "DATABASE_URL", "REDIS_URL", "WEB_BASE_URL", "API_BASE_URL", "AI_BASE_URL", "SESSION_SECRET", "OTP_PEPPER", "RATE_LIMIT_PEPPER", "AI_SERVICE_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI", "RESEND_API_KEY", "RESEND_FROM"]
     },
     "db:check": {
       "description": "Check migration history and the database contract",
       "cache": false,
       "outputs": [],
-      "passThroughEnv": ["ENVIRONMENT", "DATABASE_URL", "NEON_WS_PROXY", "REDIS_URL", "WEB_BASE_URL", "API_BASE_URL", "GOOGLE_REDIRECT_URI", "TRUSTED_PROXY_HOSTS", "SESSION_SECRET", "OTP_PEPPER", "RATE_LIMIT_PEPPER", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "RESEND_API_KEY", "RESEND_FROM"]
+      "passThroughEnv": ["ENVIRONMENT", "DATABASE_URL", "REDIS_URL", "WEB_BASE_URL", "API_BASE_URL", "AI_BASE_URL", "SESSION_SECRET", "OTP_PEPPER", "RATE_LIMIT_PEPPER", "AI_SERVICE_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI", "RESEND_API_KEY", "RESEND_FROM"]
     },
     "db:seed": {
       "description": "Seed complete local application conversations",
       "cache": false,
       "outputs": [],
-      "passThroughEnv": ["ENVIRONMENT", "DATABASE_URL", "NEON_WS_PROXY", "MYBOT_SEED_USER_EMAIL"]
+      "passThroughEnv": ["ENVIRONMENT", "DATABASE_URL", "MYBOT_SEED_USER_EMAIL"]
     },
     "//#scripts:lint": {
       "description": "Lint repository automation scripts",

@@ -50,7 +50,7 @@ Existing-conversation turn requests may include `retry_of`, the UUID of the late
 
 ## Dependency Management
 
-`package.json` defines runtime and development dependencies. The repository root `package-lock.json` records the complete npm workspace graph. Turbo runs package-owned TypeScript, Oxlint, Vitest, and production build tasks; integration tests and Drizzle migration checks are explicitly non-cached external-state tasks. Local and test connections use `pg.Pool`; production selects Neon Serverless `Pool` and configures the Node `ws` constructor. Production accepts only Neon hosts (`*.neon.tech`) unless `NEON_WS_PROXY` is configured as a `host[:port][/path]` WebSocket proxy address without a protocol.
+`package.json` defines runtime and development dependencies. The repository root `package-lock.json` records the complete npm workspace graph. Turbo runs package-owned TypeScript, Oxlint, Vitest, and production build tasks; integration tests and Drizzle migration checks are explicitly non-cached external-state tasks. Local and test connections use `pg.Pool`; production accepts only `*.neon.tech` hosts and connects directly through Neon Serverless with the Node `ws` constructor.
 
 ## Database Compatibility
 

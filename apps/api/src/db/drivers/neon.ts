@@ -2,14 +2,13 @@ import type { NeonDatabase } from 'drizzle-orm/neon-serverless'
 import type { schema } from '../schema.js'
 import { attachIdlePoolErrorHandler, type DatabaseDriver, type QueryClient, type QueryRow } from './types.js'
 
-export async function createNeonDatabase(databaseUrl: string, wsProxy?: string): Promise<DatabaseDriver> {
+export async function createNeonDatabase(databaseUrl: string): Promise<DatabaseDriver> {
   const [{ Pool, neonConfig }, { drizzle }, { default: WebSocket }] = await Promise.all([
     import('@neondatabase/serverless'),
     import('drizzle-orm/neon-serverless'),
     import('ws'),
   ])
   neonConfig.webSocketConstructor = WebSocket
-  if (wsProxy) neonConfig.wsProxy = wsProxy
   const client = new Pool({ connectionString: databaseUrl, max: 10 })
   attachIdlePoolErrorHandler(client, 'Neon')
   return {
@@ -18,13 +17,12 @@ export async function createNeonDatabase(databaseUrl: string, wsProxy?: string):
   }
 }
 
-export async function createNeonQueryClient(databaseUrl: string, wsProxy?: string): Promise<QueryClient> {
+export async function createNeonQueryClient(databaseUrl: string): Promise<QueryClient> {
   const [{ Pool, neonConfig }, { default: WebSocket }] = await Promise.all([
     import('@neondatabase/serverless'),
     import('ws'),
   ])
   neonConfig.webSocketConstructor = WebSocket
-  if (wsProxy) neonConfig.wsProxy = wsProxy
   const pool = new Pool({ connectionString: databaseUrl, max: 1 })
   attachIdlePoolErrorHandler(pool, 'Neon')
   return {

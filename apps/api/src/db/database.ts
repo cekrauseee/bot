@@ -18,7 +18,7 @@ export class Database {
   static async create(settings: Settings): Promise<Database> {
     if (databaseDriverFor(settings.environment) === 'neon') {
       const { createNeonDatabase } = await import('./drivers/neon.js')
-      const { db, client } = await createNeonDatabase(settings.databaseUrl, settings.neonWsProxy)
+      const { db, client } = await createNeonDatabase(settings.databaseUrl)
       return new Database(client, db)
     }
     const { createNodePostgresDatabase } = await import('./drivers/node-postgres.js')

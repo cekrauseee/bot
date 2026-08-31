@@ -2,7 +2,6 @@ import { cors } from '@elysiajs/cors'
 import { node } from '@elysiajs/node'
 import { openapi } from '@elysiajs/openapi'
 import { Elysia, ParseError, t, ValidationError } from 'elysia'
-import { isIP } from 'node:net'
 import type { Settings } from './config.js'
 import { AuthError, authDetail } from './errors.js'
 import {
@@ -51,22 +50,12 @@ type NodeRequest = Request & {
 export const nodeSocketPeer: PeerResolver = (request) =>
   (request as NodeRequest).runtime?.node?.req?.socket?.remoteAddress
 
-/**
- * Return the socket peer unless it is a configured proxy. A proxy may provide
- * exactly one valid X-Forwarded-For value; arbitrary client headers are never
- * used as the peer identity.
- */
 export function clientIp(
   request: Request,
-  settings: Settings,
   peer: string | undefined | PeerResolver = nodeSocketPeer,
 ) {
   const socketPeer = typeof peer === 'function' ? peer(request) : peer
-  const actualPeer = socketPeer || 'unknown'
-  if (!settings.trustedProxyHosts.includes(actualPeer)) return actualPeer
-
-  const forwarded = request.headers.get('x-forwarded-for')?.trim()
-  return forwarded && !forwarded.includes(',') && isIP(forwarded) !== 0 ? forwarded : actualPeer
+  return socketPeer || 'unknown'
 }
 
 const detailSchema = t.Object({
@@ -431,7 +420,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
 
   app.post('/auth/otp/request', async ({ request, body, set }) => {
     browserOrigin(request)
-    const challenge = await services.otp.issue(normalizeEmail(body.email), clientIp(request, settings, peerResolver))
+    const challenge = await services.otp.issue(normalizeEmail(body.email), clientIp(request, peerResolver))
     set.status = 202
     set.headers['cache-control'] = 'no-store'
     return {
@@ -446,7 +435,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
 
   app.post('/auth/otp/verify', async ({ request, body, set }) => {
     browserOrigin(request)
-    const reservation = await services.otp.reserve(body.challenge_id, body.code, clientIp(request, settings, peerResolver))
+    const reservation = await services.otp.reserve(body.challenge_id, body.code, clientIp(request, peerResolver))
     let issued: { user: Parameters<typeof userResponse>[0]; session: { token: string } }
     try {
       issued = await services.database.transaction(async (db) => {

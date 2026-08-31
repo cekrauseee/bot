@@ -26,7 +26,7 @@ The service runs on port `8001` in local development and is called only by the a
 
 The current model factory supports `gpt-5.6-sol` and `gpt-5.6-luna`. It uses LangChain's compiled agent graph, OpenAI Responses, built-in web search, reasoning summaries, `store=false`, and standard or Fast processing. Provider-native blocks are normalized before crossing the service boundary. Raw chain-of-thought, credentials, provider errors, and prompt contents are not logged or returned.
 
-`OPENAI_API_KEY` is optional at process startup in development. A real turn returns a safe service-unavailable response until the key exists. Production startup requires both a strong `AI_SERVICE_TOKEN` and a configured `OPENAI_API_KEY`.
+The service reads `ENVIRONMENT`, `AI_BASE_URL`, `AI_SERVICE_TOKEN`, and the optional development `OPENAI_API_KEY` from the canonical root `.env`. Its development runner binds to the host and port declared by `AI_BASE_URL`. A real turn returns a safe service-unavailable response until the provider key exists. Production startup requires both a strong `AI_SERVICE_TOKEN` and a configured `OPENAI_API_KEY`.
 
 ## Dependency Management
 

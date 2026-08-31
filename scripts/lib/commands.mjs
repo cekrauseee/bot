@@ -18,13 +18,13 @@ export const commandSections = [
     title: 'Operations',
     commands: [
       ['auth:check', 'Check Google and Resend environment variables'],
+      ['infra:start', 'Start PostgreSQL and Redis'],
+      ['infra:stop', 'Stop PostgreSQL and Redis without deleting data'],
+      ['infra:reset', 'Reset PostgreSQL and Redis containers and data'],
       ['db:generate', 'Generate a database migration from the API schema'],
       ['db:migrate', 'Apply pending database migrations'],
       ['db:check', 'Check the database migration history'],
       ['db:seed', 'Seed complete local conversations and Markdown examples'],
-      ['infra:start', 'Start PostgreSQL and Redis'],
-      ['infra:stop', 'Stop PostgreSQL and Redis without deleting data'],
-      ['infra:reset', 'Reset PostgreSQL and Redis containers and data'],
     ],
   },
   {

@@ -89,7 +89,16 @@ def test_stream_normalizes_reasoning_text_and_web_sources() -> None:
 
 
 def client() -> TestClient:
-    return TestClient(create_app(Settings(ai_service_token="test-token"), runner=fake_runner))
+    return TestClient(
+        create_app(
+            Settings(
+                environment="test",
+                ai_base_url="http://localhost:8001",
+                ai_service_token="test-token",
+            ),
+            runner=fake_runner,
+        )
+    )
 
 
 def test_stream_auth_and_event_framing() -> None:
@@ -125,7 +134,13 @@ def test_stream_strictly_validates_contract() -> None:
 
 
 def test_missing_provider_is_safe() -> None:
-    application = create_app(Settings(ai_service_token="test-token"))
+    application = create_app(
+        Settings(
+            environment="test",
+            ai_base_url="http://localhost:8001",
+            ai_service_token="test-token",
+        )
+    )
     response = TestClient(application).post(
         "/agent/stream", json=PAYLOAD, headers={"Authorization": "Bearer test-token"}
     )
@@ -141,8 +156,28 @@ def test_provider_settings_map_standard_and_fast() -> None:
             side_effect=lambda **kwargs: kwargs["model"],
         ),
     ):
-        standard = build_model(Settings(openai_api_key="key"), "gpt-5.6-sol", "low", "standard")
-        fast = build_model(Settings(openai_api_key="key"), "gpt-5.6-luna", "high", "fast")
+        standard = build_model(
+            Settings(
+                environment="test",
+                ai_base_url="http://localhost:8001",
+                ai_service_token="test-token",
+                openai_api_key="key",
+            ),
+            "gpt-5.6-sol",
+            "low",
+            "standard",
+        )
+        fast = build_model(
+            Settings(
+                environment="test",
+                ai_base_url="http://localhost:8001",
+                ai_service_token="test-token",
+                openai_api_key="key",
+            ),
+            "gpt-5.6-luna",
+            "high",
+            "fast",
+        )
     assert standard["service_tier"] == "default"
     assert fast["service_tier"] == "fast"
     assert standard["store"] is fast["store"] is False

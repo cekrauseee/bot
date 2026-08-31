@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 
 import { prepareDevelopment } from './lib/development.mjs'
 import { assertDevelopmentPortsAvailable } from './lib/development-ports.mjs'
+import { prepareEnvironment } from './lib/environment.mjs'
 import { terminateDescendants } from './lib/process-tree.mjs'
 import { projectRoot, turboInvocation } from './lib/project.mjs'
 
@@ -40,8 +41,9 @@ function stopChildren(signal = 'SIGTERM') {
 }
 
 try {
+  const environment = await prepareEnvironment()
   await assertDevelopmentPortsAvailable()
-  await prepareDevelopment()
+  await prepareDevelopment({ environment })
   console.log('\nmyBot is starting at http://localhost:5173\n')
 
   const invocation = turboInvocation()

@@ -198,7 +198,7 @@ export function validateIndexContract(rows: readonly IndexRow[]) {
 export async function checkDatabase(databaseUrl = loadSettings().databaseUrl) {
   const settings = loadSettings()
   const client: QueryClient = settings.environment === 'production'
-    ? await (await import('./drivers/neon.js')).createNeonQueryClient(databaseUrl, settings.neonWsProxy)
+    ? await (await import('./drivers/neon.js')).createNeonQueryClient(databaseUrl)
     : await (await import('./drivers/node-postgres.js')).createNodePostgresQueryClient(databaseUrl)
   try {
     const columnRows = (await client.query<ColumnRow>(`

@@ -37,7 +37,7 @@ The composer uses one stable `ComposerSubmitAction` and StatefulButton for send,
 
 ## Authentication
 
-The `/sign` route lazy-loads the public login page. The feature service sends credentialed requests to `VITE_API_BASE_URL`. Its hook manages email, OTP, resend countdown, pending, and error state without inferring whether an account exists.
+The `/sign` route lazy-loads the public login page. Vite reads the canonical root `.env`, and the feature service sends credentialed requests to `VITE_API_BASE_URL`. Its hook manages email, OTP, resend countdown, pending, and error state without inferring whether an account exists.
 
 The `/` and `/conversations/:conversationId` routes are protected by a server session check. Their shared signed-in layout exposes the real Sign out action. An HTTP 401 redirects to `/sign`; an unavailable API keeps a recoverable error state instead of treating the user as signed out. Sign out uses the beUI StatefulButton with a stable leading icon column, loading feedback, and a retry state styled with semantic destructive colors, without a separate error label. A successful request navigates directly to `/sign` without an intermediate success state.
 

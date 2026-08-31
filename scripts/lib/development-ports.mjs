@@ -9,18 +9,22 @@ import { projectRoot } from './project.mjs'
 const exec = promisify(execFile)
 
 export async function developmentServices(root = projectRoot, env = process.env) {
-  let values = {}
-  try {
-    values = parseEnv(await readFile(path.join(root, '.env'), 'utf8'))
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error
-  }
+  const values = parseEnv(await readFile(path.join(root, '.env'), 'utf8'))
 
-  const apiOrigin = new URL(env.API_BASE_URL ?? values.API_BASE_URL ?? 'http://localhost:8000')
+  const origin = (key) => {
+    const value = env[key] ?? values[key]
+    if (!value) throw new Error(`${key} is required`)
+    return new URL(value)
+  }
+  const port = (value) => Number(value.port || (value.protocol === 'https:' ? 443 : 80))
+
+  const webOrigin = origin('WEB_BASE_URL')
+  const apiOrigin = origin('API_BASE_URL')
+  const aiOrigin = origin('AI_BASE_URL')
   return [
-    { label: 'Web', port: 5173, hosts: ['127.0.0.1', '::1'] },
-    { label: 'API', port: Number(apiOrigin.port || 8000), hosts: ['0.0.0.0', '::'] },
-    { label: 'AI', port: 8001, hosts: ['127.0.0.1'] },
+    { label: 'Web', port: port(webOrigin), hosts: ['127.0.0.1', '::1'] },
+    { label: 'API', port: port(apiOrigin), hosts: ['0.0.0.0', '::'] },
+    { label: 'AI', port: port(aiOrigin), hosts: ['127.0.0.1'] },
   ]
 }
 

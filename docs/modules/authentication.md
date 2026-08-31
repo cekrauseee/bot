@@ -42,4 +42,4 @@ Test and production environments use the email sender and never expose the code 
 
 ## Production Topology
 
-Configure the web and API as sibling HTTPS subdomains. Register the exact API callback URI in the Google OAuth client. Set the web build's `VITE_API_BASE_URL` to the API sibling origin. If a serving proxy is present, list its immediate IP address in `TRUSTED_PROXY_HOSTS`; the API then accepts only a single valid `X-Forwarded-For` address from that peer, and ignores forwarded headers from direct or untrusted peers.
+Configure the web and API as sibling HTTPS subdomains. Register the exact `GOOGLE_REDIRECT_URI` in the Google OAuth client and set `VITE_API_BASE_URL` in the canonical root environment to the API sibling origin. The API uses the direct socket peer for IP-based limits and does not trust forwarded client-IP headers.

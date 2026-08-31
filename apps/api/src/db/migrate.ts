@@ -7,7 +7,7 @@ const migrationsFolder = await resolveMigrationsFolder()
 if (settings.environment === 'production') {
   const { createNeonDatabase } = await import('./drivers/neon.js')
   const { migrate } = await import('drizzle-orm/neon-serverless/migrator')
-  const { db, client } = await createNeonDatabase(settings.databaseUrl, settings.neonWsProxy)
+  const { db, client } = await createNeonDatabase(settings.databaseUrl)
   try {
     await migrate(db, { migrationsFolder: migrationFolderPath(migrationsFolder) })
     console.log('database migrations applied')
