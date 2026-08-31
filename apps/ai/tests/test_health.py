@@ -1,8 +1,9 @@
 from fastapi.testclient import TestClient
 
+from my_bot_ai.config import Settings
 from my_bot_ai.main import app, create_app
 
-client = TestClient(app)
+client = TestClient(create_app(Settings(environment="test")))
 
 
 def test_health_endpoint_identifies_ai_service() -> None:
@@ -19,7 +20,8 @@ def test_health_endpoint_has_no_api_prefix() -> None:
 
 
 def test_application_factory_accepts_typed_settings() -> None:
-    application = create_app()
+    application = create_app(Settings(environment="test"))
 
     assert application.title == "myBot AI"
     assert application.state.settings.service_name == "ai"
+    assert app.title == "myBot AI"
