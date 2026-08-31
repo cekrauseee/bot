@@ -1,6 +1,8 @@
 import { sql } from 'drizzle-orm'
 import {
   check,
+  bigserial,
+  bigint,
   customType,
   foreignKey,
   index,
@@ -127,4 +129,66 @@ export const messages = pgTable('messages', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [index('ix_messages_conversation_id_created_at').on(table.conversationId, table.createdAt), uniqueIndex('uq_messages_one_streaming_assistant').on(table.conversationId).where(sql`${table.role} = 'assistant' AND ${table.status} = 'streaming'`)])
 
-export const schema = { users, oauthIdentities, sessions, projects, conversations, messages }
+export const agentWorkspaces = pgTable('agent_workspaces', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  runtimeProvider: varchar('runtime_provider', { length: 40 }).notNull().default('unassigned'),
+  runtimeState: jsonb('runtime_state').notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [unique('uq_agent_workspaces_user_id').on(table.userId)])
+
+export const agentRuns = pgTable('agent_runs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id').notNull().references(() => agentWorkspaces.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  conversationId: uuid('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  assistantMessageId: uuid('assistant_message_id').notNull().references(() => messages.id, { onDelete: 'cascade' }),
+  turnId: uuid('turn_id').notNull(),
+  status: varchar('status', { length: 24 }).notNull().default('queued'),
+  model: varchar('model', { length: 32 }).notNull(),
+  provider: varchar('provider', { length: 20 }).notNull(),
+  reasoningEffort: varchar('reasoning_effort', { length: 20 }).notNull(),
+  speed: varchar('speed', { length: 20 }).notNull(),
+  plan: jsonb('plan').notNull().default([]),
+  pendingQuestion: jsonb('pending_question'),
+  browserProjection: jsonb('browser_projection'),
+  resumeInput: jsonb('resume_input'),
+  reconciledCheckpointId: varchar('reconciled_checkpoint_id', { length: 200 }),
+  executionToken: uuid('execution_token'),
+  lastEventSequence: bigint('last_event_sequence', { mode: 'bigint' }),
+  cancelRequestedAt: timestamp('cancel_requested_at', { withTimezone: true }),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  unique('uq_agent_runs_turn_id').on(table.turnId),
+  unique('uq_agent_runs_assistant_message_id').on(table.assistantMessageId),
+  index('ix_agent_runs_user_id_created_at').on(table.userId, table.createdAt),
+  index('ix_agent_runs_status_lease_expires_at').on(table.status, table.leaseExpiresAt),
+])
+
+export const agentEvents = pgTable('agent_events', {
+  sequence: bigserial('sequence', { mode: 'bigint' }).primaryKey(),
+  runId: uuid('run_id').notNull().references(() => agentRuns.id, { onDelete: 'cascade' }),
+  turnId: uuid('turn_id').notNull(),
+  type: varchar('type', { length: 64 }).notNull(),
+  data: jsonb('data').notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index('ix_agent_events_run_id_sequence').on(table.runId, table.sequence),
+])
+
+export const schema = {
+  users,
+  oauthIdentities,
+  sessions,
+  projects,
+  conversations,
+  messages,
+  agentWorkspaces,
+  agentRuns,
+  agentEvents,
+}

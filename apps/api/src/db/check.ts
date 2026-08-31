@@ -87,6 +87,48 @@ const columns: Record<string, ColumnContract[]> = {
     { name: 'created_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
     { name: 'updated_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
   ],
+  agent_workspaces: [
+    { name: 'id', type: 'uuid', length: null, nullable: false, defaultValue: 'gen_random_uuid()' },
+    { name: 'user_id', type: 'uuid', length: null, nullable: false, defaultValue: null },
+    { name: 'runtime_provider', type: 'character varying', length: 40, nullable: false, defaultValue: "'unassigned'::character varying" },
+    { name: 'runtime_state', type: 'jsonb', length: null, nullable: false, defaultValue: "'{}'::jsonb" },
+    { name: 'created_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
+    { name: 'updated_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
+  ],
+  agent_runs: [
+    { name: 'id', type: 'uuid', length: null, nullable: false, defaultValue: 'gen_random_uuid()' },
+    { name: 'workspace_id', type: 'uuid', length: null, nullable: false, defaultValue: null },
+    { name: 'user_id', type: 'uuid', length: null, nullable: false, defaultValue: null },
+    { name: 'conversation_id', type: 'uuid', length: null, nullable: false, defaultValue: null },
+    { name: 'assistant_message_id', type: 'uuid', length: null, nullable: false, defaultValue: null },
+    { name: 'turn_id', type: 'uuid', length: null, nullable: false, defaultValue: null },
+    { name: 'status', type: 'character varying', length: 24, nullable: false, defaultValue: "'queued'::character varying" },
+    { name: 'model', type: 'character varying', length: 32, nullable: false, defaultValue: null },
+    { name: 'provider', type: 'character varying', length: 20, nullable: false, defaultValue: null },
+    { name: 'reasoning_effort', type: 'character varying', length: 20, nullable: false, defaultValue: null },
+    { name: 'speed', type: 'character varying', length: 20, nullable: false, defaultValue: null },
+    { name: 'plan', type: 'jsonb', length: null, nullable: false, defaultValue: "'[]'::jsonb" },
+    { name: 'pending_question', type: 'jsonb', length: null, nullable: true, defaultValue: null },
+    { name: 'browser_projection', type: 'jsonb', length: null, nullable: true, defaultValue: null },
+    { name: 'resume_input', type: 'jsonb', length: null, nullable: true, defaultValue: null },
+    { name: 'reconciled_checkpoint_id', type: 'character varying', length: 200, nullable: true, defaultValue: null },
+    { name: 'execution_token', type: 'uuid', length: null, nullable: true, defaultValue: null },
+    { name: 'last_event_sequence', type: 'bigint', length: null, nullable: true, defaultValue: null },
+    { name: 'cancel_requested_at', type: 'timestamp with time zone', length: null, nullable: true, defaultValue: null },
+    { name: 'lease_expires_at', type: 'timestamp with time zone', length: null, nullable: true, defaultValue: null },
+    { name: 'started_at', type: 'timestamp with time zone', length: null, nullable: true, defaultValue: null },
+    { name: 'completed_at', type: 'timestamp with time zone', length: null, nullable: true, defaultValue: null },
+    { name: 'created_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
+    { name: 'updated_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
+  ],
+  agent_events: [
+    { name: 'sequence', type: 'bigint', length: null, nullable: false, defaultValue: "nextval('agent_events_sequence_seq'::regclass)" },
+    { name: 'run_id', type: 'uuid', length: null, nullable: false, defaultValue: null },
+    { name: 'turn_id', type: 'uuid', length: null, nullable: false, defaultValue: null },
+    { name: 'type', type: 'character varying', length: 64, nullable: false, defaultValue: null },
+    { name: 'data', type: 'jsonb', length: null, nullable: false, defaultValue: "'{}'::jsonb" },
+    { name: 'created_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
+  ],
 }
 
 const constraints: ConstraintContract[] = [
@@ -110,6 +152,18 @@ const constraints: ConstraintContract[] = [
   { table: 'conversations', name: 'conversations_project_id_projects_id_fk', type: 'f', definition: 'FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL' },
   { table: 'messages', name: '', type: 'p', definition: 'PRIMARY KEY (id)' },
   { table: 'messages', name: 'messages_conversation_id_conversations_id_fk', type: 'f', definition: 'FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE' },
+  { table: 'agent_workspaces', name: '', type: 'p', definition: 'PRIMARY KEY (id)' },
+  { table: 'agent_workspaces', name: 'agent_workspaces_user_id_users_id_fk', type: 'f', definition: 'FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE' },
+  { table: 'agent_workspaces', name: 'uq_agent_workspaces_user_id', type: 'u', definition: 'UNIQUE (user_id)' },
+  { table: 'agent_runs', name: '', type: 'p', definition: 'PRIMARY KEY (id)' },
+  { table: 'agent_runs', name: 'agent_runs_workspace_id_agent_workspaces_id_fk', type: 'f', definition: 'FOREIGN KEY (workspace_id) REFERENCES agent_workspaces(id) ON DELETE CASCADE' },
+  { table: 'agent_runs', name: 'agent_runs_user_id_users_id_fk', type: 'f', definition: 'FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE' },
+  { table: 'agent_runs', name: 'agent_runs_conversation_id_conversations_id_fk', type: 'f', definition: 'FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE' },
+  { table: 'agent_runs', name: 'agent_runs_assistant_message_id_messages_id_fk', type: 'f', definition: 'FOREIGN KEY (assistant_message_id) REFERENCES messages(id) ON DELETE CASCADE' },
+  { table: 'agent_runs', name: 'uq_agent_runs_turn_id', type: 'u', definition: 'UNIQUE (turn_id)' },
+  { table: 'agent_runs', name: 'uq_agent_runs_assistant_message_id', type: 'u', definition: 'UNIQUE (assistant_message_id)' },
+  { table: 'agent_events', name: '', type: 'p', definition: 'PRIMARY KEY (sequence)' },
+  { table: 'agent_events', name: 'agent_events_run_id_agent_runs_id_fk', type: 'f', definition: 'FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE' },
 ]
 
 const indexes: IndexContract[] = [
@@ -127,6 +181,12 @@ const indexes: IndexContract[] = [
   { table: 'conversations', name: 'ix_conversations_user_id_pinned_order', definition: 'CREATE INDEX ix_conversations_user_id_pinned_order ON public.conversations USING btree (user_id, pinned_order)' },
   { table: 'messages', name: 'ix_messages_conversation_id_created_at', definition: 'CREATE INDEX ix_messages_conversation_id_created_at ON public.messages USING btree (conversation_id, created_at)' },
   { table: 'messages', name: 'uq_messages_one_streaming_assistant', definition: "CREATE UNIQUE INDEX uq_messages_one_streaming_assistant ON public.messages USING btree (conversation_id) WHERE (((role)::text = 'assistant'::text) AND ((status)::text = 'streaming'::text))" },
+  { table: 'agent_workspaces', name: 'uq_agent_workspaces_user_id', definition: 'CREATE UNIQUE INDEX uq_agent_workspaces_user_id ON public.agent_workspaces USING btree (user_id)' },
+  { table: 'agent_runs', name: 'ix_agent_runs_status_lease_expires_at', definition: 'CREATE INDEX ix_agent_runs_status_lease_expires_at ON public.agent_runs USING btree (status, lease_expires_at)' },
+  { table: 'agent_runs', name: 'ix_agent_runs_user_id_created_at', definition: 'CREATE INDEX ix_agent_runs_user_id_created_at ON public.agent_runs USING btree (user_id, created_at)' },
+  { table: 'agent_runs', name: 'uq_agent_runs_assistant_message_id', definition: 'CREATE UNIQUE INDEX uq_agent_runs_assistant_message_id ON public.agent_runs USING btree (assistant_message_id)' },
+  { table: 'agent_runs', name: 'uq_agent_runs_turn_id', definition: 'CREATE UNIQUE INDEX uq_agent_runs_turn_id ON public.agent_runs USING btree (turn_id)' },
+  { table: 'agent_events', name: 'ix_agent_events_run_id_sequence', definition: 'CREATE INDEX ix_agent_events_run_id_sequence ON public.agent_events USING btree (run_id, sequence)' },
 ]
 
 const normalizeSql = (value: string) => value.toLowerCase()
@@ -174,7 +234,10 @@ const tableOrder = (table: string) => {
   if (table === 'sessions') return 3
   if (table === 'projects') return 4
   if (table === 'conversations') return 5
-  return 6
+  if (table === 'messages') return 6
+  if (table === 'agent_workspaces') return 7
+  if (table === 'agent_runs') return 8
+  return 9
 }
 const indexKey = (row: IndexContract) => `${tableOrder(row.table)}|${row.name}|${row.definition}`
 
@@ -183,7 +246,8 @@ export function validateIndexContract(rows: readonly IndexRow[]) {
   if (primary.length !== Object.keys(columns).length || primary.some((row) => {
     const table = String(row.table_name)
     const definition = normalizeSql(String(row.indexdef))
-    return !definition.startsWith('create unique index ') || !definition.includes(` on ${table} using btree (id)`)
+    const primaryColumn = table === 'agent_events' ? 'sequence' : 'id'
+    return !definition.startsWith('create unique index ') || !definition.includes(` on ${table} using btree (${primaryColumn})`)
   })) return false
   const actual = rows.filter((row) => !row.is_primary).map((row) => ({
     table: String(row.table_name), name: String(row.indexname), definition: normalizeSql(String(row.indexdef)),
@@ -206,7 +270,7 @@ export async function checkDatabase(databaseUrl = loadSettings().databaseUrl) {
              is_nullable, column_default, ordinal_position
       from information_schema.columns
       where table_schema = 'public'
-        and table_name in ('users', 'oauth_identities', 'sessions', 'projects', 'conversations', 'messages')
+        and table_name in ('users', 'oauth_identities', 'sessions', 'projects', 'conversations', 'messages', 'agent_workspaces', 'agent_runs', 'agent_events')
       order by table_name, ordinal_position
     `)).rows
     for (const [table, expected] of Object.entries(columns)) {
@@ -231,7 +295,8 @@ export async function checkDatabase(databaseUrl = loadSettings().databaseUrl) {
       join pg_namespace n on n.oid = c.connamespace
       where n.nspname = 'public' and c.contype <> 'n'
         and c.conrelid::regclass::text in (
-          'users', 'oauth_identities', 'sessions', 'projects', 'conversations', 'messages'
+          'users', 'oauth_identities', 'sessions', 'projects', 'conversations', 'messages',
+          'agent_workspaces', 'agent_runs', 'agent_events'
         )
     `)).rows
     if (!validateConstraintContract(constraintRows)) throw new Error('invalid database constraint contract')
@@ -243,14 +308,17 @@ export async function checkDatabase(databaseUrl = loadSettings().databaseUrl) {
       join pg_namespace index_namespace on index_namespace.oid = index_class.relnamespace
       join pg_index i on i.indexrelid = index_class.oid
       where p.schemaname = 'public' and index_namespace.nspname = 'public'
-        and p.tablename in ('users', 'oauth_identities', 'sessions', 'projects', 'conversations', 'messages')
+        and p.tablename in ('users', 'oauth_identities', 'sessions', 'projects', 'conversations', 'messages', 'agent_workspaces', 'agent_runs', 'agent_events')
       order by case p.tablename
         when 'users' then 1
         when 'oauth_identities' then 2
         when 'sessions' then 3
         when 'projects' then 4
         when 'conversations' then 5
-        else 6
+        when 'messages' then 6
+        when 'agent_workspaces' then 7
+        when 'agent_runs' then 8
+        else 9
       end, p.indexname
     `)).rows
     if (!validateIndexContract(indexRows)) throw new Error('invalid database index contract')
