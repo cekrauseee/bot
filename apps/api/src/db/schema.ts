@@ -86,6 +86,7 @@ export const projects = pgTable('projects', {
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   name: varchar('name', { length: 80 }).notNull(),
   slug: varchar('slug', { length: 100 }).notNull(),
+  workspacePath: text('workspace_path').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
@@ -133,6 +134,7 @@ export const agentWorkspaces = pgTable('agent_workspaces', {
 export const agentRuns = pgTable('agent_runs', {
   id: uuid('id').primaryKey().defaultRandom(),
   workspaceId: uuid('workspace_id').notNull().references(() => agentWorkspaces.id, { onDelete: 'cascade' }),
+  workingDirectory: text('working_directory').notNull().default('/workspace'),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   conversationId: uuid('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
   assistantMessageId: uuid('assistant_message_id').notNull().references(() => messages.id, { onDelete: 'cascade' }),

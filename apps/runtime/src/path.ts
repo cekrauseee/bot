@@ -4,7 +4,7 @@ import { InvalidRequestError } from './errors.js'
 
 export const WORKSPACE_ROOT = '/workspace'
 
-export function resolveWorkspacePath(input: string, allowRoot = true): string {
+export function resolveWorkspacePath(input: string, allowRoot = true, workingDirectory = WORKSPACE_ROOT): string {
   if (typeof input !== 'string' || input.length === 0 || input.length > 4096) {
     throw new InvalidRequestError('path must be a non-empty string.')
   }
@@ -24,11 +24,27 @@ export function resolveWorkspacePath(input: string, allowRoot = true): string {
   if (relative.split('/').some((segment) => segment === '..')) {
     throw new InvalidRequestError('path traversal is not allowed.')
   }
-  const normalized = posix.normalize(`/${relative}`)
-  if (!allowRoot && normalized === '/') {
+  const candidate = posix.normalize(input.startsWith('/') ? input : `${workingDirectory}/${relative}`)
+  // Preserve existing normalized tool paths (and journal fingerprints), including
+  // a trailing slash on non-root directories. The context itself is canonical.
+  const normalized = candidate === `${WORKSPACE_ROOT}/` ? WORKSPACE_ROOT : candidate
+  if (normalized.length > 4096) throw new InvalidRequestError('resolved path is too long.')
+  if (normalized !== WORKSPACE_ROOT && !normalized.startsWith(`${WORKSPACE_ROOT}/`)) {
+    throw new InvalidRequestError('absolute paths outside /workspace are not allowed.')
+  }
+  if (!allowRoot && normalized === WORKSPACE_ROOT) {
     throw new InvalidRequestError('the workspace root is not a valid file path.')
   }
-  return normalized === '/' ? WORKSPACE_ROOT : `${WORKSPACE_ROOT}${normalized}`
+  return normalized
+}
+
+export function resolveWorkingDirectory(input: string = WORKSPACE_ROOT): string {
+  const normalized = resolveWorkspacePath(input)
+  const hasControl = Array.from(input).some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
+  if (input !== normalized || input.endsWith('/') || hasControl) {
+    throw new InvalidRequestError('working_directory must be a canonical absolute workspace path.')
+  }
+  return normalized
 }
 
 export function workspaceRelativePath(path: string): string {

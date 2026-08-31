@@ -51,6 +51,7 @@ def test_runtime_tools_use_typed_schemas_and_normalized_dotted_requests() -> Non
                 conversation_id="conversation-1",
                 user_id="user-1",
                 workspace_id="workspace-1",
+                working_directory="/workspace/project",
             )
             client = RuntimeClient("https://runtime.invalid", token="token", client=http)
             tools = build_runtime_tools(client, context)
@@ -118,6 +119,7 @@ def test_runtime_tools_use_typed_schemas_and_normalized_dotted_requests() -> Non
         and item["body"]["run_id"] == "run-1"
         and item["body"]["conversation_id"] == "conversation-1"
         and item["body"]["user_id"] == "user-1"
+        and item["body"]["working_directory"] == "/workspace/project"
         for item in captured
     )
     assert all(
@@ -126,6 +128,32 @@ def test_runtime_tools_use_typed_schemas_and_normalized_dotted_requests() -> Non
         for item in captured
     )
     assert len({item["body"]["operation_id"] for item in captured}) == len(captured)
+
+
+def test_runtime_tools_use_contextual_defaults_for_filesystem_and_shell() -> None:
+    captured: list[dict[str, object]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(json.loads(request.content))
+        return httpx.Response(200, json={"result": {"ok": True}})
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            tools = build_runtime_tools(
+                RuntimeClient("https://runtime.invalid", client=http),
+                RuntimeContext("run", "conversation", "user", "workspace", "/workspace/app"),
+            )
+            by_name = {tool.name: tool for tool in tools}
+            for name in ("filesystem_list", "shell_exec"):
+                args = {"command": "true", "argv": []} if name == "shell_exec" else {}
+                result = await by_name[name].ainvoke(
+                    {"type": "tool_call", "id": f"call-{name}", "name": name, "args": args}
+                )
+                assert json.loads(result.content) == {"ok": True}
+
+    anyio.run(run)
+    assert captured[0]["arguments"] == {"path": "."}
+    assert captured[1]["arguments"] == {"command": "true", "argv": [], "cwd": "."}
 
 
 def test_agent_builds_an_isolated_runtime_client_for_each_request() -> None:
@@ -141,6 +169,7 @@ def test_agent_builds_an_isolated_runtime_client_for_each_request() -> None:
         model="gpt-5.6-luna",
         reasoning_effort="medium",
         speed="standard",
+        working_directory="/workspace/project/app",
     )
     clients: list[tuple[str, str | None]] = []
     contexts: list[RuntimeContext] = []
@@ -172,6 +201,7 @@ def test_agent_builds_an_isolated_runtime_client_for_each_request() -> None:
                 assert [event["type"] for event in events] == ["turn.started"]
                 assert events[0]["data"]["checkpoint"]["phase"] == "absent"
                 assert build.call_args.kwargs["runtime_tools"] is tools
+                assert build.call_args.kwargs["working_directory"] == body.working_directory
 
     with (
         patch("my_bot_ai.features.agent.service.RuntimeClient", FakeRuntimeClient),
@@ -184,6 +214,7 @@ def test_agent_builds_an_isolated_runtime_client_for_each_request() -> None:
         ("http://runtime.internal:8002", "runtime-token"),
     ]
     assert [context.workspace_id for context in contexts] == [str(workspace_id)] * 2
+    assert [context.working_directory for context in contexts] == [body.working_directory] * 2
 
 
 @pytest.mark.parametrize(

@@ -27,6 +27,43 @@ describe('runtime HTTP boundary', () => {
     vi.restoreAllMocks()
   })
 
+  it('resolves a project context over HTTP while retaining shared-workspace access', async () => {
+    const provider = createFakeRuntimeProvider()
+    const service = new RuntimeService({ providerFactory: async () => provider })
+    const server = createRuntimeServer({ service, serviceToken: 'service-secret' })
+    servers.push(server)
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const port = (server.address() as AddressInfo).port
+    const post = (input: Record<string, unknown>) => fetch(`http://127.0.0.1:${port}/tools`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer service-secret', 'content-type': 'application/json' },
+      body: JSON.stringify({ ...body, ...input }),
+    })
+    try {
+      const written = await post({
+        operation_id: 'project-write', working_directory: '/workspace/projects/site',
+        tool: 'filesystem.write', arguments: { path: 'notes.md', content: 'shared notes' },
+      })
+      expect(written.status).toBe(200)
+      expect(await written.json()).toEqual({ result: { path: '/workspace/projects/site/notes.md', written: true } })
+      const read = await post({
+        operation_id: 'root-read', run_id: 'run-2', conversation_id: 'conversation-2',
+        tool: 'filesystem.read', arguments: { path: '/workspace/projects/site/notes.md' },
+      })
+      expect(read.status).toBe(200)
+      expect(await read.json()).toMatchObject({ result: { content: 'shared notes' } })
+      const shell = await post({
+        operation_id: 'project-shell', working_directory: '/workspace/projects/site',
+        tool: 'shell.exec', arguments: { command: 'pwd', argv: [] },
+      })
+      expect(shell.status).toBe(200)
+      expect(await shell.json()).toMatchObject({ result: { cwd: '/workspace/projects/site' } })
+    } finally {
+      await service.dispose()
+    }
+  })
+
   it.each([
     ['shell.exec', { command: 'printf', argv: ['must not execute'] }],
     ['browser.click', { selector: '#submit' }],

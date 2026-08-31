@@ -559,6 +559,7 @@ def build_model(
     checkpointer: Any | None = None,
     runtime_tools: Sequence[BaseTool] = (),
     task_plan: Sequence[PlanStep] = (),
+    working_directory: str = "/workspace",
 ) -> tuple[Any, ProviderName]:
     """Build the sole LangChain/LangGraph orchestrator for one durable run."""
 
@@ -630,15 +631,17 @@ def build_model(
         ]
         if depth == 0:
             tools = [*hosted_tools, *build_core_tools(run_child), *runtime_tools]
-        system_prompt = None
+        system_prompt = (
+            "The shared workspace root is /workspace. "
+            f"Your working directory is {working_directory}. "
+            "Other files in /workspace remain accessible."
+        )
         if depth == 0 and current_task_plan:
             serialized_plan = json.dumps(
                 [step.model_dump(mode="json") for step in current_task_plan],
                 separators=(",", ":"),
             )
-            system_prompt = (
-                f"Current task plan (context only): {serialized_plan}"
-            )
+            system_prompt += f" Current task plan (context only): {serialized_plan}"
         graph = create_agent(
             model=llm,
             tools=tools,
@@ -727,6 +730,7 @@ async def prepare_agent_request(
                 conversation_id=str(body.conversation_id),
                 user_id=str(body.user_id),
                 workspace_id=str(body.workspace_id),
+                working_directory=body.working_directory,
             ),
         )
     graph, provider = build_model(
@@ -738,6 +742,7 @@ async def prepare_agent_request(
         checkpointer=checkpointer,
         runtime_tools=runtime_tools,
         task_plan=body.task_plan,
+        working_directory=body.working_directory,
     )
     config = graph_config(body.run_id)
     snapshot = await graph.aget_state(config)
