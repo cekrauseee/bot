@@ -2,7 +2,12 @@ import { Message, MessageContent, MessageGroup } from "./message";
 import { MessageScroller } from "./message-scroller";
 import { MessageBubble, MessageBubbleContent } from "./message-bubble";
 import { MessageBlockRenderer } from "./message-block-renderer";
-import type { ChatApprovalDecision, ChatMessage } from "@/features/chat/model";
+import type {
+  ChatApprovalDecision,
+  ChatMessage,
+  ChatQuestionAnswers,
+  ChatQuestionRequest,
+} from "@/features/chat/model";
 import { ResponseProcess } from "./response-process";
 import { isResponseProcessBlock } from "./response-process-model";
 import { cn } from "@/lib/utils";
@@ -11,11 +16,16 @@ import { useState } from "react";
 export function ChatMessageList({
   messages,
   onApprovalDecision,
+  onQuestionSubmit,
 }: {
   messages: ChatMessage[];
   onApprovalDecision?: (
     blockId: string,
     decision: ChatApprovalDecision,
+  ) => void;
+  onQuestionSubmit?: (
+    request: ChatQuestionRequest,
+    answers: ChatQuestionAnswers,
   ) => void;
 }) {
   const [initialMessageIds] = useState(
@@ -96,6 +106,7 @@ export function ChatMessageList({
                       key={block.id}
                       block={block}
                       onApprovalDecision={onApprovalDecision}
+                      onQuestionSubmit={onQuestionSubmit}
                       responseStatus={message.status}
                       sources={sources}
                     />

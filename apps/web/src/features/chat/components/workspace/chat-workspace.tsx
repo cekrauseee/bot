@@ -2,13 +2,21 @@ import type { ButtonState } from '@/components/motion/button/stateful'
 import { AnimatedSidebarInset } from '@/components/motion/animated-sidebar'
 import { Button } from '@/components/motion/button/base'
 import type {
+  ChatApprovalDecision,
+  ChatBrowserFrame,
+  ChatBrowserSession,
   ChatMessage,
   ChatModelOption,
-  ChatReasoningOption,
+  ChatQuestionAnswers,
+  ChatQuestionRequest,
+  ChatReasoningEffort,
+  ChatTodo,
   ChatUserView,
   ConversationSummary,
   ProjectSummary,
 } from '@/features/chat/model'
+import { cn } from '@/lib/utils'
+import { BrowserPip } from '../browser/browser-pip'
 import { ChatComposer } from '../composer/chat-composer'
 import { ChatMessageList } from '../messages/chat-message-list'
 import { ChatSidebar } from '../sidebar/chat-sidebar'
@@ -18,16 +26,19 @@ import { ChatShell } from './chat-shell'
 export type ChatWorkspaceProps = {
   title: string
   messages: ChatMessage[]
+  plan: ChatTodo[]
+  browser?: ChatBrowserSession
+  browserFrame?: ChatBrowserFrame
   models: ChatModelOption[]
-  reasoningOptions: ChatReasoningOption[]
   user: ChatUserView
-  reasoningEffort: string
+  reasoningEffort: ChatReasoningEffort
   model: string
   fastMode: boolean
   signOutError: string
   signOutStatus: ButtonState
   loading: boolean
   streaming: boolean
+  runActive: boolean
   status: string
   loadError: string
   turnError: string
@@ -42,17 +53,24 @@ export type ChatWorkspaceProps = {
   onConversationDelete: (id: string) => Promise<void>
   onComposerSubmit: (value: string, model?: string) => void | Promise<void>
   onComposerStop: () => void
-  onReasoningChange: (value: string) => void
+  onReasoningChange: (value: ChatReasoningEffort) => void
   onModelChange: (value: string) => void
   onSpeedChange: (value: boolean) => void
+  onApprovalDecision: (blockId: string, decision: ChatApprovalDecision) => void
+  onQuestionSubmit: (
+    request: ChatQuestionRequest,
+    answers: ChatQuestionAnswers,
+  ) => void
   onSignOut: () => void
 }
 
 export function ChatWorkspace({
   title,
   messages,
+  plan,
+  browser,
+  browserFrame,
   models,
-  reasoningOptions,
   user,
   reasoningEffort,
   model,
@@ -61,6 +79,7 @@ export function ChatWorkspace({
   signOutStatus,
   loading,
   streaming,
+  runActive,
   status,
   loadError,
   turnError,
@@ -78,6 +97,8 @@ export function ChatWorkspace({
   onReasoningChange,
   onModelChange,
   onSpeedChange,
+  onApprovalDecision,
+  onQuestionSubmit,
   onSignOut,
 }: ChatWorkspaceProps) {
   const empty = !loading && !loadError && messages.length === 0
@@ -87,15 +108,15 @@ export function ChatWorkspace({
     project.id === activeProjectId)?.name
   const composer = (
     <ChatComposer
+      plan={plan}
       models={models}
-      reasoningOptions={reasoningOptions}
       reasoningEffort={reasoningEffort}
       model={model}
       fastMode={fastMode}
-      loading={streaming}
+      loading={streaming || runActive}
       centered={empty}
       onSubmit={onComposerSubmit}
-      onStop={onComposerStop}
+      onStop={runActive ? onComposerStop : undefined}
       onReasoningChange={onReasoningChange}
       onModelChange={onModelChange}
       onSpeedChange={onSpeedChange}
@@ -129,8 +150,18 @@ export function ChatWorkspace({
             projectName={activeProjectName}
             mobileOnly={!activeConversationId}
           />
-          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className={cn(
+            "relative flex min-h-0 flex-1 flex-col overflow-hidden",
+            browser && browser.status !== 'closed' && "xl:pe-96",
+          )}>
             <span aria-live="polite" className="sr-only">{status}</span>
+            <BrowserPip
+              key={`docked-${browser?.id ?? 'none'}`}
+              session={browser}
+              frame={browserFrame}
+              layout="docked"
+              className="shrink-0 xl:hidden"
+            />
             {loading ? (
               <div className="grid min-h-0 flex-1 place-items-center" aria-busy="true">
                 <p role="status" className="text-sm text-muted-foreground">
@@ -149,7 +180,11 @@ export function ChatWorkspace({
             ) : (
               <>
                 <div className="min-h-0 flex-1">
-                  <ChatMessageList messages={messages} />
+                  <ChatMessageList
+                    messages={messages}
+                    onApprovalDecision={onApprovalDecision}
+                    onQuestionSubmit={onQuestionSubmit}
+                  />
                 </div>
                 {turnError ? (
                   <p
@@ -162,6 +197,12 @@ export function ChatWorkspace({
                 {composer}
               </>
             )}
+            <BrowserPip
+              key={`floating-${browser?.id ?? 'none'}`}
+              session={browser}
+              frame={browserFrame}
+              className="absolute end-5 top-5 hidden xl:block"
+            />
           </div>
         </AnimatedSidebarInset>
       </ChatShell>

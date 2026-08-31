@@ -15,6 +15,10 @@ export function ChatPage() {
   const [signOutError, setSignOutError] = useState('')
 
   useEffect(() => {
+    document.title = 'myBot'
+  }, [])
+
+  useEffect(() => {
     if (!isLoading && isUnauthorized) navigate('/sign', { replace: true })
   }, [isLoading, isUnauthorized, navigate])
 

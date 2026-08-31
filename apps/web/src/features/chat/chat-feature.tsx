@@ -1,29 +1,39 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import type { ButtonState } from '@/components/motion/button/stateful'
 import { ChatWorkspace } from './components/workspace/chat-workspace'
 import { useConversation } from './services/conversation-api'
-import type {
-  ChatModelOption,
-  ChatReasoningOption,
-  ChatUserView,
-  ConversationSummary,
-} from './model'
+import type { ChatModelSelection } from './model-catalog'
+import { normalizeModelSelection } from './model-catalog'
+import type { ChatUserView, ConversationSummary } from './model'
 
-const models: ChatModelOption[] = [
-  { value: 'gpt-5.6-sol', label: 'GPT 5.6 Sol' },
-  { value: 'gpt-5.6-luna', label: 'GPT 5.6 Luna' },
-]
+const defaultSelection: ChatModelSelection = {
+  model: 'gpt-5.6-sol',
+  reasoningEffort: 'medium',
+  processingMode: 'standard',
+}
 
-const reasoningOptions: ChatReasoningOption[] = [
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-  { value: 'xhigh', label: 'Extra high' },
-  { value: 'max', label: 'Max' },
-]
-
-type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+const savedSelection = (): ChatModelSelection => {
+  try {
+    const reasoningEffort = localStorage.getItem('mybot-reasoning')
+    const processingMode = localStorage.getItem('mybot-speed')
+    return {
+      model: localStorage.getItem('mybot-model') || defaultSelection.model,
+      reasoningEffort:
+        reasoningEffort === 'none' ||
+        reasoningEffort === 'low' ||
+        reasoningEffort === 'medium' ||
+        reasoningEffort === 'high' ||
+        reasoningEffort === 'xhigh' ||
+        reasoningEffort === 'max'
+          ? reasoningEffort
+          : defaultSelection.reasoningEffort,
+      processingMode: processingMode === 'fast' ? 'fast' : 'standard',
+    }
+  } catch {
+    return defaultSelection
+  }
+}
 
 export type ChatFeatureProps = {
   user: ChatUserView
@@ -51,23 +61,22 @@ export function ChatFeature({
   onSignOut,
 }: ChatFeatureProps) {
   const conversation = useConversation(conversationId, onConversationStarted)
-  const [model, setModel] = useState<'gpt-5.6-sol' | 'gpt-5.6-luna'>('gpt-5.6-sol')
-  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('medium')
-  const [fastMode, setFastMode] = useState(() => {
-    try {
-      return localStorage.getItem('mybot-speed') === 'fast'
-    } catch {
-      return false
-    }
-  })
+  const [selection, setSelection] = useState(savedSelection)
+  const normalizedSelection = useMemo(
+    () => normalizeModelSelection(conversation.models, selection),
+    [conversation.models, selection],
+  )
 
   useEffect(() => {
+    if (!normalizedSelection) return
     try {
-      localStorage.setItem('mybot-speed', fastMode ? 'fast' : 'standard')
+      localStorage.setItem('mybot-model', normalizedSelection.model)
+      localStorage.setItem('mybot-reasoning', normalizedSelection.reasoningEffort)
+      localStorage.setItem('mybot-speed', normalizedSelection.processingMode)
     } catch {
       // Browser storage is an optional preference, not conversation state.
     }
-  }, [fastMode])
+  }, [normalizedSelection])
 
   useEffect(() => {
     if (conversation.loading || !conversationId) return
@@ -88,7 +97,7 @@ export function ChatFeature({
   ])
 
   const leaveCurrentConversation = (navigate: () => void) => {
-    if (conversation.streaming) conversation.stop()
+    conversation.detach()
     navigate()
   }
 
@@ -96,16 +105,19 @@ export function ChatFeature({
     <ChatWorkspace
       title={conversation.title}
       messages={conversation.messages}
-      models={models}
-      reasoningOptions={reasoningOptions}
+      plan={conversation.plan}
+      browser={conversation.browser}
+      browserFrame={conversation.browserFrame}
+      models={conversation.models}
       user={user}
-      reasoningEffort={reasoningEffort}
-      model={model}
-      fastMode={fastMode}
+      reasoningEffort={normalizedSelection?.reasoningEffort ?? selection.reasoningEffort}
+      model={normalizedSelection?.model ?? selection.model}
+      fastMode={(normalizedSelection?.processingMode ?? selection.processingMode) === 'fast'}
       signOutError={signOutError}
       signOutStatus={signOutStatus}
       loading={conversation.loading}
       streaming={conversation.streaming}
+      runActive={Boolean(conversation.activeRunId)}
       status={conversation.status}
       loadError={conversation.loadError}
       turnError={conversation.turnError}
@@ -132,18 +144,43 @@ export function ChatFeature({
         await conversation.remove(id)
         onConversationDelete(id)
       }}
-      onComposerSubmit={(value, model) => conversation.send(
-        value,
-        model === 'gpt-5.6-luna' ? 'gpt-5.6-luna' : 'gpt-5.6-sol',
-        reasoningEffort,
-        fastMode ? 'fast' : 'standard',
-      )}
+      onComposerSubmit={(value, model) => {
+        const next = normalizeModelSelection(conversation.models, {
+          ...(normalizedSelection ?? selection),
+          model,
+        })
+        if (!next) return
+        return conversation.send(
+          value,
+          next.model,
+          next.reasoningEffort,
+          next.processingMode,
+        )
+      }}
       onComposerStop={conversation.stop}
-      onReasoningChange={(value) => setReasoningEffort(value as ReasoningEffort)}
-      onModelChange={(value) => setModel(
-        value === 'gpt-5.6-luna' ? 'gpt-5.6-luna' : 'gpt-5.6-sol',
-      )}
-      onSpeedChange={setFastMode}
+      onReasoningChange={(value) => {
+        const next = normalizeModelSelection(conversation.models, {
+          ...(normalizedSelection ?? selection),
+          reasoningEffort: value,
+        })
+        if (next) setSelection(next)
+      }}
+      onModelChange={(value) => {
+        const next = normalizeModelSelection(conversation.models, {
+          ...(normalizedSelection ?? selection),
+          model: value,
+        })
+        if (next) setSelection(next)
+      }}
+      onSpeedChange={(fast) => {
+        const next = normalizeModelSelection(conversation.models, {
+          ...(normalizedSelection ?? selection),
+          processingMode: fast ? 'fast' : 'standard',
+        })
+        if (next) setSelection(next)
+      }}
+      onApprovalDecision={conversation.decideApproval}
+      onQuestionSubmit={conversation.answerQuestion}
       onSignOut={onSignOut}
     />
   )

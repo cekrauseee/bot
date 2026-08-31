@@ -1,6 +1,12 @@
+import { useEffect } from 'react'
+
 import { LoginForm } from '@/features/auth/components/login-form'
 
 export function LoginPage() {
+  useEffect(() => {
+    document.title = 'Sign in · myBot'
+  }, [])
+
   return (
     <main className="relative flex min-h-svh flex-col">
       <section className="mx-auto flex w-full max-w-xl flex-1 items-center px-5 py-8 sm:px-6">

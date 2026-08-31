@@ -304,7 +304,7 @@ export function PromptInput({
             type={loading ? "button" : "submit"}
             size="icon"
             disabled={loading ? !onStop : !canSubmit}
-            aria-label={loading ? "Stop generating" : "Send prompt"}
+            aria-label={loading ? "Stop run" : "Send prompt"}
             onClick={loading ? onStop : undefined}
             className="size-8 rounded-full"
           >
