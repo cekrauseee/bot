@@ -6,6 +6,7 @@ import { Link } from 'react-router'
 import { AnimatedSidebarTrigger } from '@/components/motion/animated-sidebar'
 import { useAnimatedSidebar } from '@/components/motion/animated-sidebar-context'
 import { Tooltip } from '@/components/motion/tooltip'
+import { SPRING_SIDEBAR } from '@/lib/ease'
 import { cn } from '@/lib/utils'
 
 export function SidebarBrandHeader() {
@@ -14,8 +15,9 @@ export function SidebarBrandHeader() {
   const [hovered, setHovered] = useState(false)
   const [focusVisible, setFocusVisible] = useState(false)
   const [suppressCollapsedHover, setSuppressCollapsedHover] = useState(false)
+  const [closing, setClosing] = useState(false)
   const showToggle = (
-    expanded || focusVisible || (hovered && !suppressCollapsedHover)
+    expanded || closing || focusVisible || (hovered && !suppressCollapsedHover)
   )
   const showWordmark = expanded
   const fadeTransition = sidebar.reduce
@@ -71,58 +73,67 @@ export function SidebarBrandHeader() {
       >
         <Orbit aria-hidden="true" className="size-5" strokeWidth={2} />
       </motion.span>
-      <Tooltip
-        content={expanded ? 'Close sidebar' : 'Open sidebar'}
-        side={expanded ? 'bottom' : 'right'}
-        wrapperClassName={cn(
-          'z-10',
-          expanded
-            ? 'absolute end-0 top-1/2 -translate-y-1/2'
-            : 'absolute inset-y-0 start-0 size-11 items-center justify-center',
+      <motion.div
+        layout="position"
+        transition={sidebar.reduce ? { duration: 0 } : SPRING_SIDEBAR}
+        onLayoutAnimationComplete={() => {
+          if (!expanded) setClosing(false)
+        }}
+        className={cn(
+          'absolute inset-y-0 z-10 flex w-11 items-center justify-center',
+          expanded ? '-end-0.5' : 'start-0',
         )}
       >
-        <AnimatedSidebarTrigger
-          aria-label={expanded ? 'Close sidebar' : 'Open sidebar'}
-          onClick={(event) => {
-            if (!sidebar.isMobile && expanded) {
-              event.preventDefault()
-              setHovered(false)
-              setSuppressCollapsedHover(true)
-              sidebar.setOpen(false)
-            }
-          }}
-          onFocus={(event) => {
-            setFocusVisible(event.currentTarget.matches(':focus-visible'))
-          }}
-          onBlur={() => setFocusVisible(false)}
-          onPointerDown={(event) => {
-            if (event.pointerType !== 'touch') setFocusVisible(false)
-          }}
-          className={cn(
-            'relative size-10 rounded-xl text-muted-foreground transition-[background-color,color,opacity] duration-150 ease-out hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground focus-visible:opacity-100 motion-reduce:transition-none',
-            showToggle ? 'opacity-100' : 'opacity-0',
-          )}
+        <Tooltip
+          content={expanded ? 'Close sidebar' : 'Open sidebar'}
+          side={expanded ? 'bottom' : 'right'}
+          wrapperClassName="items-center justify-center"
         >
-          <motion.span
-            aria-hidden="true"
-            initial={false}
-            animate={{ opacity: expanded ? 1 : 0 }}
-            transition={fadeTransition}
-            className="absolute inset-0 grid place-items-center"
+          <AnimatedSidebarTrigger
+            aria-label={expanded ? 'Close sidebar' : 'Open sidebar'}
+            onClick={(event) => {
+              if (!sidebar.isMobile && expanded) {
+                event.preventDefault()
+                setHovered(false)
+                setSuppressCollapsedHover(true)
+                if (!sidebar.reduce) setClosing(true)
+                sidebar.setOpen(false)
+                event.currentTarget.blur()
+              }
+            }}
+            onFocus={(event) => {
+              setFocusVisible(event.currentTarget.matches(':focus-visible'))
+            }}
+            onBlur={() => setFocusVisible(false)}
+            onPointerDown={(event) => {
+              if (event.pointerType !== 'touch') setFocusVisible(false)
+            }}
+            className={cn(
+              'relative size-10 rounded-xl text-muted-foreground transition-[background-color,color,opacity] duration-150 ease-out hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground focus-visible:opacity-100 motion-reduce:transition-none',
+              showToggle ? 'opacity-100' : 'opacity-0',
+            )}
           >
-            <PanelLeftClose />
-          </motion.span>
-          <motion.span
-            aria-hidden="true"
-            initial={false}
-            animate={{ opacity: expanded ? 0 : 1 }}
-            transition={fadeTransition}
-            className="absolute inset-0 grid place-items-center"
-          >
-            <PanelLeftOpen />
-          </motion.span>
-        </AnimatedSidebarTrigger>
-      </Tooltip>
+            <motion.span
+              aria-hidden="true"
+              initial={false}
+              animate={{ opacity: expanded ? 1 : 0 }}
+              transition={fadeTransition}
+              className="absolute inset-0 grid place-items-center"
+            >
+              <PanelLeftClose />
+            </motion.span>
+            <motion.span
+              aria-hidden="true"
+              initial={false}
+              animate={{ opacity: expanded ? 0 : 1 }}
+              transition={fadeTransition}
+              className="absolute inset-0 grid place-items-center"
+            >
+              <PanelLeftOpen />
+            </motion.span>
+          </AnimatedSidebarTrigger>
+        </Tooltip>
+      </motion.div>
     </div>
   )
 }

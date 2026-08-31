@@ -19,7 +19,7 @@ export function ChatShellSkeleton({
       <p role="status" className="sr-only">{status}</p>
       <aside
         aria-hidden="true"
-        className="hidden h-svh w-[17rem] shrink-0 flex-col overflow-hidden border-r border-border md:flex"
+        className="hidden h-svh w-[17rem] shrink-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar md:flex"
       >
         <div className="flex shrink-0 flex-col gap-2 px-3 pt-3 pb-2">
           <div className="relative flex h-10 w-full min-w-0 items-center">

@@ -37,6 +37,14 @@ export const SPRING_LAYOUT = {
   mass: 0.6,
 } as const;
 
+/** Sidebar width and controls that must travel with its moving edge. */
+export const SPRING_SIDEBAR = {
+  type: "spring",
+  stiffness: 380,
+  damping: 35,
+  mass: 0.75,
+} as const;
+
 /** Cursor-follow physics for decorative mouse tracking (magnetic, tilt, dock). */
 export const SPRING_MOUSE = {
   stiffness: 200,

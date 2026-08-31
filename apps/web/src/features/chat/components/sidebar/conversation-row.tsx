@@ -142,7 +142,7 @@ export function ConversationRow({
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
       className={cn(
-        'group/conversation relative flex min-h-9 min-w-0 items-center rounded-xl text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground motion-reduce:transition-none',
+        'group/conversation relative flex min-h-9 min-w-0 items-center rounded-xl text-xs text-muted-foreground transition-[color] hover:bg-muted hover:text-foreground motion-reduce:transition-none',
         highlighted && 'bg-muted text-foreground',
         sidebarRowFocusRing,
         nested && 'ms-6',

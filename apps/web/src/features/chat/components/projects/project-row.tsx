@@ -129,7 +129,7 @@ export function ProjectRow({ project, open, onToggle, onRename, onDelete, reorde
         onPointerEnter={() => setHovered(true)}
         onPointerLeave={() => setHovered(false)}
         className={cn(
-          'group/project relative flex h-9 min-w-0 items-center rounded-xl transition-colors hover:bg-muted motion-reduce:transition-none',
+          'group/project relative flex h-9 min-w-0 items-center rounded-xl hover:bg-muted',
           sidebarRowFocusRing,
           highlighted && 'bg-muted',
         )}

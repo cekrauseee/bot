@@ -1,7 +1,6 @@
 import { forwardRef, type HTMLAttributes } from 'react'
 
 import { cn } from '@/lib/utils'
-import { SIDEBAR_ACTION_REVEAL_DURATION } from '../../motion/sidebar-motion'
 
 /** Actions cover the trailing text without changing its layout or scroll position. */
 export const SidebarRowActions = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement> & {
@@ -12,9 +11,9 @@ export const SidebarRowActions = forwardRef<HTMLDivElement, HTMLAttributes<HTMLD
     <div
       {...props}
       ref={ref}
-      style={{ ...style, transitionDuration: `${SIDEBAR_ACTION_REVEAL_DURATION}s` }}
+      style={style}
       className={cn(
-        'pointer-events-none absolute inset-y-1 end-1 flex items-stretch transition-opacity motion-reduce:transition-none',
+        'pointer-events-none absolute inset-y-1 end-1 flex items-stretch',
         visible ? 'opacity-100' : 'opacity-0',
         className,
       )}

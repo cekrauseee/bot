@@ -36,6 +36,7 @@ import {
   EASE_OUT,
   SPRING_LAYOUT,
   SPRING_PRESS,
+  SPRING_SIDEBAR,
 } from "@/lib/ease";
 import { cn } from "@/lib/utils";
 
@@ -49,16 +50,6 @@ const SIDEBAR_KEYBOARD_SHORTCUT = "b";
 const PANEL_TRANSITION = {
   duration: 0.36,
   ease: EASE_DRAWER,
-} as const;
-
-// The desktop rail settles at a hard zero-width boundary. Keep the spring
-// critically damped so it cannot overshoot, pause against that boundary, and
-// then snap back during the final frame.
-const SIDEBAR_MORPH_TRANSITION = {
-  type: "spring",
-  stiffness: 380,
-  damping: 35,
-  mass: 0.75,
 } as const;
 
 const LABEL_ENTER_TRANSITION = {
@@ -446,7 +437,7 @@ function MobileSidebar({
         }}
         className={cn(
           "pointer-events-auto fixed inset-y-0 flex h-dvh w-(--sidebar-width-mobile) max-w-[88vw] flex-col overflow-hidden",
-          "border-border bg-background shadow-2xl will-change-transform",
+          "border-sidebar-border bg-sidebar shadow-2xl will-change-transform",
           side === "left" ? "left-0 border-r" : "right-0 border-l",
           !context.openMobile && "pointer-events-none",
           className,
@@ -522,7 +513,7 @@ export const AnimatedSidebar = forwardRef<HTMLElement, AnimatedSidebarProps>(
         data-side={side}
         animate={{ width }}
         transition={
-          context.reduce ? { duration: 0 } : SIDEBAR_MORPH_TRANSITION
+          context.reduce ? { duration: 0 } : SPRING_SIDEBAR
         }
         style={style}
         className={cn(
@@ -550,7 +541,7 @@ export const AnimatedSidebar = forwardRef<HTMLElement, AnimatedSidebarProps>(
             // Keep the panel's useful layout at its expanded width while the
             // outer rail animates. This prevents labels and controls from
             // reflowing through intermediate widths during collapse/open.
-            "sticky top-0 flex h-svh w-[var(--sidebar-width)] min-w-[var(--sidebar-width)] flex-col overflow-hidden bg-background",
+            "sticky top-0 flex h-svh w-[var(--sidebar-width)] min-w-[var(--sidebar-width)] flex-col overflow-hidden bg-sidebar text-sidebar-foreground",
             variant === "floating" &&
               "m-2 h-[calc(100svh-1rem)] rounded-2xl border border-border shadow-sm",
             variant === "inset" && "m-2 h-[calc(100svh-1rem)] rounded-2xl",
