@@ -15,11 +15,15 @@
 
 ## Chat feature
 
-`src/features/chat/index.ts` is the single public entrypoint used by `ChatPage`. The page maps `AuthUser` to the application-owned user view model. `ChatFeature` owns model preferences and composes the conversation service with presentational components. The service loads conversations, parses SSE across arbitrary chunks, reconciles server IDs, and cancels active streams on navigation or Stop.
+`src/features/chat/index.ts` is the single public entrypoint used by `ChatPage`. `ChatFeature` owns model preferences and composes the conversation service with presentational components. The service loads conversations and active runs, parses SSE across arbitrary chunks, reconnects through WebSocket cursors, and reconciles optimistic and checkpoint-backed state. Navigation detaches the local view without cancelling background work; Stop calls the explicit run-cancellation endpoint.
 
 `/` shows the centered initial composer. The first `turn.started` navigates in place to `/conversations/:conversationId` without unmounting the active stream. Direct conversation URLs load durable history. The sidebar groups conversations by local calendar periods, and deletion requires an in-product confirmation.
 
-Assistant text is parsed as safe Markdown. The beUI streaming response surface owns completion actions and citations, while the beUI code block renders fenced code during and after streaming. Reasoning summaries and real web-search activity remain separate from the final response. Existing approval, plan, task, tool, and resource components remain in the source tree for future features.
+Assistant text is parsed as safe Markdown. Reasoning summaries, searches, tools, and child agents remain separate from final text. Each conversation has one macro task plan, shown as a compact badge above the composer and expanded through a popover rather than inserted into messages. The latest plan survives completed runs, new turns, and reloads. `ask_user` interrupts render through the beUI approval-card surface with keyboard-correct choice behavior, custom answers, and resumable ownership. Stop remains available while a run is waiting for input.
+
+The composer loads `/models` and adapts reasoning choices and Fast mode to the selected provider. OpenAI and xAI entries retain distinct provider icons. Invalid saved preferences fall back to the selected model's server-provided defaults.
+
+Run-scoped browser state appears in a compact picture-in-picture surface. Durable status and URL survive reload; bounded images arrive only as transient WebSocket frames. Wide viewports reserve room for a minimizable floating preview. Narrow viewports dock the same preview in layout flow so it does not cover messages or questions. The preview closes visually with the run. User takeover is intentionally not shown until a trusted control channel exists.
 
 ## Authentication
 

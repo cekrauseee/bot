@@ -21,11 +21,11 @@ The setup script:
 - installs the npm workspace and Python AI lockfiles. A marker under `node_modules` records a fingerprint of the root npm lockfile, Turbo configuration, npm workspace manifests, and `apps/ai/pyproject.toml`, `apps/ai/uv.lock`, and `apps/ai/.python-version` only after both installs succeed; changing any of these dependency inputs invalidates readiness and reruns installation;
 - builds the `@my-bot/email` workspace package consumed by the API;
 - creates `.env` and `apps/web/.env` only when absent;
-- generates independent local authentication and AI service secrets without printing or replacing existing values;
+- generates independent local authentication, AI service, and runtime service secrets without printing or replacing existing values;
 - starts the dedicated PostgreSQL and Redis services;
 - applies all database migrations.
 
-It reports the remaining Google and Resend variables without blocking local UI development. Add those provider credentials to `.env`, register `http://localhost:8000/auth/google/callback`, then run `npm run auth:check`. Set `OPENAI_API_KEY` in the same server-only file when real agent responses are needed. The setup script never provisions or prints that provider key.
+It reports the remaining Google and Resend variables without blocking local UI development. Add those provider credentials to `.env`, register `http://localhost:8000/auth/google/callback`, then run `npm run auth:check`. Set `OPENAI_API_KEY` and/or `XAI_API_KEY` in the same server-only file when real agent responses are needed. Provider keys are never exposed to `apps/web`.
 
 ## Daily Development
 
@@ -33,7 +33,14 @@ It reports the remaining Google and Resend variables without blocking local UI d
 npm run dev
 ```
 
-This command ensures environment files, dependencies, infrastructure, and migrations are ready. It then runs the Elysia API on `8000`, the FastAPI AI service on `8001`, and Vite on `5173`. Vite uses `strictPort`, so a busy `5173` fails with a clear startup error instead of silently moving to another port; stop the conflicting process and retry. `Ctrl+C` stops every application process. Open `http://localhost:5173`; use `localhost`, not `127.0.0.1`, so the configured browser origin matches.
+This command ensures environment files, dependencies, infrastructure, and migrations are ready. It then runs Elysia on `8000`, FastAPI on `8001`, the private agent runtime on `8002`, and Vite on `5173`. Vite uses `strictPort`, so a busy `5173` fails with a clear startup error instead of silently moving to another port; stop the conflicting process and retry. `Ctrl+C` stops every application process. Open `http://localhost:5173`; use `localhost`, not `127.0.0.1`, so the configured browser origin matches.
+
+The runtime's `/health` endpoint verifies liveness. `/ready` remains unavailable until one of these Vercel credential sets exists:
+
+- `VERCEL_OIDC_TOKEN`; or
+- `VERCEL_TOKEN`, `VERCEL_PROJECT_ID`, and `VERCEL_TEAM_ID`.
+
+Without these values, the web, API, AI loop, plans, questions, and provider tools can still be developed, but filesystem, shell, and browser runtime calls return a safe unavailable error. `AGENT_BROWSER_SNAPSHOT_ID` is optional and avoids first-boot browser installation when a compatible snapshot was prepared separately.
 
 Stop the background database and Redis containers when they are no longer needed:
 
@@ -55,7 +62,7 @@ Run `npm run help` for the current command guide. The primary workflows are:
 | --- | --- |
 | `npm run help` | Show the categorized command guide |
 | `npm run setup` | Bootstrap dependencies, environment, infrastructure, and migrations |
-| `npm run dev` | Prepare and run the web, Elysia API, and FastAPI AI service together |
+| `npm run dev` | Prepare and run the web, application API, AI service, and private runtime together |
 | `npm run verify` | Run the complete repository and authentication integration verification |
 | `npm run check` | Run checks and production builds without integration infrastructure |
 
@@ -74,7 +81,7 @@ Operational commands:
 
 `infra:reset` is destructive for local infrastructure: it removes this Compose project's containers, volumes, and orphan containers before starting PostgreSQL and Redis again. It does not remove Docker images or repository files.
 
-`npm run db:seed` is development-only and idempotent. It seeds five complete conversations across the sidebar date groups, including rich Markdown, reasoning summaries, searches, steps, tool activity, and trace examples. The data is assigned to the most recently active local user, the only existing user, or a dedicated `demo@mybot.local` user in that order. Set `MYBOT_SEED_USER_EMAIL` for an explicit account. Re-running the command refreshes the curated seeded messages without deleting later turns.
+`npm run db:seed` is development-only and idempotent. It seeds 32 complete conversations and 336 messages across the sidebar date groups, including rich Markdown, reasoning summaries, searches, steps, tool activity, and trace examples. The data is assigned to the most recently active local user, the only existing user, or a dedicated `demo@mybot.local` user in that order. Set `MYBOT_SEED_USER_EMAIL` for an explicit account. Re-running the command refreshes the curated seeded messages without deleting later turns.
 
 Seeded UUIDs are application database identifiers only. Conversation continuations are rebuilt from ordered `role` and `content` pairs, and the AI service keeps provider storage disabled; seeded IDs are never sent as OpenAI response or message references.
 
@@ -84,6 +91,7 @@ Project-specific commands remain available for focused development and diagnosis
 | --- | --- | --- | --- |
 | API | `api:dev` | `api:lint`, `api:typecheck`, `api:test`, `api:test:integration` | `api:build` |
 | AI | `ai:dev` | `ai:lint`, `ai:test` | — |
+| Runtime | `runtime:dev` | `runtime:lint`, `runtime:typecheck`, `runtime:test` | `runtime:build` |
 | Web | `web:dev` | `web:lint`, `web:typecheck`, `web:test` | `web:build` |
 | Email | `email:dev` | `email:typecheck` | `email:build` |
 | Automation | — | `scripts:lint`, `scripts:test` | — |
@@ -116,3 +124,5 @@ The web quality commands also include `npm run web:test` for conversation protoc
 ## Conventions
 
 Repository-specific implementation constraints live in [`AGENTS.md`](../AGENTS.md). Keep public developer documentation concise, factual, and in English.
+
+For aggregate feature branches, child PRs, evidence, and integration boundaries, follow the [delivery and review guide](delivery.md).
