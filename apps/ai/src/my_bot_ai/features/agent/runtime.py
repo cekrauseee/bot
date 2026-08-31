@@ -27,6 +27,7 @@ class RuntimeContext:
     conversation_id: str
     user_id: str
     workspace_id: str
+    working_directory: str = "/workspace"
 
 
 class RuntimeClient:
@@ -128,7 +129,7 @@ class RuntimeToolInput(BaseModel):
 
 
 class FilesystemListInput(RuntimeToolInput):
-    path: RuntimePath = "/workspace"
+    path: RuntimePath = "."
 
 
 class FilesystemReadInput(RuntimeToolInput):
@@ -145,7 +146,7 @@ class ShellExecInput(RuntimeToolInput):
     argv: list[Annotated[str, Field(min_length=1, max_length=16_384)]] = Field(
         default_factory=list, max_length=128
     )
-    cwd: RuntimePath = "/workspace"
+    cwd: RuntimePath = "."
 
 
 class BrowserOpenInput(RuntimeToolInput):
@@ -173,7 +174,7 @@ def build_runtime_tools(client: RuntimeClient, context: RuntimeContext) -> tuple
         return sha256(value).hexdigest()
 
     async def filesystem_list(
-        path: str = "/workspace",
+        path: str = ".",
         tool_call_id: Annotated[str, InjectedToolCallId] = "",
     ) -> Any:
         name = "filesystem.list"
@@ -203,7 +204,7 @@ def build_runtime_tools(client: RuntimeClient, context: RuntimeContext) -> tuple
     async def shell_exec(
         command: str,
         argv: list[str],
-        cwd: str = "/workspace",
+        cwd: str = ".",
         tool_call_id: Annotated[str, InjectedToolCallId] = "",
     ) -> Any:
         name = "shell.exec"

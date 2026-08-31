@@ -198,6 +198,18 @@ describe('Vercel provider boundaries', () => {
     expect(name.length).toBeLessThanOrEqual(63)
   })
 
+  it('creates project directories as the unprivileged agent with cancellation propagation', async () => {
+    const test = createSandboxDouble({ lookup: 'existing', userExists: true })
+    const provider = await createVercelProviderFactory({ env: { VERCEL_OIDC_TOKEN: 'present' }, importModule: test.importModule })('workspace-1')
+    const controller = new AbortController()
+    await provider.filesystem.mkdir('/workspace/projects/my-site', controller.signal)
+    expect(test.commands).toContainEqual({
+      scope: 'agent', cmd: 'mkdir', args: ['-p', '--', '/workspace/projects/my-site'], cwd: '/', signal: controller.signal,
+    })
+    expect(test.commands.some((command) => command.scope === 'sandbox' && command.cmd === 'mkdir')).toBe(false)
+    await provider.dispose?.()
+  })
+
   it('recognizes only safe credential presence', () => {
     expect(hasVercelCredentials({})).toBe(false)
     expect(hasVercelCredentials({ VERCEL_OIDC_TOKEN: 'present' })).toBe(true)

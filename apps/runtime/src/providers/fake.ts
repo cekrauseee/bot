@@ -31,6 +31,10 @@ export class FakeFilesystem implements FilesystemProvider, OperationJournalProvi
     })
   }
 
+  async mkdir(path: string): Promise<void> {
+    this.ensureDirectory(path)
+  }
+
   async read(path: string): Promise<string> {
     const node = this.nodes.get(path)
     if (!node || node.type !== 'file') throw new Error('fake file not found')
@@ -57,6 +61,7 @@ export class FakeFilesystem implements FilesystemProvider, OperationJournalProvi
   }
 
   private ensureDirectory(path: string): void {
+    if (this.nodes.get(path)?.type === 'file') throw new Error('fake path is not a directory')
     if (path === '/') return
     const parent = parentPath(path)
     this.ensureDirectory(parent)

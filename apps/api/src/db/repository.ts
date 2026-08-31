@@ -12,6 +12,7 @@ import {
   users,
 } from './schema.js'
 import type { Db } from './database.js'
+import { projectWorkspacePath } from '../modules/projects.js'
 
 export type User = typeof users.$inferSelect
 export type Session = typeof sessions.$inferSelect & { user?: User }
@@ -208,8 +209,9 @@ export class ProjectRepository {
   }
 
   async create(userId: string, name: string, slug: string) {
+    const id = randomUUID()
     const [project] = await this.db.insert(projects)
-      .values({ userId, name, slug })
+      .values({ id, userId, name, slug, workspacePath: projectWorkspacePath(id, slug) })
       .onConflictDoNothing({ target: [projects.userId, projects.slug] })
       .returning()
     return project
@@ -489,9 +491,18 @@ export class AgentRunRepository {
   async create(input: CreateAgentRun) {
     const workspace = await this.workspaceFor(input.userId)
     const plan = await this.taskPlanFor(input.userId, input.conversationId)
+    const [context] = await this.db.select({ workspacePath: projects.workspacePath })
+      .from(conversations)
+      .leftJoin(projects, and(
+        eq(conversations.projectId, projects.id),
+        eq(projects.userId, input.userId),
+      ))
+      .where(and(eq(conversations.id, input.conversationId), eq(conversations.userId, input.userId)))
+    if (!context) throw new Error('conversation_not_found')
     const [run] = await this.db.insert(agentRuns).values({
       ...input,
       workspaceId: workspace.id,
+      workingDirectory: context.workspacePath ?? '/workspace',
       plan,
       status: 'queued',
     }).returning()

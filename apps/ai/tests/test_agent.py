@@ -53,6 +53,7 @@ async def fake_runner(_body, _settings):
 def test_agent_request_validates_task_plan_with_empty_default() -> None:
     body = AgentRequest.model_validate(PAYLOAD)
     assert body.task_plan == []
+    assert body.working_directory == "/workspace"
     with pytest.raises(ValidationError):
         AgentRequest.model_validate({
             **PAYLOAD,
@@ -66,6 +67,61 @@ def test_agent_request_validates_task_plan_with_empty_default() -> None:
                 for index in range(51)
             ],
         })
+
+
+@pytest.mark.parametrize(
+    "working_directory",
+    [
+        "relative",
+        "",
+        ".",
+        "/tmp",
+        "/workspace-other",
+        "/workspace/../tmp",
+        "/workspace/project/../app",
+        "/workspace\\tmp",
+        "/workspace/.",
+        "/workspace/project/./app",
+        "/workspace//project",
+        "//workspace/project",
+        "/workspace/",
+        "/workspace/project/",
+        pytest.param(
+            "/workspace/" + "a" * (4_097 - len("/workspace/")),
+            id="over-length-limit",
+        ),
+    ],
+)
+def test_agent_request_rejects_invalid_working_directory(working_directory: str) -> None:
+    with pytest.raises(ValidationError):
+        AgentRequest.model_validate({**PAYLOAD, "working_directory": working_directory})
+
+
+@pytest.mark.parametrize("codepoint", [*range(32), 127])
+def test_agent_request_rejects_working_directory_control_characters(codepoint: int) -> None:
+    with pytest.raises(ValidationError):
+        AgentRequest.model_validate({
+            **PAYLOAD,
+            "working_directory": f"/workspace/project{chr(codepoint)}app",
+        })
+
+
+@pytest.mark.parametrize(
+    "working_directory",
+    [
+        "/workspace",
+        "/workspace/project",
+        "/workspace/project/app",
+        "/workspace/project name/.hidden",
+        pytest.param(
+            "/workspace/" + "a" * (4_096 - len("/workspace/")),
+            id="at-length-limit",
+        ),
+    ],
+)
+def test_agent_request_preserves_canonical_working_directory(working_directory: str) -> None:
+    body = AgentRequest.model_validate({**PAYLOAD, "working_directory": working_directory})
+    assert body.working_directory == working_directory
 
 
 class Chunk:
@@ -533,6 +589,7 @@ def test_child_agents_are_recursive_configurable_and_checkpoint_led() -> None:
     saver = object()
     runtime_tool = object()
     root_graph = object()
+    working_directory = "/workspace/project/app"
 
     class ChildGraph:
         async def aget_state(self, config):
@@ -590,6 +647,7 @@ def test_child_agents_are_recursive_configurable_and_checkpoint_led() -> None:
             checkpointer=saver,
             runtime_tools=(runtime_tool,),
             task_plan=[PlanStep(id="inspect", title="Inspect the workspace", status="in_progress")],
+            working_directory=working_directory,
         )
         assert graph is root_graph
         assert provider == "openai"
@@ -633,7 +691,6 @@ def test_child_agents_are_recursive_configurable_and_checkpoint_led() -> None:
             for tool in created[1]["tools"]
             if getattr(tool, "name", None) == "delegate_to_child_agent"
         )
-        assert created[1]["system_prompt"] is None
         grandchild = anyio.run(
             child_delegate.ainvoke,
             {
@@ -647,6 +704,21 @@ def test_child_agents_are_recursive_configurable_and_checkpoint_led() -> None:
         assert replayed.content == first.content
         assert grandchild.content == "Completed Run focused checks"
 
+    assert [call["name"] for call in created] == [
+        "my-bot-agent",
+        "my-bot-child-1",
+        "my-bot-child-1",
+        "my-bot-child-2",
+    ]
+    for call in created:
+        prompt = call["system_prompt"]
+        assert "The shared workspace root is /workspace." in prompt
+        assert f"Your working directory is {working_directory}." in prompt
+        assert "Other files in /workspace remain accessible." in prompt
+    assert "Current task plan (context only)" in created[0]["system_prompt"]
+    assert all(
+        "Current task plan (context only)" not in call["system_prompt"] for call in created[1:]
+    )
     assert all(call["checkpointer"] is saver for call in created[1:])
     assert all(runtime_tool in call["tools"] for call in created[1:])
     assert all(

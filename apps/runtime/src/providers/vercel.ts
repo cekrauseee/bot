@@ -204,6 +204,13 @@ async function resolveAgentUser(sandbox: Sandbox): Promise<SandboxUser> {
 class VercelFilesystem implements FilesystemProvider {
   constructor(private readonly runtime: RuntimeContextFactory) {}
 
+  async mkdir(path: string, signal?: AbortSignal): Promise<void> {
+    const { agent } = await this.runtime()
+    signal?.throwIfAborted()
+    const result = await agent.runCommand({ cmd: 'mkdir', args: ['-p', '--', path], cwd: '/', signal })
+    if (result.exitCode !== 0) throw new Error('workspace directory could not be created')
+  }
+
   async list(path: string, signal?: AbortSignal): Promise<readonly DirectoryEntry[]> {
     const { agent } = await this.runtime()
     signal?.throwIfAborted()
@@ -223,9 +230,7 @@ class VercelFilesystem implements FilesystemProvider {
   async write(path: string, content: string, signal?: AbortSignal): Promise<void> {
     const { agent } = await this.runtime()
     signal?.throwIfAborted()
-    const parent = parentPath(path)
-    const prepared = await agent.runCommand({ cmd: 'mkdir', args: ['-p', parent], cwd: '/', signal })
-    if (prepared.exitCode !== 0) throw new Error('workspace directory could not be created')
+    await this.mkdir(parentPath(path), signal)
     signal?.throwIfAborted()
     await agent.writeFiles([{ path, content: Buffer.from(content, 'utf8'), mode: 0o600 }], { signal })
   }

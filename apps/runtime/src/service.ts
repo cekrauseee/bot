@@ -1,7 +1,7 @@
 import type { BrowserFrameRelay, JsonObject, RuntimeToolRequest, RuntimeToolResponse, TrustedControlChannel } from './contracts.js'
 import { RuntimeUnavailableError, toPublicError } from './errors.js'
 import { OperationJournal } from './operation-journal.js'
-import { resolveWorkspacePath } from './path.js'
+import { resolveWorkingDirectory, resolveWorkspacePath, WORKSPACE_ROOT } from './path.js'
 import { redactSensitiveText } from './security.js'
 import { validateArguments } from './validation.js'
 import { WorkspaceRegistry, type RuntimeWorkspace } from './workspace.js'
@@ -23,13 +23,19 @@ export class RuntimeService {
 
   async execute(request: RuntimeToolRequest, signal?: AbortSignal): Promise<RuntimeToolResponse> {
     signal?.throwIfAborted()
-    const args = validateArguments(request.tool, request.arguments)
+    const workingDirectory = resolveWorkingDirectory(request.working_directory)
+    const args = validateArguments(request.tool, request.arguments, workingDirectory)
     const normalizedRequest: RuntimeToolRequest = { ...request, arguments: args }
     const workspaceId = request.workspace_id
     const workspace = await this.workspaces.get(workspaceId)
     try {
       const result = await workspace.runExclusive(async () => {
         signal?.throwIfAborted()
+        if (workingDirectory !== WORKSPACE_ROOT && (request.tool.startsWith('filesystem.') || request.tool === 'shell.exec')) {
+          // Directory preparation is convergent and must succeed before claiming a tool effect.
+          await workspace.provider.filesystem.mkdir(workingDirectory, signal)
+          signal?.throwIfAborted()
+        }
         const journal = new OperationJournal(workspace.provider.operationJournal)
         return journal.execute(
           normalizedRequest,

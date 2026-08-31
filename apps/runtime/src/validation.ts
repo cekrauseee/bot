@@ -1,6 +1,6 @@
 import type { JsonObject, RuntimeToolName, RuntimeToolRequest } from './contracts.js'
 import { InvalidRequestError } from './errors.js'
-import { resolveWorkspacePath } from './path.js'
+import { resolveWorkingDirectory, resolveWorkspacePath, WORKSPACE_ROOT } from './path.js'
 
 const TOOL_NAMES = new Set<RuntimeToolName>([
   'filesystem.list',
@@ -46,10 +46,11 @@ function objectField(value: unknown, label: string): JsonObject {
 
 export function parseRuntimeRequest(value: unknown): RuntimeToolRequest {
   if (!isRecord(value)) throw new InvalidRequestError('request body must be a JSON object.')
-  assertExactKeys(value, ['version', 'operation_id', 'run_id', 'conversation_id', 'user_id', 'workspace_id', 'tool', 'arguments'], 'request')
+  assertExactKeys(value, ['version', 'operation_id', 'run_id', 'conversation_id', 'user_id', 'workspace_id', 'working_directory', 'tool', 'arguments'], 'request')
   if (value.version !== 2) throw new InvalidRequestError('version must be 2.')
   const tool = stringField(value.tool, 'tool')
   if (!TOOL_NAMES.has(tool as RuntimeToolName)) throw new InvalidRequestError('unsupported runtime tool.')
+  const workingDirectory = resolveWorkingDirectory(optionalStringField(value.working_directory, 'working_directory') ?? WORKSPACE_ROOT)
   return {
     version: 2,
     operation_id: stringField(value.operation_id, 'operation_id', 200),
@@ -57,30 +58,31 @@ export function parseRuntimeRequest(value: unknown): RuntimeToolRequest {
     conversation_id: stringField(value.conversation_id, 'conversation_id', 200),
     user_id: stringField(value.user_id, 'user_id', 200),
     workspace_id: stringField(value.workspace_id, 'workspace_id', 200),
+    working_directory: workingDirectory,
     tool: tool as RuntimeToolName,
-    arguments: validateArguments(tool as RuntimeToolName, objectField(value.arguments, 'arguments')),
+    arguments: validateArguments(tool as RuntimeToolName, objectField(value.arguments, 'arguments'), workingDirectory),
   }
 }
 
-export function validateArguments(tool: RuntimeToolName, args: JsonObject): JsonObject {
+export function validateArguments(tool: RuntimeToolName, args: JsonObject, workingDirectory = WORKSPACE_ROOT): JsonObject {
   switch (tool) {
     case 'filesystem.list': {
       assertExactKeys(args, ['path'], tool)
-      return { path: resolveWorkspacePath(optionalStringField(args.path, 'path') ?? '/workspace') }
+      return { path: resolveWorkspacePath(optionalStringField(args.path, 'path') ?? '.', true, workingDirectory) }
     }
     case 'filesystem.read': {
       assertExactKeys(args, ['path'], tool)
-      return { path: resolveWorkspacePath(stringField(args.path, 'path'), false) }
+      return { path: resolveWorkspacePath(stringField(args.path, 'path'), false, workingDirectory) }
     }
     case 'filesystem.write': {
       assertExactKeys(args, ['path', 'content'], tool)
-      return { path: resolveWorkspacePath(stringField(args.path, 'path'), false), content: contentField(args.content, 'content', 2_000_000) }
+      return { path: resolveWorkspacePath(stringField(args.path, 'path'), false, workingDirectory), content: contentField(args.content, 'content', 2_000_000) }
     }
     case 'shell.exec': {
       assertExactKeys(args, ['command', 'argv', 'cwd'], tool)
       if (!Array.isArray(args.argv) || args.argv.length > 128) throw new InvalidRequestError('argv must be an array of at most 128 strings.')
       const argv = args.argv.map((item, index) => stringField(item, `argv[${index}]`, 16_384))
-      return { command: stringField(args.command, 'command', 512), argv, cwd: resolveWorkspacePath(optionalStringField(args.cwd, 'cwd') ?? '/workspace') }
+      return { command: stringField(args.command, 'command', 512), argv, cwd: resolveWorkspacePath(optionalStringField(args.cwd, 'cwd') ?? '.', true, workingDirectory) }
     }
     case 'browser.open':
       assertExactKeys(args, ['url'], tool)

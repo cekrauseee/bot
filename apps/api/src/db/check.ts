@@ -22,6 +22,7 @@ type ColumnRow = QueryRow & {
   column_default: unknown
 }
 
+// Physical column order follows migrations, not the ORM declaration order.
 const columns: Record<string, ColumnContract[]> = {
   users: [
     { name: 'id', type: 'uuid', length: null, nullable: false, defaultValue: 'gen_random_uuid()' },
@@ -60,6 +61,7 @@ const columns: Record<string, ColumnContract[]> = {
     { name: 'updated_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
     { name: 'sort_order', type: 'integer', length: null, nullable: true, defaultValue: null },
     { name: 'order_updated_at', type: 'timestamp with time zone', length: null, nullable: true, defaultValue: null },
+    { name: 'workspace_path', type: 'text', length: null, nullable: false, defaultValue: null },
   ],
   conversations: [
     { name: 'id', type: 'uuid', length: null, nullable: false, defaultValue: 'gen_random_uuid()' },
@@ -120,6 +122,7 @@ const columns: Record<string, ColumnContract[]> = {
     { name: 'completed_at', type: 'timestamp with time zone', length: null, nullable: true, defaultValue: null },
     { name: 'created_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
     { name: 'updated_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
+    { name: 'working_directory', type: 'text', length: null, nullable: false, defaultValue: "'/workspace'::text" },
   ],
   agent_events: [
     { name: 'sequence', type: 'bigint', length: null, nullable: false, defaultValue: "nextval('agent_events_sequence_seq'::regclass)" },
