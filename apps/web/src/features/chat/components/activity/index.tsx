@@ -5,14 +5,15 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   type ReactNode,
   useCallback,
+  useContext,
   useEffect,
   useId,
-  useLayoutEffect,
   useRef,
   useState,
 } from "react";
 import { ThinkingShimmer } from "./thinking-shimmer";
 import { CollapsiblePanel } from "../shared/collapsible-panel";
+import { TranscriptInteractionContext } from "../shared/transcript-interaction-context";
 import {
   EASE_OUT,
   SPRING_LAYOUT,
@@ -132,11 +133,11 @@ export function AgentActivity({
   className,
   contentClassName,
 }: AgentActivityProps) {
+  const pauseTranscriptFollowing = useContext(TranscriptInteractionContext);
   const reduce = useReducedMotion() ?? false;
   const baseId = useId();
   const triggerId = `${baseId}-trigger`;
   const contentId = `${baseId}-content`;
-  const contentRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const previousStatus = useRef(status);
   const [contentHeight, setContentHeight] = useState(0);
@@ -157,8 +158,7 @@ export function AgentActivity({
     ? Math.min(0, viewportHeight - contentHeight)
     : 0;
 
-  useLayoutEffect(() => {
-    const node = contentRef.current;
+  const measureContent = useCallback((node: HTMLDivElement | null) => {
     if (!node) return;
 
     const measure = () => setContentHeight(node.offsetHeight);
@@ -178,6 +178,7 @@ export function AgentActivity({
   }, [collapseOnComplete, setOpen, status]);
 
   const toggle = () => {
+    pauseTranscriptFollowing?.();
     const next = !currentOpen;
     setOpen(next);
     if (next) requestAnimationFrame(() => viewportRef.current?.scrollTo({ top: 0 }));
@@ -196,7 +197,7 @@ export function AgentActivity({
       data-state={working ? "working" : expanded ? "open" : "closed"}
       data-content={contentType}
       aria-busy={working}
-      className={cn("w-full min-w-0 max-w-full overflow-x-hidden text-xs leading-4", className)}
+      className={cn("w-full min-w-0 max-w-full text-xs leading-4", className)}
     >
       {working ? (
         <div
@@ -215,7 +216,7 @@ export function AgentActivity({
           aria-expanded={expanded}
           aria-controls={contentId}
           onClick={toggle}
-          className="group flex h-7 min-w-0 items-center gap-1.5 rounded-md text-left font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          className="group -ms-1.5 flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-md px-1.5 text-left font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring focus-visible:-outline-offset-2"
         >
           <span className="truncate">
             {renderCompletedStatus
@@ -238,8 +239,12 @@ export function AgentActivity({
         role="region"
         aria-labelledby={triggerId}
         open={expanded}
+        animateHeight
         openHeight={viewportHeight}
-        className={cn("min-w-0 max-w-full", expanded && "mt-1")}
+        className={cn(
+          "min-w-0 max-w-full transition-[margin-top] motion-reduce:transition-none",
+          expanded ? "mt-1 duration-[220ms]" : "duration-[140ms]",
+        )}
       >
         <div
           ref={viewportRef}
@@ -251,20 +256,24 @@ export function AgentActivity({
           )}
           style={{ height: viewportHeight, maskImage, WebkitMaskImage: maskImage }}
         >
-          <motion.div
-            ref={contentRef}
+          <AnimatePresence initial={false}>
+          {expanded ? <motion.div
+            key="activity-content"
+            ref={measureContent}
             role="list"
             initial={false}
-            animate={{ y: streamOffset }}
+            animate={{ y: streamOffset, opacity: 1 }}
+            exit={{ opacity: 0, transition: { duration: reduce ? 0 : 0.12, ease: EASE_OUT } }}
             transition={reduce ? { duration: 0 } : SPRING_LAYOUT}
             className={cn("flex min-w-0 max-w-full flex-col gap-1 py-2", contentClassName)}
           >
-            <AnimatePresence mode="popLayout">
+            <AnimatePresence initial={false} mode="popLayout">
               {items.map((item) => (
                 <motion.div
                   layout="position"
                   key={item.id}
                   role="listitem"
+                  className="w-full min-w-0 max-w-full"
                   initial={reduce ? { opacity: 1 } : { opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={reduce ? { opacity: 0 } : { opacity: 0, y: -3 }}
@@ -282,7 +291,8 @@ export function AgentActivity({
                 </motion.div>
               ))}
             </AnimatePresence>
-          </motion.div>
+          </motion.div> : null}
+          </AnimatePresence>
         </div>
       </CollapsiblePanel>
     </div>

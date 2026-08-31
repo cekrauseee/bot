@@ -1,12 +1,9 @@
 import {
-  Check,
-  Circle,
   FileText,
   Globe2,
   MessageSquare,
   PencilLine,
   Search,
-  Sparkles,
   SquareTerminal,
   Waypoints,
   Wrench,
@@ -33,81 +30,94 @@ function ActivityRowLayout({
   labelClassName,
   detailClassName,
 }: {
-  icon: ReactNode;
+  icon?: ReactNode;
   label: ReactNode;
   detail?: ReactNode;
   trailing?: ReactNode;
   labelClassName?: string;
   detailClassName?: string;
 }) {
+  const title = [label, detail]
+    .filter(
+      (value): value is string | number =>
+        typeof value === "string" || typeof value === "number",
+    )
+    .map(String)
+    .filter(Boolean)
+    .join(" · ");
+
   return (
-    <div className="grid min-h-6 min-w-0 max-w-full grid-cols-[1rem_minmax(0,1fr)] items-start gap-x-2 rounded-md px-1.5 py-0.5">
-      <span
-        aria-hidden="true"
-        className="mt-0.5 grid size-3.5 place-items-center text-muted-foreground/65 [&_svg]:size-3.5"
-      >
-        {icon}
-      </span>
-      <div className="min-w-0 max-w-full">
-        <div className="flex min-w-0 items-baseline gap-1.5 leading-4">
-          <span className={cn("min-w-0 flex-1 [overflow-wrap:anywhere] text-foreground/85", labelClassName)}>
-            {label}
-          </span>
-          {trailing ? <span className="ml-auto shrink-0">{trailing}</span> : null}
-        </div>
-        {detail ? (
-          <div
-            className={cn(
-              "mt-1 break-words [overflow-wrap:anywhere] text-[11px] leading-4 text-muted-foreground/65",
-              detailClassName,
-            )}
-          >
-            {detail}
-          </div>
+    <div
+      title={title || undefined}
+      className="flex min-h-6 w-full min-w-0 max-w-full items-center gap-2 rounded-md leading-5"
+    >
+      {icon ? (
+        <span
+          aria-hidden="true"
+          className="grid size-3.5 shrink-0 place-items-center text-muted-foreground [&_svg]:size-3.5 [&_svg]:stroke-[1.5]"
+        >
+          {icon}
+        </span>
+      ) : null}
+      <span className="min-w-0 flex-1 truncate text-muted-foreground">
+        <span className={labelClassName}>{label}</span>
+        {detail != null ? (
+          <>
+            <span className="text-muted-foreground">
+              {" · "}
+            </span>
+            <span
+              className={cn(
+                "text-muted-foreground",
+                detailClassName,
+              )}
+            >
+              {detail}
+            </span>
+          </>
         ) : null}
-      </div>
+      </span>
+      {trailing ? <span className="shrink-0">{trailing}</span> : null}
     </div>
   );
 }
 
 function StepRow({ item }: { item: AgentActivityStep }) {
   const state = item.status ?? "complete";
-  const reduce = useReducedMotion() ?? false;
-  const icon = state === "complete" ? (
-    <Check className="size-4" strokeWidth={1.8} />
-  ) : state === "active" ? (
-    <span className="relative grid size-3 place-items-center">
-      <motion.span
-        className="absolute inset-0 rounded-full bg-foreground/10"
-        animate={reduce ? { opacity: 0.55 } : { opacity: [0.35, 0.8, 0.35] }}
-        transition={
-          reduce
-            ? { duration: 0 }
-            : { duration: 1.5, repeat: Number.POSITIVE_INFINITY }
-        }
-      />
-      <span className="size-1.5 rounded-full bg-foreground/60" />
-    </span>
-  ) : (
-    <Circle className="size-3" strokeWidth={1.5} />
-  );
 
   return (
-    <ActivityRowLayout
-      icon={icon}
-      label={item.label}
-      detail={item.meta}
-      labelClassName={state === "pending" ? "text-muted-foreground/55" : undefined}
-    />
+    <NarrativeRow
+      className={
+        state === "pending"
+          ? "text-muted-foreground"
+          : state === "active"
+            ? "text-foreground"
+            : undefined
+      }
+    >
+      {item.label}
+      {item.meta != null ? (
+        <span className="text-muted-foreground"> · {item.meta}</span>
+      ) : null}
+    </NarrativeRow>
+  );
+}
+
+function NarrativeRow({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div
+      className={cn(
+        "min-h-6 w-full min-w-0 max-w-full py-0.5 whitespace-pre-wrap [overflow-wrap:anywhere] leading-5 text-foreground/85",
+        className,
+      )}
+    >
+      {children}
+    </div>
   );
 }
 
 function TextRow({ item }: { item: AgentActivityText }) {
-  return (
-    <div className="max-w-full rounded-md py-0.5 ps-7 pe-1.5 leading-4 [overflow-wrap:anywhere] text-foreground/75">
-      {item.content}
-    </div>
-  );
+  return <NarrativeRow>{item.content}</NarrativeRow>;
 }
 
 function SearchResultRow({
@@ -115,35 +125,50 @@ function SearchResultRow({
 }: {
   result: AgentSearchResult;
 }) {
+  const title = [result.title, result.domain]
+    .filter(
+      (value): value is string | number =>
+        typeof value === "string" || typeof value === "number",
+    )
+    .map(String)
+    .filter(Boolean)
+    .join(" · ");
   const content = (
     <>
       <span
         aria-hidden="true"
-        className="grid size-4 shrink-0 place-items-center text-muted-foreground"
+        className="grid size-3.5 shrink-0 place-items-center text-muted-foreground [&_svg]:size-3.5 [&_svg]:stroke-[1.5]"
       >
         {result.icon ?? <Globe2 className="size-3" strokeWidth={2} />}
       </span>
-      <span className="min-w-0">
-        <span className="block truncate text-foreground/85">{result.title}</span>
+      <span className="min-w-0 flex-1 truncate text-muted-foreground">
+        {result.title}
         {result.domain ? (
-          <span className="block truncate text-xs leading-4 text-muted-foreground/55">
-            {result.domain}
-          </span>
+          <>
+            <span className="text-muted-foreground">
+              {" · "}
+            </span>
+            <span className="text-muted-foreground">
+              {result.domain}
+            </span>
+          </>
         ) : null}
       </span>
     </>
   );
   const className = cn(
-    "flex min-h-6 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left outline-none transition-colors",
-    result.url && "focus-visible:ring-2 focus-visible:ring-ring",
+    "flex min-h-6 w-full min-w-0 max-w-full items-center gap-2 rounded-md text-left leading-5 outline-none transition-colors",
+    result.url && "hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
   );
 
   return result.url ? (
-    <a href={result.url} className={className}>
+    <a href={result.url} title={title || undefined} className={className}>
       {content}
     </a>
   ) : (
-    <div className={className}>{content}</div>
+    <div title={title || undefined} className={className}>
+      {content}
+    </div>
   );
 }
 
@@ -161,18 +186,24 @@ function SearchRow({ item }: { item: AgentActivitySearch }) {
       };
 
   return (
-    <div className="flex min-w-0 max-w-full flex-col gap-0.5">
-      <div className="flex min-h-6 min-w-0 max-w-full items-center gap-2 rounded-md px-1.5 py-0.5 text-foreground/80">
-        <Search aria-hidden="true" className="size-3.5 shrink-0" strokeWidth={1.7} />
-        <span className="min-w-0 truncate">{item.query}</span>
-      </div>
+    <div className="flex w-full min-w-0 max-w-full flex-col gap-1">
+      <ActivityRowLayout
+        icon={<Search />}
+        label={item.query}
+        trailing={item.moreCount ? (
+          <span className="text-muted-foreground">
+            +{item.moreCount} more
+          </span>
+        ) : undefined}
+      />
       {item.results?.length ? (
-        <div className="flex flex-col gap-0.5 pl-4">
+        <div className="flex min-w-0 max-w-full flex-col gap-1 ps-5.5">
           <AnimatePresence initial mode="popLayout">
             {item.results.map((result) => (
               <motion.div
                 layout="position"
                 key={result.id}
+                className="w-full min-w-0 max-w-full"
                 initial={enter}
                 animate={visible}
                 exit={exit}
@@ -184,20 +215,6 @@ function SearchRow({ item }: { item: AgentActivitySearch }) {
           </AnimatePresence>
         </div>
       ) : null}
-      <AnimatePresence initial>
-        {item.moreCount ? (
-          <motion.div
-            key="more-results"
-            initial={enter}
-            animate={visible}
-            exit={exit}
-            transition={transition}
-            className="px-1.5 py-0.5 pl-7 text-muted-foreground/55"
-          >
-            +{item.moreCount} more
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
     </div>
   );
 }
@@ -238,14 +255,12 @@ function ToolRow({ item }: { item: AgentActivityTool }) {
       label={action}
       detail={item.target}
       trailing={changes}
-      labelClassName="font-medium"
-      detailClassName="break-all font-mono"
+      detailClassName="font-mono"
     />
   );
 }
 
 function TraceIcon({ kind }: { kind: AgentActivityTrace["kind"] }) {
-  if (kind === "thinking") return <Sparkles className="size-4" />;
   if (kind === "message" || kind === "request") {
     return <MessageSquare className="size-4" />;
   }
@@ -256,12 +271,22 @@ function TraceIcon({ kind }: { kind: AgentActivityTrace["kind"] }) {
 }
 
 function TraceRow({ item }: { item: AgentActivityTrace }) {
+  if (item.kind === "thinking" || item.kind === "message") {
+    return (
+      <NarrativeRow>
+        {item.label}
+        {item.detail != null ? (
+          <span className="text-muted-foreground"> · {item.detail}</span>
+        ) : null}
+      </NarrativeRow>
+    );
+  }
+
   return (
     <ActivityRowLayout
       icon={item.icon ?? <TraceIcon kind={item.kind} />}
       label={item.label}
       detail={item.detail}
-      labelClassName="font-medium"
     />
   );
 }

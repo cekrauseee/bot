@@ -93,6 +93,12 @@ export type ChatMessageBlock =
 
 export type ChatMessage = {
   id: string;
+  renderKey?: string;
+  errorMessage?: string;
+  /** Keeps the failed surface visible until a retry produces actual progress. */
+  retryError?: string;
+  retryAttempted?: boolean;
+  retryable?: boolean;
   role: "user" | "assistant";
   blocks: ChatMessageBlock[];
   status?: "streaming" | "complete" | "error";
@@ -115,6 +121,9 @@ export type ConversationSummary = {
   id: string;
   title: string;
   project_id: string | null;
+  title_updated_at: string | null;
+  pinned_order: number | null;
+  pin_updated_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -123,6 +132,8 @@ export type ProjectSummary = {
   id: string;
   name: string;
   slug: string;
+  sort_order: number | null;
+  order_updated_at: string | null;
   created_at: string;
   updated_at: string;
 };

@@ -58,6 +58,8 @@ const columns: Record<string, ColumnContract[]> = {
     { name: 'slug', type: 'character varying', length: 100, nullable: false, defaultValue: null },
     { name: 'created_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
     { name: 'updated_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
+    { name: 'sort_order', type: 'integer', length: null, nullable: true, defaultValue: null },
+    { name: 'order_updated_at', type: 'timestamp with time zone', length: null, nullable: true, defaultValue: null },
   ],
   conversations: [
     { name: 'id', type: 'uuid', length: null, nullable: false, defaultValue: 'gen_random_uuid()' },
@@ -66,6 +68,9 @@ const columns: Record<string, ColumnContract[]> = {
     { name: 'created_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
     { name: 'updated_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
     { name: 'project_id', type: 'uuid', length: null, nullable: true, defaultValue: null },
+    { name: 'pinned_order', type: 'integer', length: null, nullable: true, defaultValue: null },
+    { name: 'pin_updated_at', type: 'timestamp with time zone', length: null, nullable: true, defaultValue: null },
+    { name: 'title_updated_at', type: 'timestamp with time zone', length: null, nullable: true, defaultValue: null },
   ],
   messages: [
     { name: 'id', type: 'uuid', length: null, nullable: false, defaultValue: 'gen_random_uuid()' },
@@ -116,8 +121,10 @@ const indexes: IndexContract[] = [
   { table: 'sessions', name: 'uq_sessions_token_hash', definition: 'CREATE UNIQUE INDEX uq_sessions_token_hash ON public.sessions USING btree (token_hash)' },
   { table: 'projects', name: 'ix_projects_user_id_created_at', definition: 'CREATE INDEX ix_projects_user_id_created_at ON public.projects USING btree (user_id, created_at)' },
   { table: 'projects', name: 'uq_projects_user_id_slug', definition: 'CREATE UNIQUE INDEX uq_projects_user_id_slug ON public.projects USING btree (user_id, slug)' },
+  { table: 'projects', name: 'ix_projects_user_id_sort_order', definition: 'CREATE INDEX ix_projects_user_id_sort_order ON public.projects USING btree (user_id, sort_order)' },
   { table: 'conversations', name: 'ix_conversations_project_id_updated_at', definition: 'CREATE INDEX ix_conversations_project_id_updated_at ON public.conversations USING btree (project_id, updated_at)' },
   { table: 'conversations', name: 'ix_conversations_user_id_updated_at', definition: 'CREATE INDEX ix_conversations_user_id_updated_at ON public.conversations USING btree (user_id, updated_at)' },
+  { table: 'conversations', name: 'ix_conversations_user_id_pinned_order', definition: 'CREATE INDEX ix_conversations_user_id_pinned_order ON public.conversations USING btree (user_id, pinned_order)' },
   { table: 'messages', name: 'ix_messages_conversation_id_created_at', definition: 'CREATE INDEX ix_messages_conversation_id_created_at ON public.messages USING btree (conversation_id, created_at)' },
   { table: 'messages', name: 'uq_messages_one_streaming_assistant', definition: "CREATE UNIQUE INDEX uq_messages_one_streaming_assistant ON public.messages USING btree (conversation_id) WHERE (((role)::text = 'assistant'::text) AND ((status)::text = 'streaming'::text))" },
 ]

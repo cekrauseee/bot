@@ -9,12 +9,14 @@ export interface CollapsiblePanelProps
   extends Omit<HTMLMotionProps<"div">, "animate" | "initial"> {
   open: boolean;
   openHeight?: CSSProperties["height"];
+  animateHeight?: boolean;
 }
 
-/** Shared transform-only reveal for collapsible feature content. */
+/** Shared reveal, with optional animated layout for measured disclosures. */
 export function CollapsiblePanel({
   open,
   openHeight = "auto",
+  animateHeight = false,
   className,
   style,
   transition,
@@ -30,10 +32,12 @@ export function CollapsiblePanel({
       initial={false}
       animate={
         reduce
-          ? { opacity: open ? 1 : 0 }
+          ? { opacity: open ? 1 : 0, ...(animateHeight ? { height: open ? openHeight : 0 } : {}) }
           : {
               opacity: open ? 1 : 0,
-              clipPath: open ? "inset(0 0 0% 0)" : "inset(0 0 100% 0)",
+              ...(animateHeight
+                ? { height: open ? openHeight : 0 }
+                : { clipPath: open ? "inset(0 0 0% 0)" : "inset(0 0 100% 0)" }),
               y: open ? 0 : -4,
             }
       }
@@ -46,7 +50,7 @@ export function CollapsiblePanel({
       className={cn("overflow-hidden", className)}
       style={{
         ...style,
-        height: open ? openHeight : 0,
+        ...(animateHeight ? {} : { height: open ? openHeight : 0 }),
         pointerEvents: open ? undefined : "none",
         transformOrigin: "top",
       }}

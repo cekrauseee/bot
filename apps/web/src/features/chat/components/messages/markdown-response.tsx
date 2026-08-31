@@ -2,8 +2,6 @@ import {
   Children,
   createContext,
   isValidElement,
-  lazy,
-  Suspense,
   useContext,
   type ReactElement,
   type ReactNode,
@@ -18,16 +16,12 @@ import {
   StreamingResponse,
   type StreamingResponseStatus,
 } from '@/components/agents/streaming-response'
+import { CodeBlock } from '@/components/agents/code-block'
 import type { SearchSource } from '@/features/chat/model'
 import { cn } from '@/lib/utils'
 
 type CodeBlockStatus = 'streaming' | 'complete'
 type AgentCodeLanguage = 'bash' | 'diff' | 'json' | 'text' | 'tsx' | 'typescript'
-
-const BeUICodeBlock = lazy(async () => {
-  const module = await import('@/components/agents/code-block')
-  return { default: module.CodeBlock }
-})
 
 const CodeStatusContext = createContext<CodeBlockStatus>('complete')
 
@@ -48,16 +42,14 @@ function MarkdownPre({ children }: { children?: ReactNode }) {
   const code = child as ReactElement<{ children?: ReactNode; className?: string }>
   const content = String(code.props.children ?? '').replace(/\n$/, '')
   return (
-    <Suspense fallback={<pre className="my-3 overflow-x-auto"><code>{content}</code></pre>}>
-      <BeUICodeBlock
-        code={content}
-        language={language(code.props.className)}
-        status={status}
-        showLineNumbers={false}
-        showStatus={false}
-        className="my-4"
-      />
-    </Suspense>
+    <CodeBlock
+      code={content}
+      language={language(code.props.className)}
+      status={status}
+      showLineNumbers={false}
+      showStatus={false}
+      className="my-4 select-none [&_pre]:select-text"
+    />
   )
 }
 
@@ -229,7 +221,7 @@ export function MarkdownResponse({
       sources={sources}
       announce={false}
       className="max-w-3xl"
-      contentClassName="text-sm leading-6 text-foreground/90 [&_.contains-task-list]:ps-0 [&_.katex-display]:my-5 [&_.katex-display]:overflow-x-auto [&_.katex-display]:py-1"
+      contentClassName="select-text text-sm leading-6 text-foreground/90 [&_.contains-task-list]:ps-0 [&_.katex-display]:my-5 [&_.katex-display]:overflow-x-auto [&_.katex-display]:py-1"
       actionsClassName="mt-1"
     >
       <CodeStatusContext.Provider

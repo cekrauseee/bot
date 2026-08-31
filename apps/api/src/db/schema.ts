@@ -4,6 +4,7 @@ import {
   customType,
   foreignKey,
   index,
+  integer,
   pgTable,
   timestamp,
   unique,
@@ -86,9 +87,12 @@ export const projects = pgTable('projects', {
   slug: varchar('slug', { length: 100 }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  sortOrder: integer('sort_order'),
+  orderUpdatedAt: timestamp('order_updated_at', { withTimezone: true }),
 }, (table) => [
   unique('uq_projects_user_id_slug').on(table.userId, table.slug),
   index('ix_projects_user_id_created_at').on(table.userId, table.createdAt),
+  index('ix_projects_user_id_sort_order').on(table.userId, table.sortOrder),
 ])
 
 export const conversations = pgTable('conversations', {
@@ -98,9 +102,13 @@ export const conversations = pgTable('conversations', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   projectId: uuid('project_id').references(() => projects.id, { onDelete: 'set null' }),
+  titleUpdatedAt: timestamp('title_updated_at', { withTimezone: true }),
+  pinnedOrder: integer('pinned_order'),
+  pinUpdatedAt: timestamp('pin_updated_at', { withTimezone: true }),
 }, (table) => [
   index('ix_conversations_user_id_updated_at').on(table.userId, table.updatedAt),
   index('ix_conversations_project_id_updated_at').on(table.projectId, table.updatedAt),
+  index('ix_conversations_user_id_pinned_order').on(table.userId, table.pinnedOrder),
 ])
 
 export const messages = pgTable('messages', {

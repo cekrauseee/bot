@@ -142,8 +142,26 @@
   }
 
   body {
-    @apply min-h-svh min-w-80 bg-background text-foreground;
+    @apply min-h-svh min-w-80 select-none bg-background text-foreground;
     overscroll-behavior: none;
+  }
+
+  input,
+  textarea,
+  [contenteditable=""],
+  [contenteditable="true"],
+  [contenteditable="plaintext-only"] {
+    @apply select-text;
+  }
+
+  /* Controls stay unselectable inside readable content that opts into selection. */
+  button,
+  [role="button"],
+  [role="menuitem"],
+  [role="option"],
+  svg,
+  img {
+    @apply select-none;
   }
 
   button,
@@ -169,6 +187,29 @@
 ::selection {
   color: var(--foreground);
   background: color-mix(in oklch, var(--foreground) 16%, transparent);
+}
+
+/* Auth route handoff; leave the beUI theme transition's snapshots untouched. */
+html:not([data-beui-vt])::view-transition-group(root) {
+  animation-duration: 160ms;
+}
+
+html:not([data-beui-vt])::view-transition-old(root) {
+  animation-duration: 120ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html:not([data-beui-vt])::view-transition-new(root) {
+  animation-duration: 160ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not([data-beui-vt])::view-transition-group(root),
+  html:not([data-beui-vt])::view-transition-old(root),
+  html:not([data-beui-vt])::view-transition-new(root) {
+    animation: none;
+  }
 }
 
 [data-variant="solid"] [data-slot="message-bubble-content"]::selection,

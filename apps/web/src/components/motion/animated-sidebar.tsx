@@ -528,6 +528,11 @@ export const AnimatedSidebar = forwardRef<HTMLElement, AnimatedSidebarProps>(
         className={cn(
           "group/sidebar relative hidden h-auto shrink-0 overflow-hidden md:block will-change-[width]",
           "peer",
+          variant === "sidebar" &&
+            !offcanvas &&
+            (side === "left"
+              ? "border-border border-r"
+              : "border-border border-l"),
           side === "right" && "order-last",
           className,
         )}
@@ -546,8 +551,6 @@ export const AnimatedSidebar = forwardRef<HTMLElement, AnimatedSidebarProps>(
             // outer rail animates. This prevents labels and controls from
             // reflowing through intermediate widths during collapse/open.
             "sticky top-0 flex h-svh w-[var(--sidebar-width)] min-w-[var(--sidebar-width)] flex-col overflow-hidden bg-background",
-            variant === "sidebar" &&
-              (side === "left" ? "border-border border-r" : "border-border border-l"),
             variant === "floating" &&
               "m-2 h-[calc(100svh-1rem)] rounded-2xl border border-border shadow-sm",
             variant === "inset" && "m-2 h-[calc(100svh-1rem)] rounded-2xl",

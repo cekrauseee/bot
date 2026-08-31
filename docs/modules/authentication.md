@@ -30,6 +30,12 @@ OTP request responses are identical for new and existing email addresses. Errors
 - Production cookies are host-only, `Secure`, `HttpOnly`, `SameSite=Lax`, and use the `__Host-` prefix.
 - Credentialed CORS uses one configured web origin. Production state-changing requests require the same `Origin`.
 
+## Development OTP
+
+With API `ENVIRONMENT=development`, OTP issuance skips Resend and includes `development_code` in the non-cacheable challenge response. The Vite development frontend prefills the six-digit code after both request and resend; users still submit verification normally. Issuance skips cooldown and email/IP request limits and returns `resend_after_seconds: 0`, even if old cooldown keys still exist. Each request atomically deletes the previous challenge and installs a new one. Random code generation, HMAC storage, expiry, verification attempt limits, and single-use consumption are unchanged.
+
+Test and production environments use the email sender and never expose the code in the response. Production frontend builds ignore the development field. This convenience removes email ownership proof in development: use only isolated development databases and never expose a development API publicly or point it at real user data.
+
 ## Email Template
 
 `packages/email/emails/login-otp.tsx` is the versioned React Email component and source of truth. The `@my-bot/email` workspace package exports the component and subject. The API supplies the generated OTP and expiry as props and sends the element through the Resend Node SDK `react` field without a hosted template or generated HTML/text artifacts. The API sends from `RESEND_FROM`; production uses `myBot <mybot@cekrause.eu>`.

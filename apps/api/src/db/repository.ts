@@ -168,12 +168,26 @@ export type Conversation = typeof conversations.$inferSelect
 export type Message = typeof messages.$inferSelect
 export type Project = typeof projects.$inferSelect
 
+export class ConversationPinError extends Error {
+  constructor(readonly code: 'invalid_reorder' | 'project_pinned') {
+    super(code)
+  }
+}
+
+export class ProjectOrderError extends Error {}
+
 export class ProjectRepository {
   constructor(readonly db: Db) {}
 
   async list(userId: string) {
     return this.db.select().from(projects).where(eq(projects.userId, userId))
-      .orderBy(sql`${projects.createdAt} DESC`, sql`${projects.id} DESC`)
+      .orderBy(sql`${projects.sortOrder} ASC NULLS FIRST`, sql`${projects.createdAt} DESC`, sql`${projects.id} DESC`)
+  }
+
+  async lockUser(userId: string) {
+    const [user] = await this.db.select({ id: users.id }).from(users)
+      .where(eq(users.id, userId)).for('update')
+    return user
   }
 
   async get(userId: string, id: string) {
@@ -188,6 +202,42 @@ export class ProjectRepository {
       .onConflictDoNothing({ target: [projects.userId, projects.slug] })
       .returning()
     return project
+  }
+
+  async rename(userId: string, id: string, name: string, slug: string) {
+    const [project] = await this.db.update(projects)
+      .set({ name, slug, updatedAt: new Date() })
+      .where(and(eq(projects.id, id), eq(projects.userId, userId)))
+      .returning()
+    return project
+  }
+
+  async delete(userId: string, id: string) {
+    const [project] = await this.db.delete(projects)
+      .where(and(eq(projects.id, id), eq(projects.userId, userId)))
+      .returning()
+    return project
+  }
+
+  async reorder(userId: string, ids: string[]) {
+    const rows = await this.db.select().from(projects)
+      .where(eq(projects.userId, userId)).for('update')
+    const expected = new Set(rows.map((row) => row.id))
+    const requested = new Set(ids)
+    if (ids.length !== requested.size || ids.length !== expected.size || ids.some((id) => !expected.has(id))) {
+      throw new ProjectOrderError('invalid_order')
+    }
+    const byId = new Map(rows.map((row) => [row.id, row]))
+    const now = Date.now()
+    const ordered: Project[] = []
+    for (const [index, id] of ids.entries()) {
+      const current = byId.get(id)!
+      const orderUpdatedAt = new Date(Math.max(now, current.orderUpdatedAt ? current.orderUpdatedAt.getTime() + 1 : 0))
+      const [row] = await this.db.update(projects).set({ sortOrder: index, orderUpdatedAt })
+        .where(eq(projects.id, id)).returning()
+      ordered.push(row)
+    }
+    return ordered
   }
 }
 
@@ -215,6 +265,11 @@ export class ConversationRepository {
       .for('update')
     return conversation
   }
+  async lockUser(userId: string) {
+    const [user] = await this.db.select({ id: users.id }).from(users)
+      .where(eq(users.id, userId)).for('update')
+    return user
+  }
   async create(userId: string, title: string) {
     const [row] = await this.db.insert(conversations).values({ userId, title }).returning()
     return row
@@ -223,11 +278,73 @@ export class ConversationRepository {
     const [row] = await this.db.delete(conversations).where(and(eq(conversations.id, id), eq(conversations.userId, userId))).returning()
     return row
   }
+  async pin(userId: string, id: string, pinned: boolean) {
+    const conversation = await this.lockOwned(userId, id)
+    if (!conversation) return undefined
+    if ((conversation.pinnedOrder !== null) === pinned) return conversation
+
+    const changedAt = new Date(Math.max(
+      Date.now(),
+      conversation.pinUpdatedAt ? conversation.pinUpdatedAt.getTime() + 1 : 0,
+    ))
+    if (!pinned) {
+      const [row] = await this.db.update(conversations)
+        .set({ pinnedOrder: null, pinUpdatedAt: changedAt })
+        .where(eq(conversations.id, id)).returning()
+      return row
+    }
+    const [max] = await this.db.select({ value: sql<number>`coalesce(max(${conversations.pinnedOrder}), 0)` })
+      .from(conversations)
+      .where(and(eq(conversations.userId, userId), sql`${conversations.pinnedOrder} is not null`))
+    const [row] = await this.db.update(conversations)
+      .set({ pinnedOrder: Number(max?.value ?? 0) + 1, pinUpdatedAt: changedAt })
+      .where(eq(conversations.id, id)).returning()
+    return row
+  }
+  async reorderPins(userId: string, ids: string[]) {
+    const rows = await this.db.select().from(conversations)
+      .where(and(eq(conversations.userId, userId), sql`${conversations.pinnedOrder} is not null`)).for('update')
+    const expected = new Set(rows.map((row) => row.id))
+    const requested = new Set(ids)
+    if (ids.length !== requested.size || ids.length !== expected.size ||
+      ids.some((id) => !expected.has(id))) {
+      throw new ConversationPinError('invalid_reorder')
+    }
+    const byId = new Map(rows.map((row) => [row.id, row]))
+    const now = Date.now()
+    const changed: Conversation[] = []
+    for (const [index, id] of ids.entries()) {
+      const current = byId.get(id)!
+      const changedAt = new Date(Math.max(now, current.pinUpdatedAt ? current.pinUpdatedAt.getTime() + 1 : 0))
+      const [row] = await this.db.update(conversations)
+        .set({ pinnedOrder: index + 1, pinUpdatedAt: changedAt })
+        .where(eq(conversations.id, id)).returning()
+      changed.push(row)
+    }
+    return changed
+  }
   async assignProject(userId: string, id: string, projectId: string | null) {
+    const current = await this.lockOwned(userId, id)
+    if (!current) return undefined
+    if (current.pinnedOrder !== null) {
+      throw new ConversationPinError('project_pinned')
+    }
     const [row] = await this.db.update(conversations)
       .set({ projectId })
       .where(and(eq(conversations.id, id), eq(conversations.userId, userId)))
       .returning()
+    return row
+  }
+  async rename(userId: string, id: string, title: string) {
+    const current = await this.lockOwned(userId, id)
+    if (!current) return undefined
+    if (current.title === title) return current
+    const titleUpdatedAt = new Date(Math.max(
+      Date.now(), current.titleUpdatedAt ? current.titleUpdatedAt.getTime() + 1 : 0,
+    ))
+    const [row] = await this.db.update(conversations)
+      .set({ title, titleUpdatedAt })
+      .where(eq(conversations.id, id)).returning()
     return row
   }
   async active(id: string) {
@@ -274,6 +391,26 @@ export class ConversationRepository {
         .where(eq(conversations.id, row.conversationId))
     }
     return row
+  }
+  /** Caller holds the owning conversation lock. Retry only its latest failed reply. */
+  async retryTurn(conversationId: string, assistantId: string, userContent: string, options: { model: string; reasoningEffort: string; speed: string }) {
+    if (await this.active(conversationId)) throw new Error('conversation_active')
+    const [previous, user] = await this.db.select().from(messages)
+      .where(eq(messages.conversationId, conversationId))
+      .orderBy(sql`${messages.createdAt} DESC`, sql`${messages.id} DESC`).limit(2)
+    if (previous?.id !== assistantId || previous.role !== 'assistant' ||
+      previous.status !== 'failed' || user?.role !== 'user' || user.content !== userContent) {
+      throw new Error('retry_unavailable')
+    }
+    const now = new Date()
+    const [assistant] = await this.db.update(messages).set({
+      content: '', reasoning: null, activities: [], errorMessage: null,
+      status: 'streaming', model: options.model, reasoningEffort: options.reasoningEffort,
+      speed: options.speed, createdAt: now, updatedAt: now,
+    }).where(eq(messages.id, assistantId)).returning()
+    const [conversation] = await this.db.update(conversations).set({ updatedAt: now })
+      .where(eq(conversations.id, conversationId)).returning()
+    return { user, assistant, conversation }
   }
   async transcript(id: string) {
     return this.db.select({ role: messages.role, content: messages.content }).from(messages)

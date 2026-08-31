@@ -16,9 +16,9 @@ The repository contains independently managed product services under `apps/` and
 | Redis | Short-lived OTP challenges, OAuth state, and rate limits |
 | Root workspace | Shared commands, repository rules, and canonical documentation |
 
-The web application uses React Router Data Mode. The router is created outside the React tree and lazy-loads the public login page and one persistent chat layout for `/` and `/conversations/:conversationId`. Pages compose authentication and the public chat feature. Hooks own interaction and session state; feature services own HTTP and SSE parsing.
+The web application uses React Router Data Mode. The router is created outside the React tree and lazy-loads the public login page and one persistent chat layout for `/`, `/conversations/:conversationId`, and `/projects/:projectId/:conversationId`. Pages compose authentication and the public chat feature. Hooks own interaction and session state; feature services own HTTP and SSE parsing.
 
-The chat feature is application-owned under `apps/web/src/features/chat`. Its public entrypoint re-exports the feature container. The conversation service loads durable data, parses the versioned SSE protocol, reconciles optimistic message IDs, and owns cancellation. Presentational components compose the existing beUI shell, sidebar, message scroller, activity, streaming response, citations, code block, and composer. Fixture and future approval, plan, task, and tool components remain available but are not part of the current conversation flow.
+The chat feature is application-owned under `apps/web/src/features/chat`. Its public entrypoint re-exports the feature container and route-path helper. The URL is the only active conversation identity; project slugs are canonical path metadata. `useConversationController` owns catalog loading, keyed detail and turn operations, cancellation, and mutations. Its pure reducer stores the catalog independently from conversation records, guards every detail and turn write with an operation ID, and atomically moves a new optimistic turn to the server conversation ID. The transport service contains only HTTP, SSE validation, and message mapping. Presentational components compose the existing beUI shell, sidebar, message scroller, activity, streaming response, citations, code block, and composer.
 
 The application API uses an Elysia application factory with the official Node.js adapter, typed runtime schemas, and OpenAPI documentation. It is the only browser-facing backend. It authenticates users, owns conversations and messages in PostgreSQL, and proxies the AI stream while persisting partial and final output. Drizzle defines the relational schema and versioned migrations.
 
@@ -66,3 +66,6 @@ The conversation flow is:
 - Pages do not import chat internals or vendor-style agent components.
 - Chat fixtures and model types do not import React or component types.
 - Chat workspace presentation receives data, view state, and callbacks from the feature container.
+- The route selects the active conversation; controller state never stores a second active conversation ID.
+- Catalog failures do not erase ready conversation records, and detail failures do not erase catalog data.
+- Late or aborted detail and turn callbacks can update only the record and operation that still own them.

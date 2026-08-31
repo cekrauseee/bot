@@ -10,6 +10,7 @@ export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 export type Speed = 'standard' | 'fast'
 
 export type TurnOptions = {
+  retry_of?: string
   message: string
   model: ModelName
   reasoning_effort: ReasoningEffort
@@ -80,6 +81,9 @@ export const publicConversation = (conversation: Conversation) => ({
   id: conversation.id,
   title: conversation.title,
   project_id: conversation.projectId,
+  pinned_order: conversation.pinnedOrder,
+  pin_updated_at: conversation.pinUpdatedAt ? iso(conversation.pinUpdatedAt) : null,
+  title_updated_at: conversation.titleUpdatedAt ? iso(conversation.titleUpdatedAt) : null,
   created_at: iso(conversation.createdAt),
   updated_at: iso(conversation.updatedAt),
 })
@@ -358,7 +362,8 @@ export async function streamTurn(
           reasoning: reasoning || null,
           activities,
           status: cancelled ? 'cancelled' : 'failed',
-          errorMessage: cancelled ? null : 'Unable to complete this turn.',
+          errorMessage: cancelled ? null : typeof providerDetail?.message === 'string'
+            ? providerDetail.message : 'Unable to complete this turn.',
         })
         send('turn.failed', {
           error: {

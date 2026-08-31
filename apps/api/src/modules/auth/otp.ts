@@ -4,7 +4,7 @@ import { EmailDeliveryError, type OtpEmailSender } from '../../email.js'
 import { AuthError, invalidCode } from '../../errors.js'
 import { generateOpaqueToken, generateOtpCode, hashOtp, keyedIdentifier } from '../../security.js'
 
-export type IssuedOtp = { challengeId: string; expiresInSeconds: number; resendAfterSeconds: number }
+export type IssuedOtp = { challengeId: string; expiresInSeconds: number; resendAfterSeconds: number; developmentCode?: string }
 export type OtpReservation = { challengeId: string; email: string; reservationId: string }
 
 const fixedWindowScript = `
@@ -23,6 +23,15 @@ if current then redis.call('DEL', KEYS[3]) end
 redis.call('HSET', KEYS[2], 'code_hash', ARGV[3], 'email', ARGV[4], 'attempts', '0', 'status', 'active')
 redis.call('EXPIRE', KEYS[2], ARGV[5])
 redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[5])
+return {'installed'}`
+
+// Development issues no email and replaces the current challenge in one operation.
+const replaceDevelopmentScript = `
+local current = redis.call('GET', KEYS[1])
+if current then redis.call('DEL', 'auth:otp:challenge:' .. current) end
+redis.call('HSET', KEYS[2], 'code_hash', ARGV[2], 'email', ARGV[3], 'attempts', '0', 'status', 'active')
+redis.call('EXPIRE', KEYS[2], ARGV[4])
+redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[4])
 return {'installed'}`
 
 const reserveScript = `
@@ -89,6 +98,25 @@ export class OtpService {
   async issue(email: string, ip: string): Promise<IssuedOtp> {
     const emailKey = this.emailKey(email)
     const challengeId = generateOpaqueToken()
+    if (this.settings.environment === 'development') {
+      const code = generateOtpCode()
+      await this.redis.eval(
+        replaceDevelopmentScript,
+        2,
+        `auth:otp:active:${emailKey}`,
+        `auth:otp:challenge:${challengeId}`,
+        challengeId,
+        hashOtp(challengeId, code, this.settings.otpPepper),
+        email,
+        this.settings.otpTtlSeconds,
+      )
+      return {
+        challengeId,
+        expiresInSeconds: this.settings.otpTtlSeconds,
+        resendAfterSeconds: 0,
+        developmentCode: code,
+      }
+    }
     const cooldownKey = `auth:otp:cooldown:${emailKey}`
     const acquired = await this.redis.set(cooldownKey, challengeId, 'EX', this.settings.otpResendCooldownSeconds, 'NX')
     if (!acquired) {

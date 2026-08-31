@@ -11,7 +11,7 @@ export interface AgentDisclosureProps
   openHeight?: CSSProperties["height"];
 }
 
-/** Shared transform-only reveal for collapsible agent content. */
+/** Animate the disclosure's height so closing cannot clip its exit transition. */
 export function AgentDisclosure({
   open,
   openHeight = "auto",
@@ -30,9 +30,10 @@ export function AgentDisclosure({
       initial={false}
       animate={
         reduce
-          ? { opacity: open ? 1 : 0 }
+          ? { opacity: open ? 1 : 0, height: open ? openHeight : 0 }
           : {
               opacity: open ? 1 : 0,
+              height: open ? openHeight : 0,
               clipPath: open ? "inset(0 0 0% 0)" : "inset(0 0 100% 0)",
               y: open ? 0 : -4,
             }
@@ -46,7 +47,6 @@ export function AgentDisclosure({
       className={cn("overflow-hidden", className)}
       style={{
         ...style,
-        height: open ? openHeight : 0,
         pointerEvents: open ? undefined : "none",
         transformOrigin: "top",
       }}

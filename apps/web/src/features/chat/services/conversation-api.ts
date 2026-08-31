@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   ApiConversationMessage,
   ChatActivityItem,
@@ -15,11 +14,11 @@ if (import.meta.env.PROD && !configuredApiBase) {
 }
 const apiBase = (configuredApiBase || '').replace(/\/$/, '')
 
-type ModelName = 'gpt-5.6-sol' | 'gpt-5.6-luna'
-type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
-type Speed = 'standard' | 'fast'
+export type ModelName = 'gpt-5.6-sol' | 'gpt-5.6-luna'
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export type Speed = 'standard' | 'fast'
 
-type SearchStep = {
+export type SearchStep = {
   id: string
   kind: 'web_search'
   status: 'in_progress' | 'completed'
@@ -28,7 +27,7 @@ type SearchStep = {
   sources?: SearchSource[]
 }
 
-type StreamEvent =
+export type StreamEvent =
   | {
       version: 1
       sequence: number
@@ -69,30 +68,30 @@ type StreamEvent =
       data: { error: { code: string; message: string; retryable: boolean } }
     }
 
-export type ConversationState = {
-  conversations: ConversationSummary[]
-  projects: ProjectSummary[]
-  messages: ChatMessage[]
-  title: string
-  loading: boolean
-  streaming: boolean
-  loadError: string
-  turnError: string
-  status: string
-  activeAssistantId?: string
-  activeConversationId?: string
+export type ConversationDetail = ConversationSummary & {
+  messages: ApiConversationMessage[]
 }
 
-export const initialConversationState: ConversationState = {
-  conversations: [],
-  projects: [],
-  messages: [],
-  title: 'New conversation',
-  loading: true,
-  streaming: false,
-  loadError: '',
-  turnError: '',
-  status: '',
+export const hasResponseProgress = (event: StreamEvent) => event.type === 'turn.completed' ||
+  ((event.type === 'text.delta' || event.type === 'reasoning.delta') && Boolean(event.data.delta.trim())) ||
+  event.type === 'step.started' || event.type === 'step.updated' || event.type === 'step.completed'
+
+export type TurnInput = {
+  retry_of?: string
+  message: string
+  model: ModelName
+  reasoning_effort: ReasoningEffort
+  speed: Speed
+}
+
+export class ConversationApiError extends Error {
+  readonly status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'ConversationApiError'
+    this.status = status
+  }
 }
 
 const allowedEvents = new Set<StreamEvent['type']>([
@@ -105,32 +104,6 @@ const allowedEvents = new Set<StreamEvent['type']>([
   'turn.completed',
   'turn.failed',
 ])
-
-const safeSource = (value: unknown): SearchSource | undefined => {
-  if (!value || typeof value !== 'object') return undefined
-  const source = value as Record<string, unknown>
-  const title = typeof source.title === 'string' ? source.title : ''
-  const rawUrl = typeof source.url === 'string' ? source.url : undefined
-  let url: string | undefined
-  let domain = typeof source.domain === 'string' ? source.domain : undefined
-  if (rawUrl) {
-    try {
-      const parsed = new URL(rawUrl)
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined
-      url = parsed.toString()
-      domain ??= parsed.hostname
-    } catch {
-      return undefined
-    }
-  }
-  if (!title && !url) return undefined
-  return {
-    id: typeof source.id === 'string' ? source.id : url ?? title,
-    title: title || url!,
-    ...(domain ? { domain } : {}),
-    ...(url ? { url } : {}),
-  }
-}
 
 const isActivityItem = (value: unknown): value is ChatActivityItem => {
   if (!value || typeof value !== 'object') return false
@@ -182,7 +155,7 @@ const messageBlocks = (message: ApiConversationMessage): ChatMessageBlock[] => {
   ) {
     blocks.unshift(defaultProcessBlock(message.id))
   }
-  if (!blocks.length && message.error_message) {
+  if (!blocks.length && message.error_message && message.status !== 'failed') {
     blocks.push({ id: `${message.id}-error`, type: 'text', content: message.error_message })
   }
   return blocks
@@ -204,6 +177,7 @@ export const mapApiMessage = (message: ApiConversationMessage): ChatMessage => {
     id: message.id,
     role: message.role,
     blocks,
+    ...(message.status === 'failed' ? { errorMessage: message.error_message || 'The response could not be completed.' } : {}),
     status: message.status === 'streaming'
       ? 'streaming'
       : message.status === 'failed'
@@ -238,8 +212,111 @@ async function request<T>(
     credentials: 'include',
     headers,
   })
-  if (!response.ok) throw new Error(await parseError(response, fallback))
+  if (!response.ok) {
+    throw new ConversationApiError(await parseError(response, fallback), response.status)
+  }
   return response.status === 204 ? undefined as T : response.json() as Promise<T>
+}
+
+export function loadConversationCatalog(signal?: AbortSignal) {
+  return Promise.all([
+    request<{ conversations: ConversationSummary[] }>('/conversations', { signal }),
+    request<{ projects: ProjectSummary[] }>('/projects', { signal }),
+  ]).then(([conversationResult, projectResult]) => ({
+    conversations: conversationResult.conversations,
+    projects: projectResult.projects,
+  }))
+}
+
+export function loadConversationDetail(id: string, signal?: AbortSignal) {
+  return request<ConversationDetail>(`/conversations/${id}`, { signal })
+}
+
+export async function startConversationTurn(
+  conversationId: string | undefined,
+  input: TurnInput,
+  signal: AbortSignal,
+) {
+  const path = conversationId
+    ? `/conversations/${conversationId}/turns`
+    : '/conversations/turns'
+  const response = await fetch(`${apiBase}${path}`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  })
+  if (!response.ok) {
+    throw new ConversationApiError(
+      await parseError(response, 'Unable to send the message. Try again.'),
+      response.status,
+    )
+  }
+  return response
+}
+
+export function deleteConversation(id: string) {
+  return request<void>(`/conversations/${id}`, { method: 'DELETE' })
+}
+
+export function renameConversation(id: string, title: string) {
+  return request<ConversationSummary>(`/conversations/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
+  }, 'Unable to rename the conversation. Try again.')
+}
+
+export function reorderConversationProjects(projectIds: string[]) {
+  return request<{ projects: ProjectSummary[] }>('/projects/order', {
+    method: 'PATCH',
+    body: JSON.stringify({ project_ids: projectIds }),
+  }, 'Unable to reorder projects. Try again.')
+}
+
+export function createConversationProject(name: string) {
+  return request<ProjectSummary>('/projects', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  }, 'Unable to create the project. Try again.')
+}
+
+export function renameConversationProject(id: string, name: string) {
+  return request<ProjectSummary>(`/projects/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  }, 'Unable to rename the project. Try again.')
+}
+
+export function deleteConversationProject(id: string) {
+  return request<void>(`/projects/${id}`, {
+    method: 'DELETE',
+  }, 'Unable to delete the project. Try again.')
+}
+
+export function moveConversationToProject(conversationId: string, projectId: string | null) {
+  return request<ConversationSummary>(
+    `/conversations/${conversationId}/project`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ project_id: projectId }),
+    },
+    'Unable to move the conversation. Try again.',
+  )
+}
+
+export function setConversationPinned(id: string, pinned: boolean) {
+  return request<ConversationSummary>(`/conversations/${id}/pin`, {
+    method: 'PATCH',
+    body: JSON.stringify({ pinned }),
+  }, 'Unable to update the pinned conversation. Try again.')
+}
+
+export function reorderPinnedConversations(conversationIds: string[]) {
+  return request<{ conversations: ConversationSummary[] }>('/conversations/pinned-order', {
+    method: 'PATCH',
+    body: JSON.stringify({ conversation_ids: conversationIds }),
+  }, 'Unable to reorder pinned conversations. Try again.')
 }
 
 const parseEventBlock = (block: string): StreamEvent | undefined => {
@@ -327,418 +404,5 @@ export async function readEventStream(
   buffer += decoder.decode()
   if (buffer.trim() || !terminal) {
     throw new Error('The response stream ended before completion. Try again.')
-  }
-}
-
-const upsertConversation = (
-  conversations: ConversationSummary[],
-  conversation: ConversationSummary,
-) => [conversation, ...conversations.filter((item) => item.id !== conversation.id)]
-
-const terminalBlocks = (blocks: ChatMessageBlock[]) => blocks.map((block) =>
-  block.type === 'activity' || block.type === 'reasoning'
-    ? { ...block, status: 'complete' as const }
-    : block)
-
-const elapsedProcessDuration = (message: ChatMessage) =>
-  message.processStartedAt
-    ? Math.max(1, Math.round((Date.now() - message.processStartedAt) / 1000))
-    : message.processDuration
-
-const updateAssistant = (
-  messages: ChatMessage[],
-  assistantId: string | undefined,
-  update: (message: ChatMessage) => ChatMessage,
-) => messages.map((message) =>
-  message.role === 'assistant' && message.id === assistantId ? update(message) : message)
-
-const searchItem = (step: SearchStep): ChatActivityItem => ({
-  id: step.id,
-  type: 'search',
-  query: step.query || step.label,
-  results: (step.sources ?? []).map(safeSource).filter(
-    (source): source is SearchSource => source !== undefined,
-  ),
-})
-
-export const applyStreamEvent = (
-  state: ConversationState,
-  event: StreamEvent,
-): ConversationState => {
-  if (event.type === 'turn.started') {
-    const messages = [...state.messages]
-    const userIndex = messages.length - 2
-    const assistantIndex = messages.length - 1
-    if (userIndex >= 0) messages[userIndex] = mapApiMessage(event.data.user_message)
-    if (assistantIndex >= 0) {
-      const optimisticAssistant = messages[assistantIndex]
-      messages[assistantIndex] = {
-        ...mapApiMessage(event.data.assistant_message),
-        processLabel: 'Thinking…',
-        processStartedAt: optimisticAssistant.processStartedAt ?? Date.now(),
-        processDuration: undefined,
-      }
-    }
-    return {
-      ...state,
-      conversations: upsertConversation(state.conversations, event.data.conversation),
-      messages,
-      title: event.data.conversation.title,
-      loading: false,
-      streaming: true,
-      status: 'Responding…',
-      activeAssistantId: event.data.assistant_message.id,
-      activeConversationId: event.data.conversation.id,
-    }
-  }
-
-  if (event.type === 'reasoning.delta') {
-    return {
-      ...state,
-      messages: updateAssistant(state.messages, state.activeAssistantId, (assistant) => {
-        const existing = assistant.blocks.find((block) => block.type === 'reasoning')
-        return {
-          ...assistant,
-          processLabel: 'Thinking…',
-          blocks: existing
-            ? assistant.blocks.map((block) => block.type === 'reasoning'
-              ? { ...block, content: block.content + event.data.delta }
-              : block)
-            : [
-                ...assistant.blocks.filter((block) => block.type === 'activity'),
-                {
-                  id: `${assistant.id}-reasoning`,
-                  type: 'reasoning',
-                  content: event.data.delta,
-                  status: 'working',
-                },
-                ...assistant.blocks.filter((block) => block.type !== 'activity'),
-              ],
-        }
-      }),
-    }
-  }
-
-  if (event.type === 'text.delta') {
-    return {
-      ...state,
-      messages: updateAssistant(state.messages, state.activeAssistantId, (assistant) => {
-        const existing = assistant.blocks.find((block) => block.type === 'text')
-        const completedProcess = terminalBlocks(assistant.blocks)
-        const hasProcess = completedProcess.some(
-          (block) => block.type === 'activity' || block.type === 'reasoning',
-        )
-        return {
-          ...assistant,
-          processLabel: undefined,
-          processDuration: elapsedProcessDuration(assistant),
-          blocks: existing
-            ? assistant.blocks.map((block) => block.type === 'text'
-              ? { ...block, content: block.content + event.data.delta }
-              : block)
-            : [
-                ...(hasProcess
-                  ? completedProcess
-                  : [defaultProcessBlock(assistant.id)]),
-                {
-                  id: `${assistant.id}-text`,
-                  type: 'text',
-                  content: event.data.delta,
-                },
-              ],
-        }
-      }),
-    }
-  }
-
-  if (
-    event.type === 'step.started' ||
-    event.type === 'step.updated' ||
-    event.type === 'step.completed'
-  ) {
-    return {
-      ...state,
-      messages: updateAssistant(state.messages, state.activeAssistantId, (assistant) => {
-        const item = searchItem(event.data.step)
-        const existing = assistant.blocks.find((block) => block.type === 'activity')
-        return {
-          ...assistant,
-          processLabel: event.type === 'step.completed'
-            ? 'Thinking…'
-            : 'Searching the web…',
-          blocks: existing && existing.type === 'activity'
-            ? assistant.blocks.map((block) => block.type === 'activity'
-              ? {
-                  ...block,
-                  items: [...block.items.filter((entry) => entry.id !== item.id), item],
-                }
-              : block)
-            : [{
-                id: `${assistant.id}-activity`,
-                type: 'activity',
-                status: 'working',
-                items: [item],
-              }, ...assistant.blocks],
-        }
-      }),
-    }
-  }
-
-  const completedAt = new Date().toISOString()
-  const current = state.conversations.find(
-    (item) => item.id === state.activeConversationId,
-  )
-  const conversations = current
-    ? upsertConversation(state.conversations, { ...current, updated_at: completedAt })
-    : state.conversations
-  const failed = event.type === 'turn.failed'
-  const cancelled = failed && event.data.error.code === 'cancelled'
-  return {
-    ...state,
-    conversations,
-    messages: updateAssistant(state.messages, state.activeAssistantId, (assistant) => ({
-      ...assistant,
-      blocks: terminalBlocks(assistant.blocks),
-      status: failed ? 'error' : 'complete',
-      processLabel: undefined,
-      processStartedAt: undefined,
-      processDuration: elapsedProcessDuration(assistant),
-    })),
-    streaming: false,
-    status: '',
-    turnError: failed && !cancelled
-      ? event.data.error.message || 'Unable to complete the response. Try again.'
-      : '',
-    activeAssistantId: undefined,
-  }
-}
-
-type ConversationDetail = ConversationSummary & { messages: ApiConversationMessage[] }
-
-export function useConversation(
-  conversationId: string | undefined,
-  onStarted?: (id: string) => void,
-) {
-  const [state, setState] = useState<ConversationState>(initialConversationState)
-  const stateRef = useRef(state)
-  const routeConversationRef = useRef(conversationId)
-  const streamConversationRef = useRef<string | undefined>(undefined)
-  const streamAbortRef = useRef<AbortController | null>(null)
-  const loadAbortRef = useRef<AbortController | null>(null)
-  const onStartedRef = useRef(onStarted)
-
-  useEffect(() => {
-    stateRef.current = state
-  }, [state])
-  useEffect(() => {
-    routeConversationRef.current = conversationId
-  }, [conversationId])
-  useEffect(() => {
-    onStartedRef.current = onStarted
-  }, [onStarted])
-
-  const load = useCallback(async (id = routeConversationRef.current) => {
-    loadAbortRef.current?.abort()
-    const controller = new AbortController()
-    loadAbortRef.current = controller
-    setState((current) => ({ ...current, loading: true, loadError: '', turnError: '' }))
-    try {
-      const [list, projects, detail] = await Promise.all([
-        request<{ conversations: ConversationSummary[] }>('/conversations', {
-          signal: controller.signal,
-        }),
-        request<{ projects: ProjectSummary[] }>('/projects', {
-          signal: controller.signal,
-        }),
-        id
-          ? request<ConversationDetail>(`/conversations/${id}`, { signal: controller.signal })
-          : Promise.resolve(undefined),
-      ])
-      if (controller.signal.aborted) return
-      setState((current) => ({
-        ...current,
-        conversations: list.conversations,
-        projects: projects.projects,
-        messages: detail?.messages.map(mapApiMessage) ?? [],
-        title: detail?.title ?? 'New conversation',
-        loading: false,
-        streaming: false,
-        loadError: '',
-        activeAssistantId: undefined,
-        activeConversationId: id,
-      }))
-    } catch (error) {
-      if (controller.signal.aborted) return
-      setState((current) => ({
-        ...current,
-        loading: false,
-        loadError: error instanceof Error ? error.message : 'Unable to load conversations.',
-      }))
-    }
-  }, [])
-
-  useEffect(() => {
-    if (
-      stateRef.current.streaming &&
-      conversationId === streamConversationRef.current
-    ) return
-    if (stateRef.current.streaming) streamAbortRef.current?.abort()
-    void load(conversationId)
-  }, [conversationId, load])
-
-  useEffect(() => () => {
-    streamAbortRef.current?.abort()
-    loadAbortRef.current?.abort()
-  }, [])
-
-  const send = useCallback(async (
-    message: string,
-    model: ModelName,
-    reasoningEffort: ReasoningEffort,
-    speed: Speed,
-  ) => {
-    if (stateRef.current.streaming) return
-    const controller = new AbortController()
-    streamAbortRef.current = controller
-    streamConversationRef.current = routeConversationRef.current
-    const optimisticId = crypto.randomUUID()
-    const optimisticUser: ChatMessage = {
-      id: `pending-user-${optimisticId}`,
-      role: 'user',
-      blocks: [{ id: `pending-user-${optimisticId}-text`, type: 'text', content: message }],
-      status: 'complete',
-    }
-    const optimisticAssistant: ChatMessage = {
-      id: `pending-assistant-${optimisticId}`,
-      role: 'assistant',
-      blocks: [],
-      status: 'streaming',
-      processLabel: 'Thinking…',
-      processStartedAt: Date.now(),
-    }
-    setState((current) => ({
-      ...current,
-      messages: [...current.messages, optimisticUser, optimisticAssistant],
-      loading: false,
-      streaming: true,
-      turnError: '',
-      status: 'Responding…',
-      activeAssistantId: optimisticAssistant.id,
-    }))
-    try {
-      const id = routeConversationRef.current
-      const path = id ? `/conversations/${id}/turns` : '/conversations/turns'
-      const response = await fetch(`${apiBase}${path}`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          message,
-          model,
-          reasoning_effort: reasoningEffort,
-          speed,
-        }),
-        signal: controller.signal,
-      })
-      if (!response.ok) {
-        throw new Error(await parseError(response, 'Unable to send the message. Try again.'))
-      }
-      await readEventStream(response, (event) => {
-        if (event.type === 'turn.started') {
-          streamConversationRef.current = event.data.conversation.id
-          onStartedRef.current?.(event.data.conversation.id)
-        }
-        setState((current) => applyStreamEvent(current, event))
-      })
-    } catch (error) {
-      const cancelled = controller.signal.aborted
-      setState((current) => ({
-        ...current,
-        messages: updateAssistant(current.messages, current.activeAssistantId, (assistant) => ({
-          ...assistant,
-          blocks: terminalBlocks(assistant.blocks),
-          status: cancelled ? 'complete' : 'error',
-          processLabel: undefined,
-          processStartedAt: undefined,
-          processDuration: elapsedProcessDuration(assistant),
-        })),
-        streaming: false,
-        status: '',
-        turnError: cancelled
-          ? ''
-          : error instanceof Error
-            ? error.message
-            : 'Unable to complete the response. Try again.',
-        activeAssistantId: undefined,
-      }))
-    } finally {
-      if (streamAbortRef.current === controller) streamAbortRef.current = null
-    }
-  }, [])
-
-  const stop = useCallback(() => {
-    streamAbortRef.current?.abort()
-    setState((current) => ({
-      ...current,
-      messages: updateAssistant(current.messages, current.activeAssistantId, (assistant) => ({
-        ...assistant,
-        blocks: terminalBlocks(assistant.blocks),
-        status: 'complete',
-        processLabel: undefined,
-        processStartedAt: undefined,
-        processDuration: elapsedProcessDuration(assistant),
-      })),
-      streaming: false,
-      status: '',
-      turnError: '',
-      activeAssistantId: undefined,
-    }))
-  }, [])
-
-  const remove = useCallback(async (id: string) => {
-    await request<void>(`/conversations/${id}`, { method: 'DELETE' })
-    setState((current) => ({
-      ...current,
-      conversations: current.conversations.filter((conversation) => conversation.id !== id),
-    }))
-  }, [])
-
-  const createProject = useCallback(async (name: string) => {
-    const project = await request<ProjectSummary>('/projects', {
-      method: 'POST',
-      body: JSON.stringify({ name }),
-    }, 'Unable to create the project. Try again.')
-    setState((current) => ({
-      ...current,
-      projects: [project, ...current.projects],
-    }))
-    return project
-  }, [])
-
-  const moveToProject = useCallback(async (conversationId: string, projectId: string | null) => {
-    const updated = await request<ConversationSummary>(
-      `/conversations/${conversationId}/project`,
-      {
-        method: 'PATCH',
-        body: JSON.stringify({ project_id: projectId }),
-      },
-      'Unable to move the conversation. Try again.',
-    )
-    setState((current) => ({
-      ...current,
-      conversations: current.conversations.map((conversation) =>
-        conversation.id === conversationId ? updated : conversation),
-    }))
-    return updated
-  }, [])
-
-  return {
-    ...state,
-    send,
-    stop,
-    remove,
-    createProject,
-    moveToProject,
-    reload: () => load(),
   }
 }

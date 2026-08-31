@@ -1,11 +1,12 @@
 import { createBrowserRouter, Navigate } from 'react-router'
 
+import { ChatRouteFallback } from '@/app/components/chat-route-fallback'
 import { RouteFallback } from '@/app/components/route-fallback'
 
 export const router = createBrowserRouter([
   {
     path: '/',
-    HydrateFallback: RouteFallback,
+    HydrateFallback: ChatRouteFallback,
     lazy: {
       Component: async () => (await import('@/pages/chat/page')).ChatPage,
     },

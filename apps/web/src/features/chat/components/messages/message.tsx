@@ -9,6 +9,11 @@ import {
 } from "react";
 import { EASE_OUT } from "@/lib/ease";
 import { cn } from "@/lib/utils";
+import {
+  MESSAGE_POP_UP,
+  MESSAGE_POP_UP_FROM,
+  MESSAGE_POP_UP_TO,
+} from "@/features/chat/motion/conversation-motion";
 import { MessageSideContext } from "./message-context";
 
 export {
@@ -35,6 +40,8 @@ export interface MessageProps
   from: MessageFrom;
   /** Plays a trailing-edge pop-up once when this message row mounts. */
   animateIn?: boolean;
+  /** Lets a parent presence boundary own navigation exits. */
+  animateOut?: boolean;
   children: ReactNode;
 }
 
@@ -57,17 +64,10 @@ export interface MessageTypingProps extends ComponentPropsWithRef<"span"> {
   label?: string;
 }
 
-// A sent row should rise from the live edge without changing measured layout.
-const MESSAGE_POP_UP = {
-  type: "spring",
-  stiffness: 480,
-  damping: 32,
-  mass: 0.62,
-} as const;
-
 export function Message({
   from,
   animateIn = false,
+  animateOut = true,
   children,
   className,
   initial,
@@ -89,35 +89,31 @@ export function Message({
           initial={
             initial ??
             (animateIn && !reduce
-              ? {
-                  opacity: 0,
-                  transform: "translateY(8px) scale(0.95)",
-                }
+              ? MESSAGE_POP_UP_FROM
               : false)
           }
           animate={
             animate ??
             (animateIn && !reduce
-              ? {
-                  opacity: 1,
-                  transform: "translateY(0px) scale(1)",
-                }
+              ? MESSAGE_POP_UP_TO
               : { opacity: 1 })
           }
           exit={
             exit ??
-            (reduce
-              ? { opacity: 0 }
-              : {
-                  opacity: 0,
-                  transform: "translateY(-3px) scale(0.99)",
-                })
+            (animateOut
+              ? reduce
+                ? { opacity: 0 }
+                : {
+                    opacity: 0,
+                    transform: "translateY(-3px) scale(0.99)",
+                  }
+              : undefined)
           }
           transition={
             transition ?? (reduce ? { duration: 0.12 } : MESSAGE_POP_UP)
           }
           style={{
-            transformOrigin: from === "user" ? "100% 100%" : "0% 100%",
+            transformOrigin: "50% 100%",
             ...style,
           }}
           className={cn(

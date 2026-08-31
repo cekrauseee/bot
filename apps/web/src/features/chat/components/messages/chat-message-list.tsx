@@ -3,106 +3,143 @@ import { MessageScroller } from "./message-scroller";
 import { MessageBubble, MessageBubbleContent } from "./message-bubble";
 import { MessageBlockRenderer } from "./message-block-renderer";
 import type { ChatApprovalDecision, ChatMessage } from "@/features/chat/model";
-import { ResponseProcess } from "./response-process";
+import { ResponseStatus } from './response-status';
 import { isResponseProcessBlock } from "./response-process-model";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
+import { memo, useState, type Ref } from "react";
+import { useHistoryEntrance } from '../../hooks/use-history-entrance';
+import type { ConversationEntry } from '../../motion/conversation-entry';
+
+type MessageRowProps = {
+  message: ChatMessage;
+  animateBubble: boolean;
+  onRetry?: () => void;
+  onReload?: () => void;
+  retryPending?: boolean;
+  retryDisabled?: boolean;
+  onApprovalDecision?: (blockId: string, decision: ChatApprovalDecision) => void;
+};
+
+const ChatMessageRow = memo(function ChatMessageRow({
+  message, animateBubble, onRetry, onReload, onApprovalDecision, retryPending, retryDisabled,
+}: MessageRowProps) {
+  const sources = message.blocks.flatMap((block) => block.type === 'activity'
+    ? block.items.flatMap((item) => item.type === 'search' ? item.results ?? [] : [])
+    : []);
+  const renderKey = message.renderKey ?? message.id;
+  const messageLabel = message.role === 'user' ? 'User message' : 'Assistant message';
+  const content = (
+      <MessageContent
+        className={cn(
+          message.role === "user"
+            ? "max-w-[88%]"
+            : "gap-5 text-foreground",
+        )}
+      >
+        {message.role === "assistant" ? (
+          <ResponseStatus
+            message={message}
+            onRetry={onRetry}
+            onReload={onReload}
+            retryPending={retryPending}
+            retryDisabled={retryDisabled}
+          />
+        ) : null}
+        {message.blocks.map((block, blockIndex) => {
+          if (isResponseProcessBlock(block)) {
+            return null;
+          }
+
+          return message.role === "user" && block.type === "text" ? (
+            <MessageBubble
+              key={`${renderKey}:${blockIndex}`}
+              variant="solid"
+              animateIn={animateBubble}
+            >
+              <MessageBubbleContent className="max-w-full select-text text-sm leading-5">
+                {block.content}
+              </MessageBubbleContent>
+            </MessageBubble>
+          ) : (
+            <MessageBlockRenderer
+              key={block.id}
+              block={block}
+              onApprovalDecision={onApprovalDecision}
+              responseStatus={message.status}
+              sources={sources}
+            />
+          );
+        })}
+      </MessageContent>
+  );
+  const common = { 'data-scroll-boundary': true, 'data-message-key': renderKey, from: message.role, 'aria-label': messageLabel, animateOut: false } as const;
+  return <Message {...common}>{content}</Message>;
+});
 
 export function ChatMessageList({
   messages,
   onApprovalDecision,
+  revealHistory = false,
+  viewportRef,
+  onRetryTurn,
+  onReloadConversation,
+  canRetryTurn = false,
+  entry,
+  conversationKey,
+  anchorMessageKey,
+  retryingMessageKey,
 }: {
+  entry?: ConversationEntry;
+  conversationKey?: string;
+  anchorMessageKey?: string;
+  retryingMessageKey?: string;
   messages: ChatMessage[];
+  revealHistory?: boolean;
+  viewportRef?: Ref<HTMLElement>;
+  onRetryTurn?: () => void;
+  onReloadConversation?: () => void;
+  canRetryTurn?: boolean;
   onApprovalDecision?: (
     blockId: string,
     decision: ChatApprovalDecision,
   ) => void;
 }) {
+  const revealVisibleHistory = useHistoryEntrance(revealHistory, entry, conversationKey);
   const [initialMessageIds] = useState(
-    () => new Set(messages.map((message) => message.id)),
+    () => new Set(messages.map((message) => message.renderKey ?? message.id)),
   );
-  const messageLabel = (role: ChatMessage["role"]) =>
-    role === "user" ? "User message" : "Assistant message";
+
 
   return (
     <MessageScroller
+      followOutput={false}
+      anchorMessageKey={anchorMessageKey}
+      viewportRef={viewportRef}
+      onInitialPosition={revealVisibleHistory}
+      data-history-pending={revealHistory ? "" : undefined}
       label="Conversation"
+      busy={messages.at(-1)?.status === 'streaming'}
       navigation="rail"
       navigationLabel="Message navigation"
-      className="h-full"
+      className="h-full [&[data-history-pending]_[data-slot=message]]:opacity-0!"
       viewportClassName="h-full min-h-0 px-4 sm:px-8"
-      contentClassName="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-end gap-6 py-6 pb-6 sm:py-8"
+      contentClassName="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-end pt-6 pb-10 sm:pt-8 sm:pb-12"
     >
-      <MessageGroup spacing="default" className="gap-7">
+      <MessageGroup spacing="default" className="shrink-0 gap-7">
         {messages.map((message) => {
-          const processBlocks = message.blocks.filter(isResponseProcessBlock);
-          const firstProcessIndex = message.blocks.findIndex(
-            isResponseProcessBlock,
-          );
-          const sources = message.blocks.flatMap((messageBlock) =>
-            messageBlock.type === "activity"
-              ? messageBlock.items.flatMap((item) =>
-                  item.type === "search" ? item.results ?? [] : [],
-                )
-              : [],
-          );
-
+          const key = message.renderKey ?? message.id;
+          const latest = message.id === messages.at(-1)?.id;
           return (
-            <Message
-              key={message.id}
-              from={message.role}
-              aria-label={messageLabel(message.role)}
-            >
-              <MessageContent
-                className={cn(
-                  message.role === "user"
-                    ? "max-w-[88%]"
-                    : "gap-5 text-foreground",
-                )}
-              >
-                {message.role === "assistant" &&
-                message.processLabel &&
-                firstProcessIndex < 0 ? (
-                  <ResponseProcess
-                    blocks={[]}
-                    activeLabel={message.processLabel}
-                    duration={message.processDuration}
-                  />
-                ) : null}
-                {message.blocks.map((block, blockIndex) => {
-                  if (isResponseProcessBlock(block)) {
-                    return blockIndex === firstProcessIndex ? (
-                      <ResponseProcess
-                        key={`${message.id}-process`}
-                        blocks={processBlocks}
-                        activeLabel={message.processLabel}
-                        duration={message.processDuration}
-                      />
-                    ) : null;
-                  }
-
-                  return message.role === "user" && block.type === "text" ? (
-                    <MessageBubble
-                      key={block.id}
-                      variant="solid"
-                      animateIn={!initialMessageIds.has(message.id)}
-                    >
-                      <MessageBubbleContent className="max-w-full text-sm leading-5">
-                        {block.content}
-                      </MessageBubbleContent>
-                    </MessageBubble>
-                  ) : (
-                    <MessageBlockRenderer
-                      key={block.id}
-                      block={block}
-                      onApprovalDecision={onApprovalDecision}
-                      responseStatus={message.status}
-                      sources={sources}
-                    />
-                  );
-                })}
-              </MessageContent>
-            </Message>
+            <ChatMessageRow
+              key={key}
+              message={message}
+              animateBubble={!initialMessageIds.has(key)}
+              onRetry={latest && message.retryable !== false ? onRetryTurn : undefined}
+              retryPending={key === retryingMessageKey}
+              retryDisabled={latest ? !canRetryTurn : undefined}
+              onReload={latest ? onReloadConversation : undefined}
+              onApprovalDecision={onApprovalDecision}
+            />
           );
         })}
       </MessageGroup>

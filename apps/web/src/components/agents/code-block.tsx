@@ -62,11 +62,20 @@ export function CodeBlock({
   // Highlight once the fence is complete. Re-tokenizing the entire code block
   // for every streamed delta creates avoidable main-thread work.
   const tokens = useAgentCodeTokens(streaming ? "" : code, language);
+  const lines = code.split("\n");
+  const tokensReady =
+    tokens !== null &&
+    tokens.length === lines.length &&
+    lines.every(
+      (line, index) =>
+        tokens[index]?.map((token) => token.content).join("") === line,
+    );
+  // Keep the final line geometry without painting an unhighlighted intermediate.
+  const highlighting = !streaming && !tokensReady;
   const highlighted = useMemo(
     () => new Set(highlightLines),
     [highlightLines],
   );
-  const lines = code.split("\n");
 
   useEffect(
     () => () => {
@@ -105,7 +114,7 @@ export function CodeBlock({
   return (
     <div
       data-state={status}
-      aria-busy={streaming}
+      aria-busy={streaming || highlighting}
       className={cn(
         "w-full overflow-hidden rounded-2xl bg-muted/80 text-sm [&>div>pre>code]:rounded-none [&>div>pre>code]:bg-transparent [&>div>pre>code]:p-0 [&>div>pre>code]:text-[1em]",
         className,
@@ -189,11 +198,14 @@ export function CodeBlock({
                   ) : null}
                   <AgentCodeLine
                     code={line}
-                    tokens={tokens?.[index]}
+                    tokens={
+                      streaming || highlighting ? undefined : tokens?.[index]
+                    }
                     className={cn(
                       "pr-4",
                       showLineNumbers ? "pl-1" : "pl-4",
                       wrap ? "whitespace-pre-wrap break-words" : "whitespace-pre",
+                      highlighting && "invisible",
                     )}
                   />
                 </span>

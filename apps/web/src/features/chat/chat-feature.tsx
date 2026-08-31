@@ -1,8 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import type { ButtonState } from '@/components/motion/button/stateful'
 import { ChatWorkspace } from './components/workspace/chat-workspace'
-import { useConversation } from './services/conversation-api'
+import { deletedActiveConversationPath } from './conversation-path'
+import { useConversationController } from './hooks/use-conversation-controller'
+import { resolveConversationTitle } from './motion/conversation-motion'
+import { conversationRouteIdentity } from './state/conversation-controller'
 import type {
   ChatModelOption,
   ChatReasoningOption,
@@ -27,7 +30,6 @@ type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 export type ChatFeatureProps = {
   user: ChatUserView
-  signOutError: string
   signOutStatus: ButtonState
   conversationId?: string
   projectSlug?: string
@@ -40,7 +42,6 @@ export type ChatFeatureProps = {
 
 export function ChatFeature({
   user,
-  signOutError,
   signOutStatus,
   conversationId,
   projectSlug,
@@ -50,7 +51,9 @@ export function ChatFeature({
   onConversationDelete,
   onSignOut,
 }: ChatFeatureProps) {
-  const conversation = useConversation(conversationId, onConversationStarted)
+  const conversation = useConversationController(conversationId, onConversationStarted)
+  const { activeConversation, activeIdentity, catalog } = conversation
+  const { send, stop, retryTurn } = conversation
   const [model, setModel] = useState<'gpt-5.6-sol' | 'gpt-5.6-luna'>('gpt-5.6-sol')
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('medium')
   const [fastMode, setFastMode] = useState(() => {
@@ -61,6 +64,18 @@ export function ChatFeature({
     }
   })
 
+  const submitComposer = useCallback((value: string, selectedModel?: string, onAccepted?: () => void) => send(
+    conversationRouteIdentity(conversationId), value,
+    selectedModel === 'gpt-5.6-luna' ? 'gpt-5.6-luna' : 'gpt-5.6-sol',
+    reasoningEffort, fastMode ? 'fast' : 'standard', undefined, onAccepted,
+  ), [send, conversationId, reasoningEffort, fastMode])
+  const stopComposer = useCallback(() => stop(conversationRouteIdentity(conversationId)), [stop, conversationId])
+  const retryResponse = useCallback(() => { void retryTurn(conversationRouteIdentity(conversationId)) }, [retryTurn, conversationId])
+  const changeReasoning = useCallback((value: string) => setReasoningEffort(value as ReasoningEffort), [])
+  const changeModel = useCallback((value: string) => setModel(
+    value === 'gpt-5.6-luna' ? 'gpt-5.6-luna' : 'gpt-5.6-sol',
+  ), [])
+
   useEffect(() => {
     try {
       localStorage.setItem('mybot-speed', fastMode ? 'fast' : 'standard')
@@ -70,79 +85,105 @@ export function ChatFeature({
   }, [fastMode])
 
   useEffect(() => {
-    if (conversation.loading || !conversationId) return
-    const active = conversation.conversations.find((item) => item.id === conversationId)
+    if (
+      (catalog.status !== 'ready' && catalog.status !== 'refreshing') ||
+      !conversationId
+    ) return
+    const active = catalog.conversations.find((item) => item.id === conversationId)
     if (!active) return
-    const actualProjectSlug = conversation.projects.find((project) =>
+    const actualProjectSlug = catalog.projects.find((project) =>
       project.id === active.project_id)?.slug
     if (actualProjectSlug !== projectSlug) {
       onConversationSelect(conversationId, actualProjectSlug, true)
     }
   }, [
-    conversation.loading,
-    conversation.conversations,
-    conversation.projects,
+    catalog.status,
+    catalog.conversations,
+    catalog.projects,
     conversationId,
     projectSlug,
     onConversationSelect,
   ])
 
+  useEffect(() => {
+    if (
+      conversationId &&
+      deletedActiveConversationPath(conversationId, catalog.deletedConversationIds)
+    ) {
+      onConversationDelete(conversationId)
+    }
+  }, [catalog.deletedConversationIds, conversationId, onConversationDelete])
+
   const leaveCurrentConversation = (navigate: () => void) => {
-    if (conversation.streaming) conversation.stop()
+    if (activeConversation.turn.status === 'loading') conversation.stop(activeIdentity)
     navigate()
   }
 
+  const streaming = activeConversation.turn.status === 'loading'
+  const activeSummary = activeIdentity.kind === 'existing'
+    ? catalog.conversations.find((item) => item.id === activeIdentity.id)
+    : undefined
+  const resolvedTitle = resolveConversationTitle({
+    detailTitle: activeSummary?.title_updated_at ? activeSummary.title : activeConversation.title,
+    summaryTitle: activeSummary?.title,
+    status: activeConversation.detail.status,
+  })
+
   return (
     <ChatWorkspace
-      title={conversation.title}
-      messages={conversation.messages}
+      title={resolvedTitle.title}
+      loadingTitle={resolvedTitle.loading}
+      conversationKey={activeConversation.viewKey ?? (activeIdentity.kind === 'new'
+        ? 'new'
+        : `existing:${activeIdentity.id}`)}
+      messages={activeConversation.messages}
+      submissionId={activeConversation.submissionId}
       models={models}
       reasoningOptions={reasoningOptions}
       user={user}
       reasoningEffort={reasoningEffort}
       model={model}
       fastMode={fastMode}
-      signOutError={signOutError}
       signOutStatus={signOutStatus}
-      loading={conversation.loading}
-      streaming={conversation.streaming}
-      status={conversation.status}
-      loadError={conversation.loadError}
-      turnError={conversation.turnError}
-      conversations={conversation.conversations}
-      projects={conversation.projects}
+      streaming={streaming}
+      status={streaming ? 'Responding…' : ''}
+      detailStatus={activeConversation.detail.status}
+      detailError={activeConversation.detail.error}
+      turnError={activeConversation.turn.error}
+      submittedPrompt={activeConversation.lastTurnInput?.message}
+      canRetryTurn={Boolean(activeConversation.lastTurnInput) && !streaming}
+      onRetryTurn={activeConversation.lastTurnInput ? retryResponse : undefined}
+      pendingConversationIds={[...(conversation.state.newConversation.id && conversation.state.newConversation.turn.status === 'loading'
+        ? [conversation.state.newConversation.id] : []), ...Object.entries(conversation.state.conversationsById)
+        .filter(([, record]) => record.turn.status === 'loading')
+        .map(([id]) => id)]}
+      conversations={catalog.conversations}
+      projects={catalog.projects}
+      catalogStatus={catalog.status}
+      catalogError={catalog.error}
       activeConversationId={conversationId}
-      onRetryLoad={conversation.reload}
+      onRetryLoad={conversation.retryActive}
+      onRetryCatalog={() => void conversation.reloadCatalog(true)}
       onNewTask={() => leaveCurrentConversation(onNewTask)}
+      onProjectRename={conversation.renameProject}
+      onProjectReorder={conversation.reorderProjects}
+      onProjectDelete={conversation.removeProject}
       onProjectCreate={conversation.createProject}
       onConversationSelect={(selected: ConversationSummary) => {
-        const selectedProject = conversation.projects.find((project) =>
+        const selectedProject = catalog.projects.find((project) =>
           project.id === selected.project_id)
         leaveCurrentConversation(() =>
           onConversationSelect(selected.id, selectedProject?.slug))
       }}
-      onConversationMove={async (id, projectId) => {
-        await conversation.moveToProject(id, projectId)
-        if (id === conversationId) {
-          const target = conversation.projects.find((project) => project.id === projectId)
-          onConversationSelect(id, target?.slug, true)
-        }
-      }}
-      onConversationDelete={async (id) => {
-        await conversation.remove(id)
-        onConversationDelete(id)
-      }}
-      onComposerSubmit={(value, model) => conversation.send(
-        value,
-        model === 'gpt-5.6-luna' ? 'gpt-5.6-luna' : 'gpt-5.6-sol',
-        reasoningEffort,
-        fastMode ? 'fast' : 'standard',
-      )}
-      onComposerStop={conversation.stop}
-      onReasoningChange={(value) => setReasoningEffort(value as ReasoningEffort)}
-      onModelChange={(value) => setModel(
-        value === 'gpt-5.6-luna' ? 'gpt-5.6-luna' : 'gpt-5.6-sol',
-      )}
+      onConversationPin={conversation.pin}
+      onPinnedReorder={conversation.reorderPins}
+      onConversationMove={conversation.moveToProject}
+      onConversationDelete={conversation.remove}
+      onConversationRename={conversation.rename}
+      onComposerSubmit={submitComposer}
+      onComposerStop={stopComposer}
+      onReasoningChange={changeReasoning}
+      onModelChange={changeModel}
       onSpeedChange={setFastMode}
       onSignOut={onSignOut}
     />

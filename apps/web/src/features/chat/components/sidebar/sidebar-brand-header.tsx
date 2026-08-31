@@ -1,6 +1,7 @@
 import { Orbit, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useState } from 'react'
+import { Link } from 'react-router'
 
 import { AnimatedSidebarTrigger } from '@/components/motion/animated-sidebar'
 import { useAnimatedSidebar } from '@/components/motion/animated-sidebar-context'
@@ -43,13 +44,23 @@ export function SidebarBrandHeader() {
       }}
     >
       <motion.span
-        aria-hidden="true"
+        inert={!showWordmark}
+        aria-hidden={!showWordmark || undefined}
         initial={false}
         animate={{ opacity: showWordmark ? 1 : 0 }}
         transition={wordmarkTransition}
-        className="pointer-events-none absolute inset-y-0 start-3.5 flex items-center whitespace-nowrap text-base font-semibold tracking-tight text-foreground"
+        className="absolute inset-y-0 start-3.5 flex items-center whitespace-nowrap text-base font-semibold tracking-tight text-foreground"
       >
-        myBot
+        <Link
+          to="/"
+          aria-label="myBot home"
+          onClick={() => {
+            if (sidebar.isMobile) sidebar.setOpenMobile(false)
+          }}
+          className="-mx-1 rounded-md px-1 py-1 outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring focus-visible:-outline-offset-2"
+        >
+          myBot
+        </Link>
       </motion.span>
       <motion.span
         aria-hidden="true"

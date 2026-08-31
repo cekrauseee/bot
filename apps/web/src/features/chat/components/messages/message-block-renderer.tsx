@@ -12,13 +12,8 @@ import type {
 } from "@/features/chat/model";
 import type { ToolApprovalParameter } from "@/features/chat/components/tools/tool-approval";
 import type { SearchSource } from "@/features/chat/model";
-import { lazy, Suspense } from "react";
+import { MarkdownResponse } from "./markdown-response";
 import { toAgentActivityItem } from "./response-process-model";
-
-const MarkdownResponse = lazy(async () => {
-  const module = await import("./markdown-response");
-  return { default: module.MarkdownResponse };
-});
 
 function taskItem(item: ChatTodo): TaskItem {
   return {
@@ -57,19 +52,11 @@ export function MessageBlockRenderer({
       );
     case "text":
       return (
-        <Suspense
-          fallback={
-            <p className="max-w-3xl whitespace-pre-wrap px-1 text-sm leading-6 text-foreground/90">
-              {block.content}
-            </p>
-          }
-        >
-          <MarkdownResponse
-            content={block.content}
-            status={responseStatus}
-            sources={sources}
-          />
-        </Suspense>
+        <MarkdownResponse
+          content={block.content}
+          status={responseStatus}
+          sources={sources}
+        />
       );
     case "activity":
       return (

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Loader2, LogOut, RotateCcw } from "lucide-react";
+import { LogOut } from "lucide-react";
 import {
   MorphPopover,
   MorphPopoverContent,
@@ -9,7 +9,7 @@ import {
   AnimatedSidebarMenuButton,
   AnimatedSidebarMenuItem,
 } from "@/components/motion/animated-sidebar";
-import { ActionSwapRollButton } from "@/components/motion/action-swap-roll";
+import { StatefulButton } from "@/components/motion/button/stateful";
 import type { ButtonState } from "@/components/motion/button/stateful";
 import type { ChatUserView } from "@/features/chat/model";
 import { cn } from "@/lib/utils";
@@ -50,12 +50,10 @@ export function UserAvatar({
 
 export function AccountMenu({
   user,
-  signOutError,
   signOutStatus,
   onSignOut,
 }: {
   user: ChatUserView;
-  signOutError: string;
   signOutStatus: ButtonState;
   onSignOut: () => void;
 }) {
@@ -70,7 +68,7 @@ export function AccountMenu({
     <MorphPopover
       open={menuOpen}
       onOpenChange={setMenuOpen}
-      className="w-full"
+      className="w-full group-data-[state=collapsed]/sidebar:w-11"
     >
       <AnimatedSidebarMenu>
         <AnimatedSidebarMenuItem>
@@ -112,42 +110,25 @@ export function AccountMenu({
               </div>
             </div>
           </div>
-          <ActionSwapRollButton
-            items={[
-              {
-                id: "idle",
-                label: "Sign out",
-                icon: <LogOut aria-hidden="true" className="size-4" />,
-              },
-              {
-                id: "loading",
-                label: "Signing out…",
-                icon: <Loader2 aria-hidden="true" className="size-4" />,
-              },
-              {
-                id: "success",
-                label: "Signed out",
-                icon: <Check aria-hidden="true" className="size-4" />,
-              },
-              {
-                id: "error",
-                label: "Try again",
-                icon: <RotateCcw aria-hidden="true" className="size-4" />,
-              },
-            ]}
-            value={signOutStatus}
-            cycle={false}
+          <StatefulButton
+            state={signOutStatus}
+            loadingText="Signing out…"
+            errorText="Try again"
+            icon={<LogOut aria-hidden="true" className="size-4 shrink-0" />}
             variant="ghost"
             size="sm"
-            disabled={signOutStatus === "loading"}
+            pressScale={0.96}
+            contentClassName="gap-2"
             onClick={onSignOut}
-            className="w-full justify-start rounded-lg text-xs text-muted-foreground hover:text-foreground"
-          />
-          {signOutError ? (
-            <p role="alert" className="px-2.5 pb-1 text-xs text-destructive">
-              {signOutError}
-            </p>
-          ) : null}
+            className={cn(
+              "w-full justify-start rounded-lg px-2.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+              signOutStatus === "error"
+                ? "bg-destructive/10 text-destructive hover:bg-destructive/15 hover:text-destructive focus-visible:ring-destructive"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            Sign out
+          </StatefulButton>
         </div>
       </MorphPopoverContent>
     </MorphPopover>

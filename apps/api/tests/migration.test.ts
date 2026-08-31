@@ -25,7 +25,7 @@ describe('compatibility migration', () => {
 
   it('derives ordered hashes from the journal and detects pending, mismatched, and out-of-order history', async () => {
     const expected = await readMigrationManifest(new URL('../drizzle/', import.meta.url))
-    expect(expected).toHaveLength(3)
+    expect(expected).toHaveLength(5)
     expect(compareMigrationHistory(expected, [])).toMatchObject({ ok: false, reason: 'pending' })
     expect(compareMigrationHistory(expected, [{ hash: 'wrong' }])).toMatchObject({ ok: false, reason: 'mismatch' })
     expect(compareMigrationHistory(expected, [{ hash: expected[0].hash }]))
@@ -98,9 +98,11 @@ describe('compatibility migration', () => {
       primary('projects'),
       { table_name: 'projects', indexname: 'ix_projects_user_id_created_at', indexdef: 'CREATE INDEX ix_projects_user_id_created_at ON public.projects USING btree (user_id, created_at)', is_primary: false },
       { table_name: 'projects', indexname: 'uq_projects_user_id_slug', indexdef: 'CREATE UNIQUE INDEX uq_projects_user_id_slug ON public.projects USING btree (user_id, slug)', is_primary: false },
+      { table_name: 'projects', indexname: 'ix_projects_user_id_sort_order', indexdef: 'CREATE INDEX ix_projects_user_id_sort_order ON public.projects USING btree (user_id, sort_order)', is_primary: false },
       primary('conversations'),
       { table_name: 'conversations', indexname: 'ix_conversations_project_id_updated_at', indexdef: 'CREATE INDEX ix_conversations_project_id_updated_at ON public.conversations USING btree (project_id, updated_at)', is_primary: false },
       { table_name: 'conversations', indexname: 'ix_conversations_user_id_updated_at', indexdef: 'CREATE INDEX ix_conversations_user_id_updated_at ON public.conversations USING btree (user_id, updated_at)', is_primary: false },
+      { table_name: 'conversations', indexname: 'ix_conversations_user_id_pinned_order', indexdef: 'CREATE INDEX ix_conversations_user_id_pinned_order ON public.conversations USING btree (user_id, pinned_order)', is_primary: false },
       primary('messages'),
       { table_name: 'messages', indexname: 'ix_messages_conversation_id_created_at', indexdef: 'CREATE INDEX ix_messages_conversation_id_created_at ON public.messages USING btree (conversation_id, created_at)', is_primary: false },
       { table_name: 'messages', indexname: 'uq_messages_one_streaming_assistant', indexdef: "CREATE UNIQUE INDEX uq_messages_one_streaming_assistant ON public.messages USING btree (conversation_id) WHERE (((role)::text = 'assistant'::text) AND ((status)::text = 'streaming'::text))", is_primary: false },

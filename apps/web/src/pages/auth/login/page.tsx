@@ -1,14 +1,21 @@
 import { LoginForm } from '@/features/auth/components/login-form'
+import { PageEntrance, PageEntranceItem } from '@/components/page-entrance'
 
 export function LoginPage() {
   return (
+    <PageEntrance>
     <main className="relative flex min-h-svh flex-col">
       <section className="mx-auto flex w-full max-w-xl flex-1 items-center px-5 py-8 sm:px-6">
         <div className="mx-auto flex w-full max-w-xs flex-col gap-5">
-          <span className="text-sm font-semibold tracking-tight">myBot</span>
+          <PageEntranceItem index={0} count={3}>
+            <span className="text-sm font-semibold tracking-tight">myBot</span>
+          </PageEntranceItem>
 
-          <LoginForm />
+          <PageEntranceItem index={1} count={3}>
+            <LoginForm />
+          </PageEntranceItem>
 
+          <PageEntranceItem index={2} count={3}>
           <p className="text-start text-xs leading-relaxed text-muted-foreground">
             By continuing, you agree to the{' '}
             <a
@@ -26,8 +33,10 @@ export function LoginPage() {
             </a>
             .
           </p>
+          </PageEntranceItem>
         </div>
       </section>
     </main>
+    </PageEntrance>
   )
 }

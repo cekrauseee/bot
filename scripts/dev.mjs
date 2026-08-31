@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 
 import { prepareDevelopment } from './lib/development.mjs'
+import { assertDevelopmentPortsAvailable } from './lib/development-ports.mjs'
 import { terminateDescendants } from './lib/process-tree.mjs'
 import { projectRoot, turboInvocation } from './lib/project.mjs'
 
@@ -39,6 +40,7 @@ function stopChildren(signal = 'SIGTERM') {
 }
 
 try {
+  await assertDevelopmentPortsAvailable()
   await prepareDevelopment()
   console.log('\nmyBot is starting at http://localhost:5173\n')
 

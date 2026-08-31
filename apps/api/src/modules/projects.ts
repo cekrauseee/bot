@@ -25,4 +25,6 @@ export const publicProject = (project: Project) => ({
   slug: project.slug,
   created_at: iso(project.createdAt),
   updated_at: iso(project.updatedAt),
+  sort_order: project.sortOrder,
+  order_updated_at: project.orderUpdatedAt ? iso(project.orderUpdatedAt) : null,
 })

@@ -1,5 +1,3 @@
-import { BookOpenText, Search, Sparkles } from "lucide-react";
-
 import { AgentActivity } from "@/features/chat/components/activity";
 import { ThinkingShimmer } from "@/features/chat/components/activity/thinking-shimmer";
 import {
@@ -23,8 +21,6 @@ export function ResponseProcess({
 
   if (!working && durableItemCount === 0) return null;
 
-  const searching = activeLabel === "Searching the web…";
-
   return (
     <AgentActivity
       items={items}
@@ -44,35 +40,17 @@ export function ResponseProcess({
       collapseOnComplete
       maxHeight={320}
       className="w-full min-w-0 max-w-3xl border-b border-border/70 pt-0.5 pb-3 text-xs leading-4"
-      contentClassName="gap-1.5 pb-1.5"
+      contentClassName="gap-1 pt-1 pb-2"
       renderWorkingStatus={({ label }) => (
-        <span className="flex min-w-0 items-center gap-1.5 text-xs">
-          {searching ? (
-            <Search
-              aria-hidden="true"
-              className="size-3.5 shrink-0"
-              strokeWidth={1.7}
-            />
-          ) : (
-            <Sparkles
-              aria-hidden="true"
-              className="size-3.5 shrink-0"
-              strokeWidth={1.7}
-            />
-          )}
+        <span className="block min-w-0 max-w-full text-xs">
           <ThinkingShimmer className="truncate font-normal">
             {label}
           </ThinkingShimmer>
         </span>
       )}
       renderCompletedStatus={({ summary }) => (
-        <span className="flex min-w-0 items-center gap-1.5 text-xs font-normal">
-          <BookOpenText
-            aria-hidden="true"
-            className="size-3.5 shrink-0"
-            strokeWidth={1.7}
-          />
-          <span className="truncate">{summary}</span>
+        <span className="block min-w-0 truncate text-xs font-normal">
+          {summary}
         </span>
       )}
     />

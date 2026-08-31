@@ -4,7 +4,7 @@ import { ArrowUp, Plus, Square } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   type FormEvent,
-  type KeyboardEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   type TextareaHTMLAttributes,
   useCallback,
@@ -57,12 +57,18 @@ export interface PromptInputProps extends Omit<
   actions?: PromptAction[];
   onAction?: (action: string) => void;
   onSubmit?: (value: string, model?: string) => void | Promise<void>;
+  /** Disables submission without disabling or clearing the editable draft. */
+  submitDisabled?: boolean;
   loading?: boolean;
   onStop?: () => void;
   minRows?: number;
   maxRows?: number;
   leadingAction?: ReactNode;
   trailingAction?: ReactNode;
+  submitAction?: ReactNode;
+  feedback?: ReactNode;
+  /** Redirects unhandled printable typing from the surrounding page into the prompt. */
+  focusOnGlobalTyping?: boolean;
   className?: string;
 }
 
@@ -77,12 +83,16 @@ export function PromptInput({
   actions = [],
   onAction,
   onSubmit,
+  submitDisabled = false,
   loading = false,
   onStop,
   minRows = 2,
   maxRows = 8,
   leadingAction,
   trailingAction,
+  submitAction,
+  feedback,
+  focusOnGlobalTyping = false,
   className,
   disabled,
   placeholder = "Ask the agent to do something…",
@@ -104,7 +114,11 @@ export function PromptInput({
     (option) => option.value === currentModelValue,
   );
   const canSubmit =
-    Boolean(currentValue.trim()) && Boolean(onSubmit) && !disabled && !loading;
+    Boolean(currentValue.trim()) &&
+    Boolean(onSubmit) &&
+    !disabled &&
+    !submitDisabled &&
+    !loading;
 
   const resizeTextarea = useCallback(() => {
     const textarea = textareaRef.current;
@@ -132,6 +146,28 @@ export function PromptInput({
     return () => observer.disconnect();
   }, [resizeTextarea]);
 
+  useEffect(() => {
+    if (!focusOnGlobalTyping || disabled) return;
+    const focusComposer = (event: globalThis.KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.key.length !== 1 ||
+        ((event.metaKey || event.ctrlKey || event.altKey) && !event.getModifierState("AltGraph"))
+      ) return;
+
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest('input, textarea, select, button, a[href], [contenteditable="true"], [role]')
+      ) return;
+
+      textareaRef.current?.focus({ preventScroll: true });
+    };
+    window.addEventListener("keydown", focusComposer);
+    return () => window.removeEventListener("keydown", focusComposer);
+  }, [disabled, focusOnGlobalTyping]);
+
   const setValue = (next: string) => {
     if (value === undefined) setInternalValue(next);
     onValueChange?.(next);
@@ -145,14 +181,17 @@ export function PromptInput({
   const submit = (event?: FormEvent) => {
     event?.preventDefault();
     const prompt = currentValue.trim();
-    if (!prompt || !onSubmit || disabled || loading) return;
+    if (!prompt || !onSubmit || disabled || submitDisabled || loading) return;
 
     onSubmit(prompt, currentModelValue);
     if (value === undefined) setInternalValue("");
-    textareaRef.current?.focus({ preventScroll: true });
+    const textarea = textareaRef.current;
+    if (textarea && document.activeElement !== textarea) {
+      textarea.focus({ preventScroll: true });
+    }
   };
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     onKeyDown?.(event);
     if (
       event.defaultPrevented ||
@@ -169,6 +208,14 @@ export function PromptInput({
   return (
     <form
       onSubmit={submit}
+      onPointerDownCapture={(event) => {
+        // Sending with the pointer should not blur an already-focused editor
+        // and immediately focus it again when the submit handler runs.
+        if (event.button === 0 && document.activeElement === textareaRef.current &&
+          event.target instanceof Element && event.target.closest('button[type="submit"]')) {
+          event.preventDefault();
+        }
+      }}
       className={cn(
         "relative w-full rounded-2xl border border-border/80 bg-background p-2 transition-colors focus-within:border-foreground/25",
         disabled && "opacity-60",
@@ -261,9 +308,9 @@ export function PromptInput({
             value={currentModelValue}
             onValueChange={setModel}
             disabled={disabled || loading}
-            className="min-w-0"
+            className="min-w-0 max-w-52 flex-1"
           >
-            <SelectTrigger className="h-8 w-auto max-w-52 rounded-xl border-0 bg-transparent px-2 py-0 text-xs hover:bg-muted focus-visible:ring-2">
+            <SelectTrigger className="h-8 w-auto max-w-full rounded-xl border-0 bg-transparent px-2 py-0 text-xs hover:bg-muted focus-visible:ring-2 disabled:opacity-100">
               <span className="flex min-w-0 items-center gap-1.5">
                 {currentModel?.icon ? (
                   <span className="grid size-4 shrink-0 place-items-center text-muted-foreground [&_svg]:size-3.5">
@@ -298,9 +345,9 @@ export function PromptInput({
             </SelectContent>
           </Select>
         ) : null}
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex shrink-0 items-center gap-1">
           {trailingAction}
-          <Button
+          {submitAction ?? <Button
             type={loading ? "button" : "submit"}
             size="icon"
             disabled={loading ? !onStop : !canSubmit}
@@ -324,9 +371,10 @@ export function PromptInput({
                 )}
               </motion.span>
             </AnimatePresence>
-          </Button>
+          </Button>}
         </div>
       </div>
+      {feedback}
     </form>
   );
 }

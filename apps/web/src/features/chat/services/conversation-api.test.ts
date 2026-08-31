@@ -1,12 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
-  applyStreamEvent,
-  initialConversationState,
+  ConversationApiError,
+  loadConversationDetail,
   mapApiMessage,
   parseSseBuffer,
   readEventStream,
-  type ConversationState,
+  startConversationTurn,
 } from './conversation-api'
 
 const turnId = '00000000-0000-4000-8000-000000000001'
@@ -34,7 +34,31 @@ const response = (body: string, cuts = [3, 11, 29]) => new Response(
   }),
 )
 
-describe('conversation SSE protocol', () => {
+const startedFrame = () => frame(0, 'turn.started', {
+  conversation: {
+    id: 'conversation', title: 'Title', project_id: null,
+    created_at: '2026-08-28T12:00:00.000Z',
+    updated_at: '2026-08-28T12:00:00.000Z',
+  },
+  user_message: {
+    id: 'user', role: 'user', content: 'Hi', reasoning: null,
+    status: 'completed', error_message: null, model: null,
+    reasoning_effort: null, speed: null, activities: [],
+    created_at: '2026-08-28T12:00:00.000Z',
+    updated_at: '2026-08-28T12:00:00.000Z',
+  },
+  assistant_message: {
+    id: 'assistant', role: 'assistant', content: '', reasoning: null,
+    status: 'streaming', error_message: null, model: 'gpt-5.6-sol',
+    reasoning_effort: 'medium', speed: 'standard', activities: [],
+    created_at: '2026-08-28T12:00:00.001Z',
+    updated_at: '2026-08-28T12:00:00.001Z',
+  },
+})
+
+afterEach(() => vi.unstubAllGlobals())
+
+describe('conversation transport', () => {
   it('restores the persisted processing duration from message timestamps', () => {
     const message = mapApiMessage({
       id: 'assistant',
@@ -56,16 +80,9 @@ describe('conversation SSE protocol', () => {
 
   it('keeps a process disclosure for completed answers without reported reasoning', () => {
     const message = mapApiMessage({
-      id: 'assistant',
-      role: 'assistant',
-      content: 'A concise answer.',
-      reasoning: null,
-      status: 'completed',
-      error_message: null,
-      model: 'gpt-5.6-luna',
-      reasoning_effort: 'low',
-      speed: 'fast',
-      activities: [],
+      id: 'assistant', role: 'assistant', content: 'A concise answer.', reasoning: null,
+      status: 'completed', error_message: null, model: 'gpt-5.6-luna',
+      reasoning_effort: 'low', speed: 'fast', activities: [],
       created_at: '2026-08-29T12:00:00.000Z',
       updated_at: '2026-08-29T12:00:04.000Z',
     })
@@ -93,144 +110,47 @@ describe('conversation SSE protocol', () => {
   })
 
   it('requires a strictly ordered terminal stream', async () => {
-    const started = frame(0, 'turn.started', {
-      conversation: {
-        id: 'conversation', title: 'Title',
-        created_at: '2026-08-28T12:00:00.000Z',
-        updated_at: '2026-08-28T12:00:00.000Z',
-      },
-      user_message: {
-        id: 'user', role: 'user', content: 'Hi', reasoning: null,
-        status: 'completed', error_message: null, model: null,
-        reasoning_effort: null, speed: null, activities: [],
-        created_at: '2026-08-28T12:00:00.000Z',
-        updated_at: '2026-08-28T12:00:00.000Z',
-      },
-      assistant_message: {
-        id: 'assistant', role: 'assistant', content: '', reasoning: null,
-        status: 'streaming', error_message: null, model: 'gpt-5.6-sol',
-        reasoning_effort: 'medium', speed: 'standard', activities: [],
-        created_at: '2026-08-28T12:00:00.001Z',
-        updated_at: '2026-08-28T12:00:00.001Z',
-      },
-    })
     await expect(readEventStream(response(
-      started + frame(1, 'text.delta', { delta: 'Hello' }),
+      startedFrame() + frame(1, 'text.delta', { delta: 'Hello' }),
     ), () => undefined)).rejects.toThrow(/before completion/)
     await expect(readEventStream(response(
-      started + frame(0, 'turn.completed', {}),
+      startedFrame() + frame(0, 'turn.completed', {}),
     ), () => undefined)).rejects.toThrow(/invalid/)
 
     const seen: string[] = []
     await readEventStream(response(
-      started + frame(1, 'turn.completed', {}),
+      startedFrame() + frame(1, 'turn.completed', {}),
     ), (event) => seen.push(event.type))
     expect(seen).toEqual(['turn.started', 'turn.completed'])
   })
 
-  it('reconciles optimistic IDs and applies deltas immutably', () => {
-    const optimistic: ConversationState = {
-      ...initialConversationState,
-      loading: false,
-      streaming: true,
-      messages: [
-        { id: 'pending-user', role: 'user', status: 'complete', blocks: [] },
-        { id: 'pending-assistant', role: 'assistant', status: 'streaming', blocks: [] },
-      ],
-      activeAssistantId: 'pending-assistant',
-    }
-    const started = parseSseBuffer(frame(0, 'turn.started', {
-      conversation: {
-        id: 'conversation', title: 'Title',
-        created_at: '2026-08-28T12:00:00.000Z',
-        updated_at: '2026-08-28T12:00:00.000Z',
-      },
-      user_message: {
-        id: 'user', role: 'user', content: 'Hi', reasoning: null,
-        status: 'completed', error_message: null, model: null,
-        reasoning_effort: null, speed: null, activities: [],
-        created_at: '2026-08-28T12:00:00.000Z',
-        updated_at: '2026-08-28T12:00:00.000Z',
-      },
-      assistant_message: {
-        id: 'assistant', role: 'assistant', content: '', reasoning: null,
-        status: 'streaming', error_message: null, model: 'gpt-5.6-sol',
-        reasoning_effort: 'medium', speed: 'standard', activities: [],
-        created_at: '2026-08-28T12:00:00.001Z',
-        updated_at: '2026-08-28T12:00:00.001Z',
-      },
-    })).events[0]
-    const reconciled = applyStreamEvent(optimistic, started)
-    const delta = parseSseBuffer(frame(1, 'text.delta', { delta: '**Hello**' })).events[0]
-    const streamed = applyStreamEvent(reconciled, delta)
+  it('preserves the HTTP status on API failures', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ detail: 'Conversation not found.' }),
+      { status: 404, headers: { 'content-type': 'application/json' } },
+    )))
 
-    expect(optimistic.messages[1].blocks).toEqual([])
-    expect(reconciled.messages.map((message) => message.id)).toEqual(['user', 'assistant'])
-    expect(streamed.messages[1].blocks).toContainEqual({
-      id: 'assistant-text',
-      type: 'text',
-      content: '**Hello**',
-    })
+    const error = await loadConversationDetail('missing').catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(ConversationApiError)
+    expect(error).toMatchObject({ status: 404, message: 'Conversation not found.' })
   })
 
-  it('updates the active process label and retires reasoning when final text starts', () => {
-    const state: ConversationState = {
-      ...initialConversationState,
-      loading: false,
-      streaming: true,
-      activeAssistantId: 'assistant',
-      messages: [{
-        id: 'assistant',
-        role: 'assistant',
-        status: 'streaming',
-        processLabel: 'Thinking…',
-        processStartedAt: Date.now() - 5_000,
-        blocks: [],
-      }],
-    }
-    const event = (sequence: number, type: string, data: Record<string, unknown>) =>
-      parseSseBuffer(frame(sequence, type, data)).events[0]
+  it('posts to the synchronously captured rendered conversation ID', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(''))
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
 
-    const reasoning = applyStreamEvent(state, event(1, 'reasoning.delta', {
-      delta: 'Checking sources.',
-    }))
-    expect(reasoning.messages[0].processLabel).toBe('Thinking…')
+    await startConversationTurn('B', {
+      message: 'Prompt for B',
+      model: 'gpt-5.6-sol',
+      reasoning_effort: 'medium',
+      speed: 'standard',
+    }, controller.signal)
 
-    const searching = applyStreamEvent(reasoning, event(2, 'step.started', {
-      step: {
-        id: 'search-1',
-        kind: 'web_search',
-        status: 'in_progress',
-        label: 'Web search',
-        query: 'current reference',
-      },
-    }))
-    expect(searching.messages[0].processLabel).toBe('Searching the web…')
-
-    const completedSearch = applyStreamEvent(searching, event(3, 'step.completed', {
-      step: {
-        id: 'search-1',
-        kind: 'web_search',
-        status: 'completed',
-        label: 'Web search',
-        query: 'current reference',
-      },
-    }))
-    expect(completedSearch.messages[0].processLabel).toBe('Thinking…')
-
-    const answering = applyStreamEvent(completedSearch, event(4, 'text.delta', {
-      delta: 'Final answer.',
-    }))
-    expect(answering.messages[0].processLabel).toBeUndefined()
-    expect(answering.messages[0].processStartedAt).toEqual(expect.any(Number))
-    expect(answering.messages[0].processDuration).toBeGreaterThanOrEqual(5)
-    expect(answering.messages[0].blocks).toContainEqual(expect.objectContaining({
-      type: 'reasoning',
-      status: 'complete',
-    }))
-    expect(answering.messages[0].blocks).toContainEqual(expect.objectContaining({
-      type: 'activity',
-      status: 'complete',
-    }))
+    expect(fetchMock).toHaveBeenCalledOnce()
+    const [request] = fetchMock.mock.calls[0]!
+    const requestUrl = request instanceof Request ? request.url : String(request)
+    expect(new URL(requestUrl, 'https://api.example.test').pathname)
+      .toBe('/conversations/B/turns')
   })
 })

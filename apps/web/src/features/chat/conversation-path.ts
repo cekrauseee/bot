@@ -5,7 +5,20 @@ export function conversationPath(
   projects: ProjectSummary[],
 ) {
   const project = projects.find((item) => item.id === conversation.project_id)
-  return project
-    ? `/projects/${encodeURIComponent(project.slug)}/${conversation.id}`
-    : `/conversations/${conversation.id}`
+  return conversationPathForRoute(conversation.id, project?.slug)
+}
+
+export function conversationPathForRoute(id: string, projectSlug?: string) {
+  return projectSlug
+    ? `/projects/${encodeURIComponent(projectSlug)}/${id}`
+    : `/conversations/${id}`
+}
+
+export function deletedActiveConversationPath(
+  activeConversationId: string | undefined,
+  deletedConversationIds: string[],
+) {
+  return activeConversationId && deletedConversationIds.includes(activeConversationId)
+    ? '/'
+    : undefined
 }

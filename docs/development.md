@@ -33,7 +33,9 @@ It reports the remaining Google and Resend variables without blocking local UI d
 npm run dev
 ```
 
-This command ensures environment files, dependencies, infrastructure, and migrations are ready. It then runs the Elysia API on `8000`, the FastAPI AI service on `8001`, and Vite on `5173`. Vite uses `strictPort`, so a busy `5173` fails with a clear startup error instead of silently moving to another port; stop the conflicting process and retry. `Ctrl+C` stops every application process. Open `http://localhost:5173`; use `localhost`, not `127.0.0.1`, so the configured browser origin matches.
+Before preparing the environment, this command checks the application ports: Vite on `5173` (IPv4 and IPv6), the Elysia API on `8000` (or the port from `API_BASE_URL`, with shell environment taking precedence over `.env`), and FastAPI on `8001`. If a port is occupied, startup stops with one line per service showing its port, process, and PID, followed by a single command to stop all identified owners. PID discovery uses `lsof` when available; otherwise the log provides an inspection command. Nothing is stopped automatically. Verify the PIDs before running the command, or use `Ctrl+C` in the existing development terminal, then retry `npm run dev`.
+
+Once the ports are available, the command ensures environment files, dependencies, infrastructure, and migrations are ready, then starts the services. Vite retains `strictPort` to prevent silently switching ports if a conflict appears after the check. `Ctrl+C` stops every application process. Open `http://localhost:5173`; use `localhost`, not `127.0.0.1`, so the configured browser origin matches.
 
 Stop the background database and Redis containers when they are no longer needed:
 

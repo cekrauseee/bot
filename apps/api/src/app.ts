@@ -8,6 +8,8 @@ import { AuthError, authDetail } from './errors.js'
 import {
   AuthRepository,
   ConversationRepository,
+  ConversationPinError,
+  ProjectOrderError,
   ProjectRepository,
   normalizeEmail,
 } from './db/repository.js'
@@ -84,6 +86,7 @@ const validationDetailSchema = t.Object({
   })),
 })
 const challengeSchema = t.Object({
+  development_code: t.Optional(t.String({ pattern: '^\\d{6}$' })),
   challenge_id: t.String(),
   expires_in_seconds: t.Integer(),
   resend_after_seconds: t.Integer(),
@@ -430,10 +433,14 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     browserOrigin(request)
     const challenge = await services.otp.issue(normalizeEmail(body.email), clientIp(request, settings, peerResolver))
     set.status = 202
+    set.headers['cache-control'] = 'no-store'
     return {
       challenge_id: challenge.challengeId,
       expires_in_seconds: challenge.expiresInSeconds,
       resend_after_seconds: challenge.resendAfterSeconds,
+      ...(settings.environment === 'development' && challenge.developmentCode
+        ? { development_code: challenge.developmentCode }
+        : {}),
     }
   }, { body: otpRequestBody, response: otpRequestResponses })
 
@@ -534,10 +541,21 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   const projectBody = t.Object({
     name: t.String({ minLength: 1, maxLength: 80 }),
   })
+  const conversationTitleBody = t.Object({
+    title: t.String({ minLength: 1, maxLength: 120 }),
+  })
+  const projectOrderBody = t.Object({
+    project_ids: t.Array(t.String({ format: 'uuid' })),
+  })
   const assignProjectBody = t.Object({
     project_id: t.Union([t.String({ format: 'uuid' }), t.Null()]),
   })
+  const pinBody = t.Object({ pinned: t.Boolean() })
+  const pinnedOrderBody = t.Object({
+    conversation_ids: t.Array(t.String({ format: 'uuid' })),
+  })
   const turnBody = t.Object({
+    retry_of: t.Optional(t.String({ format: 'uuid' })),
     message: t.String({ minLength: 1, maxLength: 1_048_576 }),
     model: t.Union([t.Literal('gpt-5.6-sol'), t.Literal('gpt-5.6-luna')]),
     reasoning_effort: t.Union([
@@ -577,8 +595,11 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
         400,
       )
     }
-    const project = await services.database.transaction((db) =>
-      new ProjectRepository(db).create(user.id, name, slug))
+    const project = await services.database.transaction(async (db) => {
+      const repository = new ProjectRepository(db)
+      await repository.lockUser(user.id)
+      return repository.create(user.id, name, slug)
+    })
     if (!project) {
       throw new AuthError(
         'project_exists',
@@ -589,6 +610,79 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     set.status = 201
     return publicProject(project)
   }, { body: projectBody })
+
+  const projectParams = t.Object({
+    projectId: t.String({ format: 'uuid' }),
+  })
+
+  app.patch('/projects/:projectId', async ({ request, params, body, set }) => {
+    browserOrigin(request)
+    const user = await sessionUser(request)
+    const name = normalizeProjectName(body.name)
+    const slug = projectSlug(name)
+    if (!slug) {
+      throw new AuthError(
+        'invalid_project_name',
+        'Use at least one letter or number in the project name.',
+        400,
+      )
+    }
+
+    try {
+      const project = await services.database.transaction(async (db) => {
+        const repository = new ProjectRepository(db)
+        if (!await repository.get(user.id, params.projectId)) return undefined
+        return repository.rename(user.id, params.projectId, name, slug)
+      })
+      if (!project) {
+        set.status = 404
+        return { detail: { code: 'not_found', message: 'Not Found' } }
+      }
+      return publicProject(project)
+    } catch (error) {
+      if (constraintName(error) === 'uq_projects_user_id_slug') {
+        throw new AuthError(
+          'project_exists',
+          'A project with this name already exists.',
+          409,
+        )
+      }
+      throw error
+    }
+  }, { params: projectParams, body: projectBody })
+
+  app.delete('/projects/:projectId', async ({ request, params, set }) => {
+    browserOrigin(request)
+    const user = await sessionUser(request)
+    const project = await services.database.transaction(async (db) => {
+      const repository = new ProjectRepository(db)
+      await repository.lockUser(user.id)
+      return repository.delete(user.id, params.projectId)
+    })
+    if (!project) {
+      set.status = 404
+      return { detail: { code: 'not_found', message: 'Not Found' } }
+    }
+    return new Response(null, { status: 204 })
+  }, { params: projectParams })
+
+  app.patch('/projects/order', async ({ request, body }) => {
+    browserOrigin(request)
+    const user = await sessionUser(request)
+    const projects = await services.database.transaction(async (db) => {
+      const repository = new ProjectRepository(db)
+      await repository.lockUser(user.id)
+      try {
+        return await repository.reorder(user.id, body.project_ids)
+      } catch (error) {
+        if (error instanceof ProjectOrderError) {
+          throw new AuthError('invalid_project_order', 'The project set is stale or invalid.', 409)
+        }
+        throw error
+      }
+    })
+    return { projects: projects.map(publicProject) }
+  }, { body: projectOrderBody })
 
   app.get('/conversations', async ({ request }) => {
     const user = await sessionUser(request)
@@ -608,11 +702,28 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     return { ...publicConversation(result), messages: result.messages.map(publicMessage) }
   }, { params: conversationParams })
 
+  app.patch('/conversations/:conversationId', async ({ request, params, body, set }) => {
+    browserOrigin(request)
+    const user = await sessionUser(request)
+    const title = body.title.trim().replace(/\s+/g, ' ').slice(0, 120)
+    if (!title) {
+      throw new AuthError('invalid_title', 'Enter a title to continue.', 400)
+    }
+    const conversation = await services.database.transaction((db) =>
+      new ConversationRepository(db).rename(user.id, params.conversationId, title))
+    if (!conversation) {
+      set.status = 404
+      return { detail: { code: 'not_found', message: 'Not Found' } }
+    }
+    return publicConversation(conversation)
+  }, { params: conversationParams, body: conversationTitleBody })
+
   app.delete('/conversations/:conversationId', async ({ request, params, set }) => {
     browserOrigin(request)
     const user = await sessionUser(request)
     const deleted = await services.database.transaction(async (db) => {
       const repository = new ConversationRepository(db)
+      await repository.lockUser(user.id)
       const owned = await repository.lockOwned(user.id, params.conversationId)
       if (!owned) return undefined
       if (await repository.active(owned.id)) {
@@ -631,17 +742,58 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     return new Response(null, { status: 204 })
   }, { params: conversationParams })
 
+  app.patch('/conversations/:conversationId/pin', async ({ request, params, body, set }) => {
+    browserOrigin(request)
+    const user = await sessionUser(request)
+    const conversation = await services.database.transaction(async (db) => {
+      const repository = new ConversationRepository(db)
+      await repository.lockUser(user.id)
+      return repository.pin(user.id, params.conversationId, body.pinned)
+    })
+    if (!conversation) {
+      set.status = 404
+      return { detail: { code: 'not_found', message: 'Not Found' } }
+    }
+    return publicConversation(conversation)
+  }, { params: conversationParams, body: pinBody })
+
+  app.patch('/conversations/pinned-order', async ({ request, body }) => {
+    browserOrigin(request)
+    const user = await sessionUser(request)
+    const conversations = await services.database.transaction(async (db) => {
+      const repository = new ConversationRepository(db)
+      await repository.lockUser(user.id)
+      try {
+        return await repository.reorderPins(user.id, body.conversation_ids)
+      } catch (error) {
+        if (error instanceof ConversationPinError && error.code === 'invalid_reorder') {
+          throw new AuthError('invalid_pinned_order', 'The pinned conversation set is stale or invalid.', 409)
+        }
+        throw error
+      }
+    })
+    return { conversations: conversations.map(publicConversation) }
+  }, { body: pinnedOrderBody })
+
   app.patch('/conversations/:conversationId/project', async ({ request, params, body, set }) => {
     browserOrigin(request)
     const user = await sessionUser(request)
     const conversation = await services.database.transaction(async (db) => {
       const projectRepository = new ProjectRepository(db)
       const conversationRepository = new ConversationRepository(db)
+      await conversationRepository.lockUser(user.id)
       const projectId = body.project_id
       if (projectId !== null && !await projectRepository.get(user.id, projectId)) {
         return undefined
       }
-      return conversationRepository.assignProject(user.id, params.conversationId, projectId)
+      try {
+        return await conversationRepository.assignProject(user.id, params.conversationId, projectId)
+      } catch (error) {
+        if (error instanceof ConversationPinError && error.code === 'project_pinned') {
+          throw new AuthError('project_pinned', 'Unpin the conversation before moving it between projects or Recents.', 409)
+        }
+        throw error
+      }
     })
     if (!conversation) {
       set.status = 404
@@ -665,6 +817,9 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   ) => {
     const message = options.message.trim()
     if (!message) throw new AuthError('invalid_message', 'Enter a message to continue.', 400)
+    if (options.retry_of && !conversationId) {
+      throw new AuthError('retry_unavailable', 'Open the conversation before retrying this response.', 409)
+    }
     try {
       const result = await services.database.transaction(async (db) => {
         const repository = new ConversationRepository(db)
@@ -672,11 +827,14 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
           ? await repository.lockOwned(userId, conversationId)
           : await repository.create(userId, conversationTitle(message))
         if (!conversation) throw new AuthError('not_found', 'Not Found', 404)
-        const created = await repository.addTurn(conversation.id, message, {
+        const modelOptions = {
           model: options.model,
           reasoningEffort: options.reasoning_effort,
           speed: options.speed,
-        })
+        }
+        const created = options.retry_of
+          ? await repository.retryTurn(conversation.id, options.retry_of, message, modelOptions)
+          : await repository.addTurn(conversation.id, message, modelOptions)
         return { conversation: created.conversation ?? conversation, created }
       })
       return streamTurn(
@@ -691,6 +849,9 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       )
     } catch (error) {
       if (error instanceof AuthError) throw error
+      if (error instanceof Error && error.message === 'retry_unavailable') {
+        throw new AuthError('retry_unavailable', 'This response can no longer be retried. Refresh the conversation to see its latest state.', 409)
+      }
       if (
         constraintName(error) === 'uq_messages_one_streaming_assistant' ||
         (error instanceof Error && error.message === 'conversation_active')

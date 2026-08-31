@@ -31,11 +31,22 @@ Authenticated conversation routes are:
 | --- | --- | --- |
 | `GET` | `/conversations` | List the current user's conversations newest first |
 | `GET` | `/conversations/:conversationId` | Load one owned conversation and its messages |
+| `PATCH` | `/conversations/:conversationId` | Rename an owned conversation with `{ title: string }` |
 | `POST` | `/conversations/turns` | Create a conversation and stream its first turn |
 | `POST` | `/conversations/:conversationId/turns` | Stream a turn in an existing conversation |
 | `DELETE` | `/conversations/:conversationId` | Delete an inactive owned conversation |
+| `PATCH` | `/conversations/:conversationId/pin` | Set `{ pinned: boolean }` for an owned conversation |
+| `PATCH` | `/conversations/pinned-order` | Reorder the complete owned pinned set using `{ conversation_ids: string[] }` |
+
+Conversation summaries include nullable `pinned_order` and `pin_updated_at`. Pinning appends to the pinned order and preserves `project_id` and `updated_at`; unpinning clears the order. Pin/reorder requests serialize on the owning user row, and pin timestamps advance monotonically. Reordering rejects duplicate, missing, foreign, or unpinned IDs with 409 without partial writes. Pinned conversations reject all explicit project assignments, including moves to Recents, until unpinned.
+
+Conversation renames normalize whitespace, keep chat activity timestamps and project/pin membership unchanged, and advance a separate `title_updated_at` clock.
+
+Projects expose nullable `sort_order` and `order_updated_at`. `PATCH /projects/order` accepts `{ project_ids: string[] }` containing the complete current owned set and returns the reordered projects. Invalid or stale sets return 409 without partial writes. Create, delete, and reorder serialize on the user row. Unordered/new projects precede ordered projects, with creation time and ID descending as tie-breakers; renaming does not change the chosen order.
 
 Turn responses use named `text/event-stream` events with a versioned JSON envelope. Elysia validates ordering and identifiers, emits one enriched `turn.started`, persists partial output on cancellation, and completes only after a valid upstream terminal event. One streaming assistant message is allowed per conversation across application instances.
+
+Existing-conversation turn requests may include `retry_of`, the UUID of the latest failed assistant message. Under the owning conversation lock, the API verifies that the prompt matches its preceding user message and that no turn is streaming. It resets and reuses that assistant row, keeping the user message once. Older, completed, mismatched, or already-running attempts return 409; another user's conversation returns 404. New-conversation requests cannot include `retry_of`.
 
 ## Dependency Management
 

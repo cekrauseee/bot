@@ -77,6 +77,25 @@ describe('HTTP contract', () => {
     expect(await response.json()).toEqual({ challenge_id: 'challenge', expires_in_seconds: 600, resend_after_seconds: 60 })
   })
 
+  it.each(['development', 'test', 'production'] as const)(
+    'only exposes an OTP in a non-cacheable development response: %s', async (environment) => {
+      services.otp.issue.mockResolvedValueOnce({
+        challengeId: 'challenge', expiresInSeconds: 600, resendAfterSeconds: 60,
+        developmentCode: '123456',
+      })
+      const app = createApp({ ...settings, environment }, services)
+      const response = await app.handle(new Request('http://localhost/auth/otp/request', {
+        method: 'POST', headers: { 'content-type': 'application/json', origin: settings.webOrigin },
+        body: JSON.stringify({ email: 'developer@example.com' }),
+      }))
+      expect(response.status).toBe(202)
+      expect(response.headers.get('cache-control')).toBe('no-store')
+      const body = await response.json()
+      if (environment === 'development') expect(body.development_code).toBe('123456')
+      else expect(body).not.toHaveProperty('development_code')
+    },
+  )
+
   it('preserves FastAPI validation semantics for representative auth bodies', async () => {
     const controlBody = '{"a":"bad' + String.fromCharCode(1) + '"}'
     const cases = [
