@@ -9,7 +9,9 @@
 - `src/app.ts`: Elysia application factory, cross-cutting HTTP behavior, and typed route composition.
 - `src/config.ts`: validated environment configuration and production guardrails.
 - `src/modules/auth`: OTP, Google OpenID Connect, and session services.
-- `src/modules/conversations.ts`: AI client, versioned SSE validation, stream persistence, and public serialization.
+- `src/modules/conversations.ts`: private AI client and public conversation serialization.
+- `src/modules/agent-control-plane.ts`: leased execution, checkpoint projection, event replay, Redis fanout, and WebSocket transport.
+- `src/modules/models.ts`: provider-aware public model capability catalog.
 - `src/db`: Drizzle schema, repository, connection, migration, drift checks, and local application seed.
 - `src/email.ts`: React Email composition and Resend delivery.
 - `drizzle`: versioned, non-destructive SQL migrations.
@@ -44,7 +46,28 @@ Conversation renames normalize whitespace, keep chat activity timestamps and pro
 
 Projects expose nullable `sort_order` and `order_updated_at`. `PATCH /projects/order` accepts `{ project_ids: string[] }` containing the complete current owned set and returns the reordered projects. Invalid or stale sets return 409 without partial writes. Create, delete, and reorder serialize on the user row. Unordered/new projects precede ordered projects, with creation time and ID descending as tie-breakers; renaming does not change the chosen order.
 
-Turn responses use named `text/event-stream` events with a versioned JSON envelope. Elysia validates ordering and identifiers, emits one enriched `turn.started`, persists partial output on cancellation, and completes only after a valid upstream terminal event. One streaming assistant message is allowed per conversation across application instances.
+Agent control routes are:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/models` | Return provider-aware model, reasoning, and speed capabilities |
+| `GET` | `/agent-runs/:runId` | Load one owned run projection |
+| `GET` | `/agent-runs/:runId/events?after=` | Replay a bounded page of durable events |
+| `POST` | `/agent-runs/:runId/resume` | Atomically answer the current question and queue continuation |
+| `POST` | `/agent-runs/:runId/cancel` | Request cancellation without deleting run history |
+| WebSocket | `/agent-runs/:runId/subscribe?after=` | Replay then stream durable events and transient browser frames |
+
+Starting a turn creates a durable run and returns named `text/event-stream` events with a v2 envelope. PostgreSQL assigns the public decimal event sequence. The executor validates the AI service sequence, fences every write with a renewable execution token, stores partial state, and completes only after a valid terminal event. One active run is allowed per conversation across application instances.
+
+Runs may continue after the initiating HTTP connection closes. Clients hydrate `active_run`, reconnect with the last sequence, replay through a fixed high-water mark, and then receive Redis-backed live fanout. PostgreSQL remains authoritative if Redis drops a message. Browser images are validated and fanned out separately without a database insert.
+
+Conversation details expose one current task `plan`, projected from the latest nonempty run snapshot. New runs inherit that plan and pass it to the AI service as context. Plan updates replace the current snapshot; they do not create message blocks or independent plans per turn.
+
+Projects expose a stable `workspace_path` through the existing authenticated `GET /projects` and `POST /projects` routes. Creation stores `/workspace/projects/<initial-slug-prefix>-<project-id>` without calling the runtime. Paths use at most 48 Unicode code points from the initial slug and the full project UUID, so renaming preserves references and recreating a deleted project cannot adopt its files. Existing projects receive paths through the non-destructive migration.
+
+Each new run snapshots its owned conversation's project path into `working_directory`, or `/workspace` when unassigned. The executor uses the stored value on every invocation and resume, even if the conversation moves or project metadata changes. The following run uses the conversation's new assignment. Pre-migration runs keep `/workspace` to preserve existing tool effects. Folder selection, file browsing, and project lifecycle UI are outside this change.
+
+The first AI event contains its LangGraph checkpoint projection. When that checkpoint advanced beyond the API, Elysia replaces stale assistant text, clears a consumed resume value, records the reconciled checkpoint ID, and then applies new deltas. Expired execution leases are reclaimed periodically; stale executors cannot append events or change the assistant.
 
 Existing-conversation turn requests may include `retry_of`, the UUID of the latest failed assistant message. Under the owning conversation lock, the API verifies that the prompt matches its preceding user message and that no turn is streaming. It resets and reuses that assistant row, keeping the user message once. Older, completed, mismatched, or already-running attempts return 409; another user's conversation returns 404. New-conversation requests cannot include `retry_of`.
 
@@ -54,4 +77,4 @@ Existing-conversation turn requests may include `retry_of`, the UUID of the late
 
 ## Database Compatibility
 
-Drizzle owns the schema and migration workflow. The compatibility migration adopts the former authentication schema without deleting data; the conversation migration adds `conversations` and `messages` with cascading ownership and streaming indexes. Migration checks verify the complete relational contract before delivery.
+Drizzle owns the schema and migration workflow. The agent control-plane migration adds one global workspace per user, durable runs, and append-only events without changing existing conversation ownership. Migration checks verify the complete relational contract before delivery.
