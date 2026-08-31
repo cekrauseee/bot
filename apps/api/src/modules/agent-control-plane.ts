@@ -546,6 +546,7 @@ export class AgentRunExecutor {
         run_id: run.id,
         turn_id: run.turnId,
         workspace_id: run.workspaceId,
+        working_directory: run.workingDirectory,
         conversation_id: run.conversationId,
         user_id: run.userId,
         messages: state.transcript.map(({ role, content: messageContent }) => ({

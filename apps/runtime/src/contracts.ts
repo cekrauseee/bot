@@ -22,6 +22,7 @@ export interface RuntimeToolRequest {
   readonly conversation_id: string
   readonly user_id: string
   readonly workspace_id: string
+  readonly working_directory?: string
   readonly tool: RuntimeToolName
   readonly arguments: JsonObject
 }
@@ -38,6 +39,7 @@ export interface DirectoryEntry {
 }
 
 export interface FilesystemProvider {
+  mkdir(path: string, signal?: AbortSignal): Promise<void>
   list(path: string, signal?: AbortSignal): Promise<readonly DirectoryEntry[]>
   read(path: string, signal?: AbortSignal): Promise<string>
   write(path: string, content: string, signal?: AbortSignal): Promise<void>

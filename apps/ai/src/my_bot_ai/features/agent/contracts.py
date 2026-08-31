@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import Any, Literal
 from uuid import UUID
 
@@ -155,8 +156,28 @@ class AgentRequest(BaseModel):
     model: ModelName
     reasoning_effort: ReasoningEffort
     speed: Speed
+    working_directory: str = Field(default="/workspace", max_length=4_096)
     task_plan: list[PlanStep] = Field(default_factory=list, max_length=50)
     resume: ResumeInput | None = None
+
+    @model_validator(mode="after")
+    def validate_working_directory(self) -> AgentRequest:
+        value = self.working_directory
+        if (
+            "\\" in value
+            or any(ord(character) < 32 or ord(character) == 127 for character in value)
+            or any(part == ".." for part in PurePosixPath(value).parts)
+            or not value.startswith("/")
+        ):
+            raise ValueError(
+                "working_directory must be an absolute canonical path inside /workspace"
+            )
+        canonical = str(PurePosixPath(value))
+        if canonical != value:
+            raise ValueError("working_directory must be canonical")
+        if not (canonical == "/workspace" or canonical.startswith("/workspace/")):
+            raise ValueError("working_directory must be inside /workspace")
+        return self
 
     @model_validator(mode="after")
     def validate_model_capabilities(self) -> AgentRequest:

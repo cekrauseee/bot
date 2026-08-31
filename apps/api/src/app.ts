@@ -667,6 +667,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   const publicRun = (run: AgentRun) => ({
     id: run.id,
     workspace_id: run.workspaceId,
+    working_directory: run.workingDirectory,
     conversation_id: run.conversationId,
     turn_id: run.turnId,
     status: run.status,

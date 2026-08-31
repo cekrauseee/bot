@@ -18,11 +18,16 @@ export const projectSlug = (name: string) => {
   return /[\p{Letter}\p{Number}]/u.test(slug) ? slug : ''
 }
 
+// Persist the initial name with the immutable ID: renames keep paths stable,
+// and recreating a deleted project never adopts its previous files.
+export const projectWorkspacePath = (id: string, slug: string) =>
+  `/workspace/projects/${Array.from(slug).slice(0, 48).join('')}-${id}`
 
 export const publicProject = (project: Project) => ({
   id: project.id,
   name: project.name,
   slug: project.slug,
+  workspace_path: project.workspacePath,
   created_at: iso(project.createdAt),
   updated_at: iso(project.updatedAt),
   sort_order: project.sortOrder,
