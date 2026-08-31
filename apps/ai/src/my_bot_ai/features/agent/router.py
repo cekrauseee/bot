@@ -1,39 +1,22 @@
-"""Authenticated agent streaming endpoint."""
+"""Authenticated internal v2 agent streaming endpoint."""
 
 import asyncio
 import hmac
 import json
 from collections.abc import AsyncIterator
-from typing import Any, Literal
-from uuid import UUID
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
 
 from my_bot_ai.config import Settings
-from my_bot_ai.features.agent.service import build_model, stream_model
+from my_bot_ai.features.agent.contracts import AgentRequest, NormalizedEvent
+from my_bot_ai.features.agent.errors import AgentServiceError, ProviderMissingError
+from my_bot_ai.features.agent.models import ensure_provider_available
+from my_bot_ai.features.agent.service import stream_agent_request
 from my_bot_ai.logging import lifecycle_event
 
 router = APIRouter(tags=["agent"])
-
-
-class Message(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    role: Literal["user", "assistant"]
-    content: str = Field(min_length=1)
-
-
-class AgentRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    version: Literal[1]
-    turn_id: UUID
-    conversation_id: UUID
-    user_id: UUID
-    messages: list[Message] = Field(min_length=1)
-    model: Literal["gpt-5.6-sol", "gpt-5.6-luna"]
-    reasoning_effort: Literal["low", "medium", "high", "xhigh", "max"]
-    speed: Literal["standard", "fast"]
 
 
 def require_token(request: Request) -> None:
@@ -43,27 +26,34 @@ def require_token(request: Request) -> None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
 
 
-def _frame(sequence: int, turn_id: UUID, event_type: str, data: dict[str, Any]) -> bytes:
+def _frame(sequence: int, body: AgentRequest, event: NormalizedEvent) -> bytes:
     payload = {
-        "version": 1,
+        "version": 2,
         "sequence": sequence,
-        "turn_id": str(turn_id),
-        "type": event_type,
-        "data": data,
+        "run_id": str(body.run_id),
+        "turn_id": str(body.turn_id),
+        "type": event.type,
+        "data": event.data,
     }
-    return f"event: {event_type}\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n".encode()
+    return (
+        f"event: {event.type}\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n"
+    ).encode()
 
 
 async def _events(
-    request: Request, body: AgentRequest, settings: Settings, runner: Any = None
+    request: Request,
+    body: AgentRequest,
+    settings: Settings,
+    runner: Any = None,
 ) -> AsyncIterator[bytes]:
     sequence = 0
     cancellation_logged = False
+    terminal = False
 
-    def emit(event_type: str, data: dict[str, Any]) -> bytes:
+    def emit(event: NormalizedEvent) -> bytes:
         nonlocal sequence
         sequence += 1
-        return _frame(sequence, body.turn_id, event_type, data)
+        return _frame(sequence, body, event)
 
     def mark_cancelled() -> None:
         nonlocal cancellation_logged
@@ -80,37 +70,97 @@ async def _events(
     try:
         request.state.request_outcome = "success"
         lifecycle_event(
-            "turn_started", turn_id=str(body.turn_id), conversation_id=str(body.conversation_id),
-            model=body.model, reasoning_effort=body.reasoning_effort,
-        )
-        yield emit(
-            "turn.started",
-            {
-                "model": body.model,
-                "reasoning_effort": body.reasoning_effort,
-                "speed": body.speed,
-            },
-        )
-        if runner is None:
-            llm = build_model(settings, body.model, body.reasoning_effort, body.speed)
-            events = stream_model(llm, [message.model_dump() for message in body.messages])
-        else:
-            events = runner(body, settings)
-        async for event in events:
-            if await request.is_disconnected():
-                mark_cancelled()
-                return
-            yield emit(event["type"], event.get("data", {}))
-        yield emit("turn.completed", {"model": body.model})
-        lifecycle_event(
-            "turn_completed",
+            "turn_started",
             turn_id=str(body.turn_id),
             conversation_id=str(body.conversation_id),
             model=body.model,
+            reasoning_effort=body.reasoning_effort,
         )
-    except asyncio.CancelledError, GeneratorExit:
+        if runner is None:
+            events = stream_agent_request(
+                body,
+                settings,
+                request.app.state.checkpointer,
+                runtime_tools=request.app.state.runtime_tools,
+            )
+        else:
+            yield emit(
+                NormalizedEvent(
+                    type="turn.started",
+                    data={
+                        "thread_id": str(body.run_id),
+                        "model": body.model,
+                        "reasoning_effort": body.reasoning_effort,
+                        "speed": body.speed,
+                        "plan": [step.model_dump(mode="json") for step in body.task_plan],
+                        "resumed": body.resume is not None,
+                    },
+                )
+            )
+            events = runner(body, settings)
+
+        async for raw_event in events:
+            if await request.is_disconnected():
+                mark_cancelled()
+                return
+            event = NormalizedEvent.model_validate(raw_event)
+            yield emit(event)
+            if event.type in {"turn.completed", "turn.failed", "user.input_required"}:
+                terminal = True
+                if event.type == "turn.completed":
+                    lifecycle_event(
+                        "turn_completed",
+                        turn_id=str(body.turn_id),
+                        conversation_id=str(body.conversation_id),
+                        model=body.model,
+                    )
+                elif event.type == "turn.failed":
+                    request.state.request_outcome = "error"
+                    error = event.data.get("error", {})
+                    lifecycle_event(
+                        "turn_failed",
+                        turn_id=str(body.turn_id),
+                        conversation_id=str(body.conversation_id),
+                        error_code=str(error.get("code", "provider_error")),
+                    )
+                return
+
+        if not terminal:
+            completed = NormalizedEvent(
+                type="turn.completed",
+                data={"model": body.model},
+            )
+            yield emit(completed)
+            lifecycle_event(
+                "turn_completed",
+                turn_id=str(body.turn_id),
+                conversation_id=str(body.conversation_id),
+                model=body.model,
+            )
+    except (asyncio.CancelledError, GeneratorExit):
         mark_cancelled()
         raise
+    except AgentServiceError as error:
+        public = error.public_error
+        request.state.request_outcome = "error"
+        lifecycle_event(
+            "turn_failed",
+            turn_id=str(body.turn_id),
+            conversation_id=str(body.conversation_id),
+            error_code=public.code,
+        )
+        yield emit(
+            NormalizedEvent(
+                type="turn.failed",
+                data={
+                    "error": {
+                        "code": public.code,
+                        "message": public.message,
+                        "retryable": public.retryable,
+                    }
+                },
+            )
+        )
     except Exception:
         request.state.request_outcome = "error"
         lifecycle_event(
@@ -120,14 +170,16 @@ async def _events(
             error_code="provider_error",
         )
         yield emit(
-            "turn.failed",
-            {
-                "error": {
-                    "code": "provider_error",
-                    "message": "The AI provider failed.",
-                    "retryable": True,
-                }
-            },
+            NormalizedEvent(
+                type="turn.failed",
+                data={
+                    "error": {
+                        "code": "provider_error",
+                        "message": "The AI provider failed.",
+                        "retryable": True,
+                    }
+                },
+            )
         )
 
 
@@ -138,9 +190,16 @@ async def agent_stream(body: AgentRequest, request: Request) -> StreamingRespons
     request.state.model = body.model
     request.state.reasoning_effort = body.reasoning_effort
     settings: Settings = request.app.state.settings
-    if not settings.openai_api_key and not getattr(request.app.state, "runner", None):
-        raise HTTPException(status_code=503, detail="AI provider is not configured")
     runner = getattr(request.app.state, "runner", None)
+    if runner is None:
+        try:
+            ensure_provider_available(settings, body.model)
+        except ProviderMissingError as error:
+            public = error.public_error
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"code": public.code, "message": public.message},
+            ) from None
     return StreamingResponse(
         _events(request, body, settings, runner),
         media_type="text/event-stream",
