@@ -1,7 +1,9 @@
 import { loadSettings } from '../config.js'
 import { migrationFolderPath, resolveMigrationsFolder } from './migrations.js'
+import { createLogger } from '../logger.js'
 
 const settings = loadSettings()
+const logger = createLogger(settings)
 const migrationsFolder = await resolveMigrationsFolder()
 
 if (settings.environment === 'production') {
@@ -10,7 +12,7 @@ if (settings.environment === 'production') {
   const { db, client } = await createNeonDatabase(settings.databaseUrl)
   try {
     await migrate(db, { migrationsFolder: migrationFolderPath(migrationsFolder) })
-    console.log('database migrations applied')
+    logger.info({ event: 'database_migrations_applied' }, 'database_migrations_applied')
   } finally {
     await client.end()
   }
@@ -20,7 +22,7 @@ if (settings.environment === 'production') {
   const { db, client } = await createNodePostgresDatabase(settings.databaseUrl)
   try {
     await migrate(db, { migrationsFolder: migrationFolderPath(migrationsFolder) })
-    console.log('database migrations applied')
+    logger.info({ event: 'database_migrations_applied' }, 'database_migrations_applied')
   } finally {
     await client.end()
   }

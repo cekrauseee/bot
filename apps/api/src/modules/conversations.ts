@@ -1,4 +1,6 @@
 import type { Settings } from '../config.js'
+import { requestIdsFor, requestHeaders, setRequestOutcome } from '../logger.js'
+import type { Logger } from 'pino'
 import type {
   Conversation,
   ConversationRepository,
@@ -20,6 +22,7 @@ export type TurnOptions = {
 export type AiClient = (
   input: Record<string, unknown>,
   signal: AbortSignal,
+  headers?: Record<string, string>,
 ) => Promise<Response>
 
 type ProviderEvent = {
@@ -106,7 +109,7 @@ export const publicMessage = (message: Message) => ({
 export const conversationTitle = (message: string) =>
   message.trim().replace(/\s+/g, ' ').slice(0, 120) || 'New conversation'
 
-export const createAiClient = (settings: Settings): AiClient => async (input, signal) => {
+export const createAiClient = (settings: Settings): AiClient => async (input, signal, headers) => {
   const connectionController = new AbortController()
   const timeout = setTimeout(() => connectionController.abort(), 30_000)
   try {
@@ -116,6 +119,7 @@ export const createAiClient = (settings: Settings): AiClient => async (input, si
       headers: {
         'content-type': 'application/json',
         authorization: `Bearer ${settings.aiServiceToken}`,
+        ...headers,
       },
       body: JSON.stringify(input),
     })
@@ -236,6 +240,7 @@ export async function streamTurn(
   ai: AiClient,
   request: Request,
   created: { user: Message; assistant: Message },
+  logger?: Logger,
 ) {
   const transcript = await repository.transcript(conversation.id)
   const controller = new AbortController()
@@ -268,6 +273,7 @@ export async function streamTurn(
       }
 
       try {
+        logger?.info({ event: 'chat_turn_started', conversation_id: conversation.id, turn_id: turnId, user_id: userId }, 'chat_turn_started')
         send('turn.started', {
           conversation: publicConversation(conversation),
           user_message: publicMessage(created.user),
@@ -288,6 +294,7 @@ export async function streamTurn(
             speed: options.speed,
           },
           controller.signal,
+          requestHeaders(requestIdsFor(request)),
         )
         if (!response.ok || !response.body) throw new Error('provider_unavailable')
 
@@ -354,8 +361,11 @@ export async function streamTurn(
           errorMessage: null,
         })
         send('turn.completed', completedData)
+        setRequestOutcome(request, controller.signal.aborted || request.signal.aborted ? 'cancelled' : 'success')
+        logger?.info({ event: 'chat_turn_completed', conversation_id: conversation.id, turn_id: turnId, user_id: userId }, 'chat_turn_completed')
       } catch (error) {
         const cancelled = controller.signal.aborted || request.signal.aborted
+        setRequestOutcome(request, cancelled ? 'cancelled' : 'error')
         const providerDetail = error instanceof ProviderFailure ? error.detail : undefined
         await repository.updateAssistant(created.assistant.id, {
           content,
@@ -384,6 +394,7 @@ export async function streamTurn(
                 : true,
           },
         })
+        logger?.warn({ event: 'chat_turn_failed', conversation_id: conversation.id, turn_id: turnId, user_id: userId }, 'chat_turn_failed')
       } finally {
         request.signal.removeEventListener('abort', abort)
         if (controller.signal.aborted) await reader?.cancel().catch(() => undefined)

@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from my_bot_ai.config import Settings, get_settings
 from my_bot_ai.features.agent.router import router as agent_router
 from my_bot_ai.features.health.router import router as health_router
+from my_bot_ai.logging import configure_logging, logging_middleware
 
 
 def _is_placeholder(value: str) -> bool:
@@ -19,6 +20,7 @@ def create_app(settings: Settings | None = None, runner=None) -> FastAPI:
     """Create an isolated AI service application."""
 
     resolved_settings = settings or get_settings()
+    configure_logging(resolved_settings.environment)
     if resolved_settings.environment == "production":
         token = resolved_settings.ai_service_token
         key = resolved_settings.openai_api_key or ""
@@ -42,6 +44,8 @@ def create_app(settings: Settings | None = None, runner=None) -> FastAPI:
         if content_length and content_length.isdigit() and int(content_length) > 8 * 1024 * 1024:
             return JSONResponse({"detail": "Request body too large"}, status_code=413)
         return await call_next(request)
+
+    application.middleware("http")(logging_middleware)
 
     application.include_router(health_router)
     application.include_router(agent_router)

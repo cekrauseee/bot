@@ -31,6 +31,17 @@ import {
   projectSlug,
   publicProject,
 } from './modules/projects.js'
+import {
+  createLogger,
+  requestHeaders,
+  requestIdsFor,
+  requestLogFields,
+  safeError,
+  setRequestOutcome,
+  trackedResponse,
+  type RequestContext,
+  type RequestOutcome,
+} from './logger.js'
 
 export type Services = {
   database: Database
@@ -375,8 +386,26 @@ const userResponse = (user: { id: string; email: string; firstName: string | nul
 
 export function createApp(settings: Settings, services: Services, peerResolver: PeerResolver = nodeSocketPeer) {
   const requestBodyProfiles = new WeakMap<Request, JsonBodyProfile>()
+  const requestContexts = new WeakMap<Request, RequestContext>()
+  const logger = createLogger(settings)
+  const completeRequest = (
+    context: RequestContext,
+    request: Request,
+    statusCode: number,
+    outcome: RequestOutcome,
+  ) => {
+    if (context.completed) return
+    context.completed = true
+    setRequestOutcome(request, outcome)
+    logger.info({ ...requestLogFields(context), event: 'request_completed', http_status_code: statusCode,
+      duration_ms: Math.round((performance.now() - context.startedAt) * 100) / 100, outcome }, 'request_completed')
+  }
   const app = new Elysia({ name: 'mybot-api', adapter: node() })
     .onRequest(async ({ request }) => {
+      const ids = requestIdsFor(request)
+      const context: RequestContext = { ...ids, startedAt: performance.now(), httpMethod: request.method }
+      requestContexts.set(request, context)
+      logger.debug({ ...requestLogFields(context), event: 'request_started' }, 'request_started')
       if (request.headers.get('content-type')?.startsWith('application/json')) {
         try { requestBodyProfiles.set(request, profileJsonBody(await request.clone().text())) } catch { /* parser reports the failure */ }
       }
@@ -385,25 +414,55 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       origin: settings.webOrigin,
       credentials: true,
       methods: ['GET', 'POST', 'PATCH', 'DELETE'],
-      allowedHeaders: ['Content-Type'],
+      allowedHeaders: ['Content-Type', 'X-Request-Id', 'X-Correlation-Id'],
+      exposeHeaders: ['X-Request-Id', 'X-Correlation-Id'],
     }))
     .use(openapi({ documentation: { info: { title: 'myBot API', version: '0.1.0' } } }))
     .onError(({ error, request, set }) => {
+      const context = requestContexts.get(request)
+      if (context) logger.warn({ ...requestLogFields(context), ...safeError(error), event: 'request_error' }, 'request_error')
+      if (context) {
+        context.httpRoute = new URL(request.url).pathname
+        Object.assign(set.headers, requestHeaders(context))
+      }
       if (error instanceof AuthError) {
         set.status = error.statusCode
         if (error.retryAfterSeconds != null) set.headers['Retry-After'] = String(error.retryAfterSeconds)
-        return authDetail(error)
+        const response = authDetail(error)
+        if (context) completeRequest(context, request, Number(set.status) || 500, 'error')
+        return response
       }
       if (error instanceof ValidationError || error instanceof ParseError) {
         set.status = 422
-        return validationDetails(error, request, requestBodyProfiles)
+        const response = validationDetails(error, request, requestBodyProfiles)
+        if (context) completeRequest(context, request, Number(set.status) || 422, 'error')
+        return response
       }
       if ((error as { code?: string }).code === 'NOT_FOUND') {
         set.status = 404
-        return { detail: { code: 'not_found', message: 'Not Found' } }
+        const response = { detail: { code: 'not_found', message: 'Not Found' } }
+        if (context) completeRequest(context, request, Number(set.status) || 404, 'error')
+        return response
       }
       set.status = 500
-      return { detail: { code: 'internal_error', message: 'An unexpected error occurred.' } }
+      const response = { detail: { code: 'internal_error', message: 'An unexpected error occurred.' } }
+      if (context) completeRequest(context, request, Number(set.status) || 500, 'error')
+      return response
+    })
+    .onAfterHandle(({ request, response, route, set }) => {
+      const context = requestContexts.get(request)
+      if (!context) return response
+      context.httpRoute = typeof route === 'string' && route ? route : new URL(request.url).pathname
+      const headers = requestHeaders(context)
+      Object.assign(set.headers, headers)
+      if (response instanceof Response) {
+        for (const [name, value] of Object.entries(headers)) response.headers.set(name, value)
+      }
+      const complete = (statusCode: number, outcome: RequestOutcome) => completeRequest(context, request, statusCode, outcome)
+      if (response instanceof Response) return trackedResponse(response, complete, request)
+      const statusCode = Number(set.status) || 200
+      complete(statusCode, context.completed ? 'success' : statusCode >= 400 ? 'error' : 'success')
+      return response
     })
 
   const browserOrigin = (request: Request) => {
@@ -804,6 +863,8 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     options: TurnOptions,
     conversationId?: string,
   ) => {
+    const context = requestContexts.get(request)
+    if (context) context.userId = userId
     const message = options.message.trim()
     if (!message) throw new AuthError('invalid_message', 'Enter a message to continue.', 400)
     if (options.retry_of && !conversationId) {
@@ -826,15 +887,21 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
           : await repository.addTurn(conversation.id, message, modelOptions)
         return { conversation: created.conversation ?? conversation, created }
       })
+      const streamTurnId = crypto.randomUUID()
+      if (context) {
+        context.conversationId = result.conversation.id
+        context.turnId = streamTurnId
+      }
       return streamTurn(
         new ConversationRepository(services.database.handle),
         result.conversation,
         userId,
-        crypto.randomUUID(),
+        streamTurnId,
         { ...options, message },
         services.ai ?? createAiClient(settings),
         request,
         result.created,
+        context ? logger.child(requestLogFields(context)) : logger,
       )
     } catch (error) {
       if (error instanceof AuthError) throw error

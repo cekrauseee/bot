@@ -6,8 +6,10 @@ import { ResendOtpEmailSender } from './email.js'
 import { GoogleOAuthService } from './modules/auth/oauth.js'
 import { OtpService } from './modules/auth/otp.js'
 import { SessionManager } from './modules/auth/sessions.js'
+import { createLogger } from './logger.js'
 
 const settings = loadSettings()
+const logger = createLogger(settings)
 const database = await Database.create(settings)
 const redis = new Redis(settings.redisUrl, { lazyConnect: true })
 await redis.connect()
@@ -23,9 +25,10 @@ const app = createApp(
   nodeSocketPeer,
 )
 app.listen(Number(new URL(settings.apiOrigin).port || 8000))
-console.log('myBot API listening')
+logger.info({ event: 'api_started' }, 'api_started')
 
 const close = async () => {
+  logger.info({ event: 'api_shutdown_started' }, 'api_shutdown_started')
   await redis.quit()
   await database.close()
   process.exit(0)

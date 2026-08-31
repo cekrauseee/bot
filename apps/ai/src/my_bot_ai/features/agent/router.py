@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from my_bot_ai.config import Settings
 from my_bot_ai.features.agent.service import build_model, stream_model
+from my_bot_ai.logging import lifecycle_event
 
 router = APIRouter(tags=["agent"])
 
@@ -57,13 +58,31 @@ async def _events(
     request: Request, body: AgentRequest, settings: Settings, runner: Any = None
 ) -> AsyncIterator[bytes]:
     sequence = 0
+    cancellation_logged = False
 
     def emit(event_type: str, data: dict[str, Any]) -> bytes:
         nonlocal sequence
         sequence += 1
         return _frame(sequence, body.turn_id, event_type, data)
 
+    def mark_cancelled() -> None:
+        nonlocal cancellation_logged
+        request.state.request_outcome = "cancelled"
+        if cancellation_logged:
+            return
+        cancellation_logged = True
+        lifecycle_event(
+            "turn_cancelled",
+            turn_id=str(body.turn_id),
+            conversation_id=str(body.conversation_id),
+        )
+
     try:
+        request.state.request_outcome = "success"
+        lifecycle_event(
+            "turn_started", turn_id=str(body.turn_id), conversation_id=str(body.conversation_id),
+            model=body.model, reasoning_effort=body.reasoning_effort,
+        )
         yield emit(
             "turn.started",
             {
@@ -79,12 +98,27 @@ async def _events(
             events = runner(body, settings)
         async for event in events:
             if await request.is_disconnected():
+                mark_cancelled()
                 return
             yield emit(event["type"], event.get("data", {}))
         yield emit("turn.completed", {"model": body.model})
+        lifecycle_event(
+            "turn_completed",
+            turn_id=str(body.turn_id),
+            conversation_id=str(body.conversation_id),
+            model=body.model,
+        )
     except asyncio.CancelledError, GeneratorExit:
+        mark_cancelled()
         raise
     except Exception:
+        request.state.request_outcome = "error"
+        lifecycle_event(
+            "turn_failed",
+            turn_id=str(body.turn_id),
+            conversation_id=str(body.conversation_id),
+            error_code="provider_error",
+        )
         yield emit(
             "turn.failed",
             {
@@ -99,6 +133,10 @@ async def _events(
 
 @router.post("/agent/stream", dependencies=[Depends(require_token)])
 async def agent_stream(body: AgentRequest, request: Request) -> StreamingResponse:
+    request.state.turn_id = body.turn_id
+    request.state.conversation_id = body.conversation_id
+    request.state.model = body.model
+    request.state.reasoning_effort = body.reasoning_effort
     settings: Settings = request.app.state.settings
     if not settings.openai_api_key and not getattr(request.app.state, "runner", None):
         raise HTTPException(status_code=503, detail="AI provider is not configured")
