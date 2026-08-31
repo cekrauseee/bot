@@ -6,11 +6,13 @@ import type { Settings } from './config.js'
 import { AuthError, authDetail } from './errors.js'
 import {
   AuthRepository,
+  AgentRunRepository,
   ConversationRepository,
   ConversationPinError,
   ProjectOrderError,
   ProjectRepository,
   normalizeEmail,
+  type AgentRun,
 } from './db/repository.js'
 import type { Database } from './db/database.js'
 import { GoogleOAuthService } from './modules/auth/oauth.js'
@@ -22,10 +24,18 @@ import {
   createAiClient,
   publicConversation,
   publicMessage,
-  streamTurn,
   type AiClient,
   type TurnOptions,
 } from './modules/conversations.js'
+import {
+  AgentRunExecutor,
+  publicAgentEvent,
+} from './modules/agent-control-plane.js'
+import {
+  modelDefinition,
+  publicModelCatalog,
+  validModelSelection,
+} from './modules/models.js'
 import {
   normalizeProjectName,
   projectSlug,
@@ -49,6 +59,7 @@ export type Services = {
   sessions: SessionManager
   google: GoogleOAuthService
   ai?: AiClient
+  agentRuns?: AgentRunExecutor
 }
 
 export type PeerResolver = (request: Request) => string | undefined
@@ -400,6 +411,13 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     logger.info({ ...requestLogFields(context), event: 'request_completed', http_status_code: statusCode,
       duration_ms: Math.round((performance.now() - context.startedAt) * 100) / 100, outcome }, 'request_completed')
   }
+  const agentExecutor = services.agentRuns ?? new AgentRunExecutor(
+    services.database,
+    services.ai ?? createAiClient(settings),
+  )
+  if (services.agentRuns && typeof (services.database as { transaction?: unknown }).transaction === 'function') {
+    agentExecutor.startRecoverySweeper()
+  }
   const app = new Elysia({ name: 'mybot-api', adapter: node() })
     .onRequest(async ({ request }) => {
       const ids = requestIdsFor(request)
@@ -464,10 +482,15 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       complete(statusCode, context.completed ? 'success' : statusCode >= 400 ? 'error' : 'success')
       return response
     })
+    .onStop(() => agentExecutor.close())
 
   const browserOrigin = (request: Request) => {
     const origin = request.headers.get('origin')
     if (origin === settings.webOrigin || (settings.environment !== 'production' && !origin)) return
+    throw new AuthError('invalid_origin', 'This request did not come from an allowed origin.', 403)
+  }
+  const websocketOrigin = (request: Request) => {
+    if (request.headers.get('origin') === settings.webOrigin) return
     throw new AuthError('invalid_origin', 'This request did not come from an allowed origin.', 403)
   }
 
@@ -586,6 +609,16 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   const conversationParams = t.Object({
     conversationId: t.String({ format: 'uuid' }),
   })
+  const runParams = t.Object({
+    runId: t.String({ format: 'uuid' }),
+  })
+  const resumeBody = t.Object({
+    question_id: t.String({ minLength: 1, maxLength: 200 }),
+    answer: t.Union([
+      t.String({ minLength: 1, maxLength: 1_048_576 }),
+      t.Array(t.String({ minLength: 1, maxLength: 1_048_576 }), { minItems: 1, maxItems: 100 }),
+    ]),
+  })
   const projectBody = t.Object({
     name: t.String({ minLength: 1, maxLength: 80 }),
   })
@@ -605,8 +638,15 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   const turnBody = t.Object({
     retry_of: t.Optional(t.String({ format: 'uuid' })),
     message: t.String({ minLength: 1, maxLength: 1_048_576 }),
-    model: t.Union([t.Literal('gpt-5.6-sol'), t.Literal('gpt-5.6-luna')]),
+    model: t.Union([
+      t.Literal('gpt-5.6-sol'),
+      t.Literal('gpt-5.6-terra'),
+      t.Literal('gpt-5.6-luna'),
+      t.Literal('grok-4.6'),
+      t.Literal('grok-4.3'),
+    ]),
     reasoning_effort: t.Union([
+      t.Literal('none'),
       t.Literal('low'),
       t.Literal('medium'),
       t.Literal('high'),
@@ -623,6 +663,45 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       return active.user!
     })
   }
+
+  const publicRun = (run: AgentRun) => ({
+    id: run.id,
+    workspace_id: run.workspaceId,
+    conversation_id: run.conversationId,
+    turn_id: run.turnId,
+    status: run.status,
+    model: run.model,
+    provider: run.provider,
+    reasoning_effort: run.reasoningEffort,
+    speed: run.speed,
+    plan: run.plan,
+    pending_question: run.pendingQuestion,
+    browser_projection: run.browserProjection,
+    last_event_sequence: run.lastEventSequence?.toString() ?? null,
+    cancel_requested_at: run.cancelRequestedAt?.toISOString() ?? null,
+    started_at: run.startedAt?.toISOString() ?? null,
+    completed_at: run.completedAt?.toISOString() ?? null,
+    created_at: run.createdAt.toISOString(),
+    updated_at: run.updatedAt.toISOString(),
+  })
+  const activeRunProjection = (run: AgentRun) => ({
+    id: run.id,
+    turn_id: run.turnId,
+    status: run.status,
+    last_event_sequence: run.lastEventSequence?.toString() ?? null,
+    plan: run.plan,
+    pending_question: run.pendingQuestion,
+    browser_projection: run.browserProjection,
+    model: run.model,
+    provider: run.provider,
+    reasoning_effort: run.reasoningEffort,
+    speed: run.speed,
+  })
+
+  app.get('/models', async ({ request }) => {
+    await sessionUser(request)
+    return publicModelCatalog()
+  })
 
   app.get('/projects', async ({ request }) => {
     const user = await sessionUser(request)
@@ -741,13 +820,26 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
 
   app.get('/conversations/:conversationId', async ({ request, params, set }) => {
     const user = await sessionUser(request)
-    const result = await services.database.transaction(async (db) =>
-      new ConversationRepository(db).get(user.id, params.conversationId))
+    const result = await services.database.transaction(async (db) => {
+      const conversation = await new ConversationRepository(db).get(user.id, params.conversationId)
+      if (!conversation) return undefined
+      const runs = new AgentRunRepository(db)
+      const [activeRun, plan] = await Promise.all([
+        runs.activeForConversation(conversation.id),
+        runs.taskPlanFor(user.id, conversation.id),
+      ])
+      return { conversation, activeRun, plan }
+    })
     if (!result) {
       set.status = 404
       return { detail: { code: 'not_found', message: 'Not Found' } }
     }
-    return { ...publicConversation(result), messages: result.messages.map(publicMessage) }
+    return {
+      ...publicConversation(result.conversation),
+      messages: result.conversation.messages.map(publicMessage),
+      plan: result.plan,
+      active_run: result.activeRun ? activeRunProjection(result.activeRun) : null,
+    }
   }, { params: conversationParams })
 
   app.patch('/conversations/:conversationId', async ({ request, params, body, set }) => {
@@ -870,6 +962,14 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     if (options.retry_of && !conversationId) {
       throw new AuthError('retry_unavailable', 'Open the conversation before retrying this response.', 409)
     }
+    if (!validModelSelection(options.model, options.reasoning_effort, options.speed)) {
+      throw new AuthError(
+        'invalid_model_options',
+        'The selected reasoning effort or processing mode is not available for this model.',
+        400,
+      )
+    }
+    const definition = modelDefinition(options.model)!
     try {
       const result = await services.database.transaction(async (db) => {
         const repository = new ConversationRepository(db)
@@ -885,24 +985,36 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
         const created = options.retry_of
           ? await repository.retryTurn(conversation.id, options.retry_of, message, modelOptions)
           : await repository.addTurn(conversation.id, message, modelOptions)
-        return { conversation: created.conversation ?? conversation, created }
+        const resolvedConversation = created.conversation ?? conversation
+        const runs = new AgentRunRepository(db)
+        const queued = await runs.create({
+          id: crypto.randomUUID(),
+          turnId: crypto.randomUUID(),
+          userId,
+          conversationId: resolvedConversation.id,
+          assistantMessageId: created.assistant.id,
+          model: options.model,
+          provider: definition.provider,
+          reasoningEffort: options.reasoning_effort,
+          speed: options.speed,
+        })
+        const run = await runs.claim(queued.id)
+        if (!run) throw new Error('agent_run_claim_failed')
+        const event = await runs.appendEvent(run, 'turn.started', {
+          conversation: publicConversation(resolvedConversation),
+          user_message: publicMessage(created.user),
+          assistant_message: publicMessage(created.assistant),
+          plan: run.plan,
+        })
+        return { run, event }
       })
-      const streamTurnId = crypto.randomUUID()
       if (context) {
-        context.conversationId = result.conversation.id
-        context.turnId = streamTurnId
+        context.conversationId = result.run.conversationId
+        context.turnId = result.run.turnId
       }
-      return streamTurn(
-        new ConversationRepository(services.database.handle),
-        result.conversation,
-        userId,
-        streamTurnId,
-        { ...options, message },
-        services.ai ?? createAiClient(settings),
-        request,
-        result.created,
-        context ? logger.child(requestLogFields(context)) : logger,
-      )
+      await agentExecutor.publishCommitted(result.event)
+      agentExecutor.startClaimed(result.run)
+      return agentExecutor.stream(result.run.id)
     } catch (error) {
       if (error instanceof AuthError) throw error
       if (error instanceof Error && error.message === 'retry_unavailable') {
@@ -933,6 +1045,162 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     const user = await sessionUser(request)
     return beginTurn(request, user.id, body, params.conversationId)
   }, { body: turnBody, params: conversationParams })
+
+  app.get('/agent-runs/:runId', async ({ request, params, set }) => {
+    const user = await sessionUser(request)
+    const run = await services.database.transaction((db) =>
+      new AgentRunRepository(db).getOwned(user.id, params.runId))
+    if (!run) {
+      set.status = 404
+      return { detail: { code: 'not_found', message: 'Not Found' } }
+    }
+    return publicRun(run)
+  }, { params: runParams })
+
+  app.get('/agent-runs/:runId/events', async ({ request, params, set }) => {
+    const user = await sessionUser(request)
+    const cursorValue = new URL(request.url).searchParams.get('after') ?? '0'
+    let after: bigint
+    try {
+      if (!/^\d+$/.test(cursorValue)) throw new Error('invalid')
+      after = BigInt(cursorValue)
+      if (after > 9_223_372_036_854_775_807n) throw new Error('overflow')
+    } catch {
+      throw new AuthError('invalid_cursor', 'The replay cursor is invalid.', 400)
+    }
+    const result = await services.database.transaction(async (db) => {
+      const repository = new AgentRunRepository(db)
+      const run = await repository.getOwned(user.id, params.runId)
+      if (!run) return undefined
+      const highWater = await repository.replayHighWater(run.id)
+      const page = await repository.replayPage(run.id, after, highWater)
+      return { run, page }
+    })
+    if (!result) {
+      set.status = 404
+      return { detail: { code: 'not_found', message: 'Not Found' } }
+    }
+    const events = result.page.events.map(publicAgentEvent)
+    const nextCursor = events.at(-1)?.sequence ?? after.toString()
+    return {
+      events,
+      has_more: result.page.hasMore,
+      next_cursor: nextCursor,
+      next_sequence: nextCursor,
+    }
+  }, { params: runParams })
+
+  app.post('/agent-runs/:runId/resume', async ({ request, params, body, set }) => {
+    browserOrigin(request)
+    const user = await sessionUser(request)
+    const answer = body.answer
+    const hasContent = typeof answer === 'string'
+      ? answer.trim().length > 0
+      : answer.every((value) => value.trim().length > 0)
+    if (!hasContent) throw new AuthError('invalid_answer', 'Enter an answer to continue.', 400)
+    const result = await services.database.transaction(async (db) => {
+      const repository = new AgentRunRepository(db)
+      const owned = await repository.getOwned(user.id, params.runId)
+      if (!owned) return { kind: 'missing' as const }
+      const run = await repository.queueResume(user.id, owned.id, body.question_id, answer)
+      return run ? { kind: 'queued' as const, run } : { kind: 'conflict' as const }
+    })
+    if (result.kind === 'missing') {
+      set.status = 404
+      return { detail: { code: 'not_found', message: 'Not Found' } }
+    }
+    if (result.kind === 'conflict') {
+      throw new AuthError('run_not_waiting', 'This run is not waiting for that input.', 409)
+    }
+    agentExecutor.start(result.run.id)
+    set.status = 202
+    return publicRun(result.run)
+  }, { params: runParams, body: resumeBody })
+
+  app.post('/agent-runs/:runId/cancel', async ({ request, params, set }) => {
+    browserOrigin(request)
+    const user = await sessionUser(request)
+    const result = await services.database.transaction(async (db) => {
+      const repository = new AgentRunRepository(db)
+      const owned = await repository.getOwned(user.id, params.runId)
+      if (!owned) return { kind: 'missing' as const }
+      const run = await repository.requestCancellation(user.id, owned.id)
+      return run ? { kind: 'cancelling' as const, run } : { kind: 'conflict' as const }
+    })
+    if (result.kind === 'missing') {
+      set.status = 404
+      return { detail: { code: 'not_found', message: 'Not Found' } }
+    }
+    if (result.kind === 'conflict') {
+      throw new AuthError('run_terminal', 'This run has already finished.', 409)
+    }
+    agentExecutor.cancel(result.run.id)
+    set.status = 202
+    return publicRun(result.run)
+  }, { params: runParams })
+
+  const socketSubscriptions = new Map<string, () => void>()
+  app.ws('/agent-runs/:runId/subscribe', {
+    params: runParams,
+    query: t.Object({ after: t.Optional(t.String()) }),
+    beforeHandle: async ({ request, params }) => {
+      websocketOrigin(request)
+      const cursor = new URL(request.url).searchParams.get('after') ?? '0'
+      try {
+        if (!/^\d+$/.test(cursor) || BigInt(cursor) > 9_223_372_036_854_775_807n) throw new Error('invalid')
+      } catch {
+        throw new AuthError('invalid_cursor', 'The replay cursor is invalid.', 400)
+      }
+      const user = await sessionUser(request)
+      const run = await services.database.transaction((db) =>
+        new AgentRunRepository(db).getOwned(user.id, params.runId))
+      if (!run) throw new AuthError('not_found', 'Not Found', 404)
+    },
+    open: async (socket) => {
+      const runId = socket.data.params.runId
+      const afterValue = socket.data.query.after ?? '0'
+      const after = BigInt(afterValue)
+      let cursor = after
+      let replaying = true
+      const buffered: ReturnType<typeof publicAgentEvent>[] = []
+      const send = (event: ReturnType<typeof publicAgentEvent>) => {
+        const sequence = BigInt(event.sequence)
+        if (sequence <= cursor) return
+        cursor = sequence
+        socket.send(JSON.stringify(event))
+      }
+      const receive = (event: ReturnType<typeof publicAgentEvent>) => {
+        if (replaying) buffered.push(event)
+        else send(event)
+      }
+      const unsubscribeEvents = agentExecutor.hub.subscribe(runId, receive)
+      const unsubscribeFrames = agentExecutor.hub.subscribeFrames(runId, (frame) => {
+        socket.send(JSON.stringify({ version: 2, run_id: runId, type: 'browser.frame', data: frame }))
+      })
+      socketSubscriptions.set(socket.id, () => {
+        unsubscribeEvents()
+        unsubscribeFrames()
+      })
+      const highWater = await services.database.transaction((db) =>
+        new AgentRunRepository(db).replayHighWater(runId))
+      while (cursor < highWater) {
+        const page = await services.database.transaction((db) =>
+          new AgentRunRepository(db).replayPage(runId, cursor, highWater))
+        for (const event of page.events) send(publicAgentEvent(event))
+        if (!page.hasMore) break
+      }
+      while (buffered.length) {
+        const batch = buffered.splice(0).sort((left, right) =>
+          BigInt(left.sequence) < BigInt(right.sequence) ? -1 : 1)
+        for (const event of batch) send(event)
+      }
+      replaying = false
+    },
+    close: (socket) => {
+      socketSubscriptions.get(socket.id)?.()
+      socketSubscriptions.delete(socket.id)
+    },
+  })
 
   return app
 }

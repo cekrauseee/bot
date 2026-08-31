@@ -213,7 +213,7 @@ describe('HTTP contract', () => {
     expect(document.paths['/conversations/{conversationId}']).toBeDefined()
     const turn = document.paths['/conversations/{conversationId}/turns'].post
     expect(turn.requestBody.content['application/json'].schema.properties.model.enum)
-      .toEqual(['gpt-5.6-sol', 'gpt-5.6-luna'])
+      .toEqual(['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'grok-4.6', 'grok-4.3'])
   })
 
   it('returns redirect and state cookie for Google start', async () => {
