@@ -1,6 +1,10 @@
 import { LoginOtpEmail, loginOtpSubject } from '@my-bot/email'
 import { createElement } from 'react'
 import { Resend } from 'resend'
+import { createLogger } from './logger.js'
+
+const logger = createLogger({ environment: process.env.ENVIRONMENT === 'production' ? 'production' : 'development' })
+type EmailLogger = Pick<typeof logger, 'error'>
 
 export class EmailDeliveryError extends Error {}
 
@@ -15,6 +19,7 @@ export class ResendOtpEmailSender implements OtpEmailSender {
     private readonly apiKey: string,
     private readonly from: string,
     resend?: Resend,
+    private readonly log: EmailLogger = logger,
   ) {
     this.resend = resend
   }
@@ -34,18 +39,17 @@ export class ResendOtpEmailSender implements OtpEmailSender {
         tags: [{ name: 'category', value: 'authentication' }],
       }, { idempotencyKey: `otp-${challengeId}` })
       if (result.error) {
-        console.error('resend_otp_delivery_failed', {
-          errorType: result.error.name,
-          statusCode: result.error.statusCode,
-        })
+        this.log.error({
+          event: 'otp_email_delivery_failed',
+          error_name: result.error.name,
+          http_status_code: result.error.statusCode,
+        }, 'otp_email_delivery_failed')
         throw new EmailDeliveryError('Resend did not accept the OTP email')
       }
     } catch (error) {
       if (error instanceof EmailDeliveryError) throw error
       // Never include recipient, OTP, or challenge identifiers in logs.
-      console.error('resend_otp_delivery_failed', {
-        errorType: error instanceof Error ? error.name : 'unknown',
-      })
+      this.log.error({ event: 'otp_email_delivery_failed', error_name: error instanceof Error ? error.name : 'unknown' }, 'otp_email_delivery_failed')
       throw new EmailDeliveryError('Resend did not accept the OTP email')
     }
   }

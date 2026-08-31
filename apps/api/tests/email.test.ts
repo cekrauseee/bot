@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { Writable } from 'node:stream'
 import { LoginOtpEmail } from '@my-bot/email'
 import {
   EmailDeliveryError,
   ResendOtpEmailSender,
 } from '../src/email.js'
+import { createLogger } from '../src/logger.js'
 
 describe('OTP email delivery', () => {
   afterEach(() => vi.restoreAllMocks())
@@ -38,11 +40,14 @@ describe('OTP email delivery', () => {
   })
 
   it('logs only safe metadata when Resend rejects a message', async () => {
-    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    let serialized = ''
+    const destination = new Writable({ write(chunk, _encoding, callback) { serialized += chunk.toString(); callback() } })
+    const log = createLogger({ environment: 'production' }, destination)
     const sender = new ResendOtpEmailSender(
       're_private',
       'myBot <mybot@example.com>',
       { emails: { send: vi.fn().mockRejectedValue(new TypeError('provider unavailable')) } } as never,
+      log,
     )
 
     await expect(sender.sendOtp({
@@ -52,12 +57,19 @@ describe('OTP email delivery', () => {
       expiresInSeconds: 600,
     })).rejects.toBeInstanceOf(EmailDeliveryError)
 
-    const serialized = JSON.stringify(log.mock.calls)
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    const record = JSON.parse(serialized) as Record<string, unknown>
+    expect(record).toMatchObject({
+      level: 'error', service: 'my_bot_api', environment: 'production',
+      event: 'otp_email_delivery_failed', message: 'otp_email_delivery_failed',
+      error_name: 'TypeError',
+    })
     expect(serialized).toContain('TypeError')
     expect(serialized).not.toContain('private@example.com')
     expect(serialized).not.toContain('482913')
     expect(serialized).not.toContain('re_private')
     expect(serialized).not.toContain('private_challenge')
+    destination.end()
   })
 
   it('treats an SDK error response as a delivery failure', async () => {
