@@ -25,7 +25,7 @@ describe('compatibility migration', () => {
 
   it('derives ordered hashes from the journal and detects pending, mismatched, and out-of-order history', async () => {
     const expected = await readMigrationManifest(new URL('../drizzle/', import.meta.url))
-    expect(expected).toHaveLength(5)
+    expect(expected).toHaveLength(6)
     expect(compareMigrationHistory(expected, [])).toMatchObject({ ok: false, reason: 'pending' })
     expect(compareMigrationHistory(expected, [{ hash: 'wrong' }])).toMatchObject({ ok: false, reason: 'mismatch' })
     expect(compareMigrationHistory(expected, [{ hash: expected[0].hash }]))
@@ -78,13 +78,25 @@ describe('compatibility migration', () => {
       { table_name: 'conversations', conname: 'conversations_project_id_projects_id_fk', contype: 'f', definition: 'FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL' },
       { table_name: 'messages', conname: 'messages_pkey', contype: 'p', definition: 'PRIMARY KEY (id)' },
       { table_name: 'messages', conname: 'messages_conversation_id_conversations_id_fk', contype: 'f', definition: 'FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE' },
+      { table_name: 'agent_workspaces', conname: 'agent_workspaces_pkey', contype: 'p', definition: 'PRIMARY KEY (id)' },
+      { table_name: 'agent_workspaces', conname: 'agent_workspaces_user_id_users_id_fk', contype: 'f', definition: 'FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE' },
+      { table_name: 'agent_workspaces', conname: 'uq_agent_workspaces_user_id', contype: 'u', definition: 'UNIQUE (user_id)' },
+      { table_name: 'agent_runs', conname: 'agent_runs_pkey', contype: 'p', definition: 'PRIMARY KEY (id)' },
+      { table_name: 'agent_runs', conname: 'agent_runs_workspace_id_agent_workspaces_id_fk', contype: 'f', definition: 'FOREIGN KEY (workspace_id) REFERENCES agent_workspaces(id) ON DELETE CASCADE' },
+      { table_name: 'agent_runs', conname: 'agent_runs_user_id_users_id_fk', contype: 'f', definition: 'FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE' },
+      { table_name: 'agent_runs', conname: 'agent_runs_conversation_id_conversations_id_fk', contype: 'f', definition: 'FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE' },
+      { table_name: 'agent_runs', conname: 'agent_runs_assistant_message_id_messages_id_fk', contype: 'f', definition: 'FOREIGN KEY (assistant_message_id) REFERENCES messages(id) ON DELETE CASCADE' },
+      { table_name: 'agent_runs', conname: 'uq_agent_runs_turn_id', contype: 'u', definition: 'UNIQUE (turn_id)' },
+      { table_name: 'agent_runs', conname: 'uq_agent_runs_assistant_message_id', contype: 'u', definition: 'UNIQUE (assistant_message_id)' },
+      { table_name: 'agent_events', conname: 'agent_events_pkey', contype: 'p', definition: 'PRIMARY KEY (sequence)' },
+      { table_name: 'agent_events', conname: 'agent_events_run_id_agent_runs_id_fk', contype: 'f', definition: 'FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE' },
       { table_name: 'users', conname: 'users_email_not_null', contype: 'n', definition: 'NOT NULL email' },
     ]
     expect(validateConstraintContract(constraints)).toBe(true)
   })
 
   it('accepts adopted primary-key index names while requiring exact non-primary indexes', () => {
-    const primary = (table: string) => ({ table_name: table, indexname: `pk_${table}`, indexdef: `CREATE UNIQUE INDEX pk_${table} ON public.${table} USING btree (id)`, is_primary: true })
+    const primary = (table: string, column = 'id') => ({ table_name: table, indexname: `pk_${table}`, indexdef: `CREATE UNIQUE INDEX pk_${table} ON public.${table} USING btree (${column})`, is_primary: true })
     const indexes = [
       primary('users'),
       { table_name: 'users', indexname: 'uq_users_email', indexdef: 'CREATE UNIQUE INDEX uq_users_email ON public.users USING btree (email)', is_primary: false },
@@ -106,6 +118,15 @@ describe('compatibility migration', () => {
       primary('messages'),
       { table_name: 'messages', indexname: 'ix_messages_conversation_id_created_at', indexdef: 'CREATE INDEX ix_messages_conversation_id_created_at ON public.messages USING btree (conversation_id, created_at)', is_primary: false },
       { table_name: 'messages', indexname: 'uq_messages_one_streaming_assistant', indexdef: "CREATE UNIQUE INDEX uq_messages_one_streaming_assistant ON public.messages USING btree (conversation_id) WHERE (((role)::text = 'assistant'::text) AND ((status)::text = 'streaming'::text))", is_primary: false },
+      primary('agent_workspaces'),
+      { table_name: 'agent_workspaces', indexname: 'uq_agent_workspaces_user_id', indexdef: 'CREATE UNIQUE INDEX uq_agent_workspaces_user_id ON public.agent_workspaces USING btree (user_id)', is_primary: false },
+      primary('agent_runs'),
+      { table_name: 'agent_runs', indexname: 'ix_agent_runs_status_lease_expires_at', indexdef: 'CREATE INDEX ix_agent_runs_status_lease_expires_at ON public.agent_runs USING btree (status, lease_expires_at)', is_primary: false },
+      { table_name: 'agent_runs', indexname: 'ix_agent_runs_user_id_created_at', indexdef: 'CREATE INDEX ix_agent_runs_user_id_created_at ON public.agent_runs USING btree (user_id, created_at)', is_primary: false },
+      { table_name: 'agent_runs', indexname: 'uq_agent_runs_assistant_message_id', indexdef: 'CREATE UNIQUE INDEX uq_agent_runs_assistant_message_id ON public.agent_runs USING btree (assistant_message_id)', is_primary: false },
+      { table_name: 'agent_runs', indexname: 'uq_agent_runs_turn_id', indexdef: 'CREATE UNIQUE INDEX uq_agent_runs_turn_id ON public.agent_runs USING btree (turn_id)', is_primary: false },
+      primary('agent_events', 'sequence'),
+      { table_name: 'agent_events', indexname: 'ix_agent_events_run_id_sequence', indexdef: 'CREATE INDEX ix_agent_events_run_id_sequence ON public.agent_events USING btree (run_id, sequence)', is_primary: false },
     ]
     expect(validateIndexContract(indexes)).toBe(true)
   })
