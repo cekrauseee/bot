@@ -209,21 +209,19 @@ export async function prepareEnvironment(
 }
 
 export function printEnvironmentSummary(result) {
-  if (result.createdEnv) console.log('✓ Created .env')
+  const lines = []
+  if (result.createdEnv) lines.push('✓ Created .env')
   if (result.generatedSecretKeys.length > 0) {
-    console.log(
-      `✓ Generated ${result.generatedSecretKeys.length} independent local service secrets`,
-    )
+    lines.push(`✓ Generated ${result.generatedSecretKeys.length} independent local service secrets`)
   }
   if (result.configuredDefaultKeys.length > 0) {
-    console.log(`✓ Configured ${result.configuredDefaultKeys.length} local runtime defaults`)
+    lines.push(`✓ Configured ${result.configuredDefaultKeys.length} local runtime defaults`)
   }
 
   if (result.authentication.configured) {
-    console.log('✓ Google and Resend variables are configured')
+    lines.push('✓ Google and Resend variables are configured')
   } else {
-    console.log(
-      `⚠ External auth still needs: ${result.authentication.missing.join(', ')}`,
-    )
+    lines.push(`⚠ External auth still needs: ${result.authentication.missing.join(', ')}`)
   }
+  console.log(`\n${lines.join('\n')}`)
 }

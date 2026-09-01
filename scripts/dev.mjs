@@ -12,7 +12,7 @@ let shutdownPromise
 let shutdownSignal
 
 function start(command, args, label) {
-  console.log(`→ Start ${label}`)
+  console.log(`\n→ Start ${label}`)
   const child = spawn(command, args, {
     cwd: projectRoot,
     env: process.env,
@@ -44,10 +44,14 @@ try {
   const environment = await prepareEnvironment()
   await assertDevelopmentPortsAvailable()
   await prepareDevelopment({ environment })
-  console.log('\nmyBot is starting at http://localhost:5173\n')
+  console.log('\nmyBot is starting at:\n  Web:         http://localhost:5173\n  Web rebuild: http://localhost:5174\n')
 
   const invocation = turboInvocation()
-  const turbo = start(invocation.command, [...invocation.args, 'run', 'dev', '--ui=tui'], 'Turbo development tasks')
+  const turbo = start(
+    invocation.command,
+    [...invocation.args, 'run', 'dev', '--ui=tui', '--filter=./apps/*'],
+    'Turbo development tasks',
+  )
 
   for (const signal of ['SIGINT', 'SIGTERM']) {
     process.once(signal, () => {

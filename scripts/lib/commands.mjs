@@ -61,6 +61,7 @@ export const commandSections = [
     title: 'Web',
     commands: [
       ['web:dev', 'Run the Vite application'],
+      ['web:rebuild:dev', 'Run the rebuilt Vite application'],
       ['web:lint', 'Lint the web application'],
       ['web:typecheck', 'Type-check the web application'],
       ['web:test', 'Run web application unit tests'],

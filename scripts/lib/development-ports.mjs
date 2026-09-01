@@ -31,6 +31,7 @@ export async function developmentServices(root = projectRoot, env = process.env)
   }
   return [
     { label: 'Web', port: port(webOrigin), hosts: ['127.0.0.1', '::1'] },
+    { label: 'Web rebuild', port: 5174, hosts: ['127.0.0.1', '::1'] },
     { label: 'API', port: port(apiOrigin), hosts: ['0.0.0.0', '::'] },
     { label: 'AI', port: port(aiOrigin), hosts: ['127.0.0.1'] },
     { label: 'Runtime', port: runtimePort, hosts: ['0.0.0.0', '::'] },
@@ -95,12 +96,17 @@ export async function inspectDevelopmentPorts(services) {
 }
 
 export function formatDevelopmentPorts(checks, platform = process.platform) {
-  const lines = ['\n→ Development ports']
+  const labelWidth = Math.max('Service'.length, ...checks.map(({ label }) => label.length))
+  const portWidth = Math.max('Port'.length, ...checks.map(({ port }) => String(port).length))
+  const lines = [
+    '\n→ Development ports',
+    `    ${'Service'.padEnd(labelWidth)}  ${'Port'.padEnd(portWidth)}  Status`,
+  ]
   for (const check of checks) {
     const available = check.status === 'available'
     const status = check.status === 'error' ? `cannot check (${check.detail})` : check.status
     const owners = check.owners.map(({ command, pid }) => `${command} (PID ${pid})`).join(', ')
-    lines.push(`  ${available ? '✓' : '✗'} ${check.label.padEnd(5)} ${String(check.port).padEnd(5)} ${status}${owners ? ` · ${owners}` : ''}`)
+    lines.push(`  ${available ? '✓' : '✗'} ${check.label.padEnd(labelWidth)}  ${String(check.port).padEnd(portWidth)}  ${status}${owners ? ` · ${owners}` : ''}`)
   }
 
   const conflicts = checks.filter(({ status }) => status === 'occupied')

@@ -26,9 +26,9 @@ test('port preflight uses the canonical environment file and shell overrides', a
     'RUNTIME_PORT=8002',
     '',
   ].join('\n'))
-  assert.deepEqual((await developmentServices(root, {})).map(({ port }) => port), [5173, 8123, 8001, 8002])
-  assert.equal((await developmentServices(root, { API_BASE_URL: 'http://localhost:8234' }))[1].port, 8234)
-  assert.equal((await developmentServices(root, { API_BASE_URL: 'http://localhost' }))[1].port, 80)
+  assert.deepEqual((await developmentServices(root, {})).map(({ port }) => port), [5173, 5174, 8123, 8001, 8002])
+  assert.equal((await developmentServices(root, { API_BASE_URL: 'http://localhost:8234' }))[2].port, 8234)
+  assert.equal((await developmentServices(root, { API_BASE_URL: 'http://localhost' }))[2].port, 80)
   await assert.rejects(
     developmentServices(root, { RUNTIME_PORT: '9002' }),
     /must match RUNTIME_BASE_URL/,
@@ -78,9 +78,11 @@ test('reports every listener PID once, including reload workers sharing a socket
     { label: 'AI', port: 8001, status: 'occupied', owners },
     { label: 'API', port: 8000, status: 'occupied', owners: [owners[0]] },
   ], 'darwin')
+  assert.match(log, /\n→ Development ports\n    Service\s+Port\s+Status/)
   assert.match(log, /Web\s+5173\s+available/)
   assert.match(log, /AI\s+8001\s+occupied/)
   assert.match(log, /python3\.14 \(PID 456\)/)
+  assert.match(log, /\n\n  Stop \(check PIDs first\): kill -TERM 123 456$/)
   assert.match(log, /kill -TERM 123 456$/)
   assert.equal(log.match(/kill -TERM/g).length, 1)
   assert.doesNotMatch(log, /kill -9|kill -KILL/)

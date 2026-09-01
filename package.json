@@ -40,6 +40,7 @@
     "runtime:build": "turbo run build --filter=@my-bot/runtime",
     "runtime:start": "npm run start --workspace=@my-bot/runtime",
     "web:dev": "turbo run dev --filter=@my-bot/web",
+    "web:rebuild:dev": "turbo run dev --filter=./apps/web-rebuild",
     "web:lint": "turbo run lint --filter=@my-bot/web",
     "web:typecheck": "turbo run typecheck --filter=@my-bot/web",
     "web:test": "turbo run test --filter=@my-bot/web",

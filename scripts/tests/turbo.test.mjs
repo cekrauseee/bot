@@ -72,10 +72,13 @@ test('the runtime package exposes the complete service lifecycle', async () => {
   assert.match(runtime.scripts.start, /--env-file-if-exists=\.\.\/\.\.\/\.env/)
 })
 
-test('development uses the Turbo TUI after the shared preflight', async () => {
+test('development uses the Turbo TUI for runnable apps after the shared preflight', async () => {
   const source = await readFile(path.join(projectRoot, 'scripts/dev.mjs'), 'utf8')
   assert.ok(source.indexOf('await prepareEnvironment()') < source.indexOf('await assertDevelopmentPortsAvailable()'))
   assert.ok(source.indexOf('await prepareDevelopment({ environment })') < source.indexOf("'run', 'dev', '--ui=tui'"))
+  assert.match(source, /'--filter=\.\/apps\/\*'/)
+  const rootPackage = await jsonFile('package.json')
+  assert.equal(rootPackage.scripts['web:rebuild:dev'], 'turbo run dev --filter=./apps/web-rebuild')
   assert.doesNotMatch(source, /detached:/)
   assert.match(source, /stopChildren\(signal\)/)
   assert.match(source, /turboInvocation\(\)/)
@@ -91,6 +94,10 @@ test('web development reads the canonical origin and refuses port fallback', asy
   const webTurbo = await jsonFile('apps/web/turbo.json')
   assert.deepEqual(webTurbo.extends, ['//'])
   assert.match(vite, /\benvDir,/)
+
+  const rebuildVite = await readFile(path.join(projectRoot, 'apps/web-rebuild/vite.config.ts'), 'utf8')
+  assert.match(rebuildVite, /port: 5174/)
+  assert.match(rebuildVite, /strictPort:\s*true/)
 
   const turbo = await jsonFile('turbo.json')
   assert.ok(turbo.globalDependencies.includes('.env.example'))
