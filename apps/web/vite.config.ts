@@ -14,7 +14,7 @@ export default defineConfig(({ mode }) => {
     envDir,
     server: {
       host: webOrigin.hostname,
-      port: Number(webOrigin.port || (webOrigin.protocol === 'https:' ? 443 : 80)),
+      port: 5174,
       strictPort: true,
     },
     plugins: [react(), tailwindcss()],
