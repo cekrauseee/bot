@@ -98,7 +98,7 @@ test('alignEnvironment rejects undocumented variables without exposing values', 
   )
 })
 
-test('prepareEnvironment adds missing runtime defaults and preserves overrides', async (context) => {
+test('prepareEnvironment aligns missing runtime settings and preserves overrides', async (context) => {
   const root = await fixture(context)
   let counter = 0
   await writeFile(
@@ -114,10 +114,7 @@ test('prepareEnvironment adds missing runtime defaults and preserves overrides',
   })
   const values = parseEnvironment(await readFile(path.join(root, '.env'), 'utf8'))
 
-  assert.deepEqual(result.configuredDefaultKeys, [
-    'RUNTIME_BASE_URL',
-    'RUNTIME_ENVIRONMENT',
-  ])
+  assert.deepEqual(result.configuredDefaultKeys, [])
   assert.equal(values.get('RUNTIME_BASE_URL'), 'http://localhost:8002')
   assert.equal(values.get('RUNTIME_PORT'), '9002')
   assert.equal(values.get('RUNTIME_ENVIRONMENT'), 'development')

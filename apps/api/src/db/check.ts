@@ -164,7 +164,6 @@ const constraints: ConstraintContract[] = [
   { table: 'agent_runs', name: 'agent_runs_conversation_id_conversations_id_fk', type: 'f', definition: 'FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE' },
   { table: 'agent_runs', name: 'agent_runs_assistant_message_id_messages_id_fk', type: 'f', definition: 'FOREIGN KEY (assistant_message_id) REFERENCES messages(id) ON DELETE CASCADE' },
   { table: 'agent_runs', name: 'uq_agent_runs_turn_id', type: 'u', definition: 'UNIQUE (turn_id)' },
-  { table: 'agent_runs', name: 'uq_agent_runs_assistant_message_id', type: 'u', definition: 'UNIQUE (assistant_message_id)' },
   { table: 'agent_events', name: '', type: 'p', definition: 'PRIMARY KEY (sequence)' },
   { table: 'agent_events', name: 'agent_events_run_id_agent_runs_id_fk', type: 'f', definition: 'FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE' },
 ]
@@ -187,7 +186,6 @@ const indexes: IndexContract[] = [
   { table: 'agent_workspaces', name: 'uq_agent_workspaces_user_id', definition: 'CREATE UNIQUE INDEX uq_agent_workspaces_user_id ON public.agent_workspaces USING btree (user_id)' },
   { table: 'agent_runs', name: 'ix_agent_runs_status_lease_expires_at', definition: 'CREATE INDEX ix_agent_runs_status_lease_expires_at ON public.agent_runs USING btree (status, lease_expires_at)' },
   { table: 'agent_runs', name: 'ix_agent_runs_user_id_created_at', definition: 'CREATE INDEX ix_agent_runs_user_id_created_at ON public.agent_runs USING btree (user_id, created_at)' },
-  { table: 'agent_runs', name: 'uq_agent_runs_assistant_message_id', definition: 'CREATE UNIQUE INDEX uq_agent_runs_assistant_message_id ON public.agent_runs USING btree (assistant_message_id)' },
   { table: 'agent_runs', name: 'uq_agent_runs_turn_id', definition: 'CREATE UNIQUE INDEX uq_agent_runs_turn_id ON public.agent_runs USING btree (turn_id)' },
   { table: 'agent_events', name: 'ix_agent_events_run_id_sequence', definition: 'CREATE INDEX ix_agent_events_run_id_sequence ON public.agent_events USING btree (run_id, sequence)' },
 ]

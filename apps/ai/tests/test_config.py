@@ -24,6 +24,7 @@ def test_env_file_is_loaded_and_process_environment_wins(tmp_path, monkeypatch) 
     env_file.write_text(
         "ENVIRONMENT=production\n"
         "AI_BASE_URL=http://localhost:8001\n"
+        "RUNTIME_BASE_URL=http://localhost:8002\n"
         "AI_SERVICE_TOKEN=test-service-token\n",
         encoding="utf-8",
     )
@@ -41,6 +42,7 @@ def test_production_rejects_placeholder_secrets_and_missing_database() -> None:
             Settings(
                 environment="production",
                 ai_base_url="https://ai.example.com",
+                runtime_base_url="https://runtime.example.com",
                 ai_service_token="replace-with-a-service-secret-at-least-32-characters",
                 openai_api_key="replace-with-an-openai-key",
             )
@@ -51,6 +53,7 @@ def test_production_rejects_placeholder_secrets_and_missing_database() -> None:
             Settings(
                 environment="production",
                 ai_base_url="https://ai.example.com",
+                runtime_base_url="https://runtime.example.com",
                 ai_service_token="a-strong-service-token-that-is-long-enough",
                 openai_api_key="replace-with-an-openai-key",
             )
@@ -60,8 +63,12 @@ def test_production_rejects_placeholder_secrets_and_missing_database() -> None:
         create_app(
             Settings(
                 environment="production",
+                ai_base_url="https://ai.example.com",
+                runtime_base_url="https://runtime.example.com",
                 ai_service_token="a-strong-service-token-that-is-long-enough",
                 openai_api_key="a-valid-provider-key-that-is-long-enough",
+                database_url=None,
+                runtime_service_token="a-valid-runtime-token-that-is-long-enough",
             )
         )
 
@@ -69,8 +76,11 @@ def test_production_rejects_placeholder_secrets_and_missing_database() -> None:
         create_app(
             Settings(
                 environment="production",
+                ai_base_url="https://ai.example.com",
+                runtime_base_url="https://runtime.example.com",
                 ai_service_token="a-strong-service-token-that-is-long-enough",
                 openai_api_key="a-valid-provider-key-that-is-long-enough",
                 database_url="postgresql://db/prod",
+                runtime_service_token=None,
             )
         )

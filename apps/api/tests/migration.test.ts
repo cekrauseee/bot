@@ -25,7 +25,7 @@ describe('compatibility migration', () => {
 
   it('derives ordered hashes from the journal and detects pending, mismatched, and out-of-order history', async () => {
     const expected = await readMigrationManifest(new URL('../drizzle/', import.meta.url))
-    expect(expected).toHaveLength(7)
+    expect(expected).toHaveLength(8)
     expect(compareMigrationHistory(expected, [])).toMatchObject({ ok: false, reason: 'pending' })
     expect(compareMigrationHistory(expected, [{ hash: 'wrong' }])).toMatchObject({ ok: false, reason: 'mismatch' })
     expect(compareMigrationHistory(expected, [{ hash: expected[0].hash }]))
@@ -87,7 +87,6 @@ describe('compatibility migration', () => {
       { table_name: 'agent_runs', conname: 'agent_runs_conversation_id_conversations_id_fk', contype: 'f', definition: 'FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE' },
       { table_name: 'agent_runs', conname: 'agent_runs_assistant_message_id_messages_id_fk', contype: 'f', definition: 'FOREIGN KEY (assistant_message_id) REFERENCES messages(id) ON DELETE CASCADE' },
       { table_name: 'agent_runs', conname: 'uq_agent_runs_turn_id', contype: 'u', definition: 'UNIQUE (turn_id)' },
-      { table_name: 'agent_runs', conname: 'uq_agent_runs_assistant_message_id', contype: 'u', definition: 'UNIQUE (assistant_message_id)' },
       { table_name: 'agent_events', conname: 'agent_events_pkey', contype: 'p', definition: 'PRIMARY KEY (sequence)' },
       { table_name: 'agent_events', conname: 'agent_events_run_id_agent_runs_id_fk', contype: 'f', definition: 'FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE' },
       { table_name: 'users', conname: 'users_email_not_null', contype: 'n', definition: 'NOT NULL email' },
@@ -123,7 +122,6 @@ describe('compatibility migration', () => {
       primary('agent_runs'),
       { table_name: 'agent_runs', indexname: 'ix_agent_runs_status_lease_expires_at', indexdef: 'CREATE INDEX ix_agent_runs_status_lease_expires_at ON public.agent_runs USING btree (status, lease_expires_at)', is_primary: false },
       { table_name: 'agent_runs', indexname: 'ix_agent_runs_user_id_created_at', indexdef: 'CREATE INDEX ix_agent_runs_user_id_created_at ON public.agent_runs USING btree (user_id, created_at)', is_primary: false },
-      { table_name: 'agent_runs', indexname: 'uq_agent_runs_assistant_message_id', indexdef: 'CREATE UNIQUE INDEX uq_agent_runs_assistant_message_id ON public.agent_runs USING btree (assistant_message_id)', is_primary: false },
       { table_name: 'agent_runs', indexname: 'uq_agent_runs_turn_id', indexdef: 'CREATE UNIQUE INDEX uq_agent_runs_turn_id ON public.agent_runs USING btree (turn_id)', is_primary: false },
       primary('agent_events', 'sequence'),
       { table_name: 'agent_events', indexname: 'ix_agent_events_run_id_sequence', indexdef: 'CREATE INDEX ix_agent_events_run_id_sequence ON public.agent_events USING btree (run_id, sequence)', is_primary: false },

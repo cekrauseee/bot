@@ -21,10 +21,19 @@ export async function developmentServices(root = projectRoot, env = process.env)
   const webOrigin = origin('WEB_BASE_URL')
   const apiOrigin = origin('API_BASE_URL')
   const aiOrigin = origin('AI_BASE_URL')
+  const runtimeOrigin = origin('RUNTIME_BASE_URL')
+  const runtimePort = Number(env.RUNTIME_PORT ?? values.RUNTIME_PORT)
+  if (!Number.isInteger(runtimePort) || runtimePort < 1 || runtimePort > 65_535) {
+    throw new Error('RUNTIME_PORT must be a valid TCP port')
+  }
+  if (runtimePort !== port(runtimeOrigin)) {
+    throw new Error('RUNTIME_PORT must match RUNTIME_BASE_URL')
+  }
   return [
     { label: 'Web', port: port(webOrigin), hosts: ['127.0.0.1', '::1'] },
     { label: 'API', port: port(apiOrigin), hosts: ['0.0.0.0', '::'] },
     { label: 'AI', port: port(aiOrigin), hosts: ['127.0.0.1'] },
+    { label: 'Runtime', port: runtimePort, hosts: ['0.0.0.0', '::'] },
   ]
 }
 

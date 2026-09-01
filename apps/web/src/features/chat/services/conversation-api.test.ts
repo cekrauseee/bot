@@ -1,19 +1,27 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  agentRunSocketUrl,
+  answerForQuestion,
   ConversationApiError,
   loadConversationDetail,
   mapApiMessage,
+  mapBrowserFrame,
+  mapQuestionRequest,
+  parseEventSequence,
   parseSseBuffer,
+  parseSocketMessage,
   readEventStream,
   startConversationTurn,
 } from './conversation-api'
 
 const turnId = '00000000-0000-4000-8000-000000000001'
+const runId = '00000000-0000-4000-8000-000000000002'
 const frame = (sequence: number, type: string, data: Record<string, unknown>) =>
   `event: ${type}\ndata: ${JSON.stringify({
-    version: 1,
-    sequence,
+    version: 2,
+    sequence: String(sequence),
+    run_id: runId,
     turn_id: turnId,
     type,
     data,
@@ -126,8 +134,9 @@ describe('conversation transport', () => {
 
   it('parses CRLF, multiline JSON, and incomplete chunks', () => {
     const payload = JSON.stringify({
-      version: 1,
-      sequence: 0,
+      version: 2,
+      sequence: '0',
+      run_id: runId,
       turn_id: turnId,
       type: 'text.delta',
       data: { delta: 'Hello' },
@@ -137,6 +146,52 @@ describe('conversation transport', () => {
     expect(parsed.events).toHaveLength(1)
     expect(parsed.events[0].data).toEqual({ delta: 'Hello' })
     expect(parsed.remainder).toBe('partial')
+  })
+
+  it('keeps bigint cursors and browser frames lossless across the live transport', () => {
+    expect(parseEventSequence('9007199254740993')).toBe(9_007_199_254_740_993n)
+    expect(() => parseEventSequence('01')).toThrow(/invalid/)
+    expect(() => parseEventSequence(1)).toThrow(/invalid/)
+
+    const durable = parseSocketMessage(JSON.stringify({
+      version: 2,
+      sequence: '9007199254740993',
+      run_id: runId,
+      turn_id: turnId,
+      type: 'text.delta',
+      data: { delta: 'Hello' },
+    }))
+    expect(durable).toMatchObject({ sequence: '9007199254740993', type: 'text.delta' })
+
+    const transient = parseSocketMessage(JSON.stringify({
+      version: 2,
+      run_id: runId,
+      type: 'browser.frame',
+      data: { base64: 'cG5n', mime_type: 'image/png' },
+    }))
+    expect(mapBrowserFrame(transient.data)).toEqual({
+      src: 'data:image/png;base64,cG5n',
+    })
+    expect(agentRunSocketUrl(runId, '42', 'https://mybot.example')).toBe(
+      `wss://mybot.example/agent-runs/${runId}/subscribe?after=42`,
+    )
+  })
+
+  it('preserves structured question answers without flattening multiple choices', () => {
+    const request = mapQuestionRequest({
+      question_id: 'targets',
+      prompt: 'Which targets?',
+      options: [{ id: 'web', label: 'Web' }, { id: 'api', label: 'API' }],
+      multiple: true,
+      allow_custom: true,
+    }, runId)!
+
+    expect(answerForQuestion(request, {
+      targets: { selected: ['web', 'api'] },
+    })).toEqual({ questionId: 'targets', answer: ['web', 'api'] })
+    expect(answerForQuestion(request, {
+      targets: { selected: ['web'], custom: 'A custom target' },
+    })).toEqual({ questionId: 'targets', answer: 'A custom target' })
   })
 
   it('requires a strictly ordered terminal stream', async () => {

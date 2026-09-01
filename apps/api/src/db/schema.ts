@@ -167,7 +167,6 @@ export const agentRuns = pgTable('agent_runs', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
   unique('uq_agent_runs_turn_id').on(table.turnId),
-  unique('uq_agent_runs_assistant_message_id').on(table.assistantMessageId),
   index('ix_agent_runs_user_id_created_at').on(table.userId, table.createdAt),
   index('ix_agent_runs_status_lease_expires_at').on(table.status, table.leaseExpiresAt),
 ])

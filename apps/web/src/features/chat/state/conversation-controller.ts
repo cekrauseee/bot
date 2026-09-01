@@ -1,13 +1,24 @@
 import type {
   ChatActivityItem,
+  ChatBrowserFrame,
+  ChatBrowserSession,
   ChatMessage,
   ChatMessageBlock,
+  ChatModelOption,
+  ChatQuestionAnswers,
+  ChatQuestionRequest,
+  ChatTodo,
   ConversationSummary,
   ProjectSummary,
   SearchSource,
 } from '../model'
 import {
+  mapBrowserProjection,
   mapApiMessage,
+  mapPlanItems,
+  mapQuestionRequest,
+  parseActiveRunProjection,
+  parseEventSequence,
   type ConversationDetail,
   type SearchStep,
   type StreamEvent,
@@ -41,12 +52,19 @@ export type ConversationRecord = {
   detail: OperationState
   turn: OperationState
   activeAssistantId?: string
+  activeRunId?: string
+  activeTurnId?: string
+  lastSequence?: string
+  plan: ChatTodo[]
+  browser?: ChatBrowserSession
+  browserFrame?: ChatBrowserFrame
 }
 
 export type ConversationControllerState = {
   catalog: {
     conversations: ConversationSummary[]
     projects: ProjectSummary[]
+    models: ChatModelOption[]
     status: ResourceStatus
     error: string
     operationId?: string
@@ -68,6 +86,7 @@ export type ConversationControllerAction =
       operationId: string
       conversations: ConversationSummary[]
       projects: ProjectSummary[]
+      models?: ChatModelOption[]
     }
   | { type: 'catalog.load.failed'; operationId: string; error: string }
   | { type: 'catalog.load.aborted'; operationId: string }
@@ -97,6 +116,38 @@ export type ConversationControllerAction =
       at: number
       deferHandoff?: boolean
     }
+  | {
+      type: 'run.event'
+      key: ConversationRouteIdentity
+      event: StreamEvent
+      at: number
+    }
+  | {
+      type: 'run.browser-frame'
+      key: ConversationRouteIdentity
+      runId: string
+      frame: ChatBrowserFrame
+    }
+  | {
+      type: 'run.cancelling'
+      key: ConversationRouteIdentity
+      runId: string
+    }
+  | {
+      type: 'run.connection.failed'
+      key: ConversationRouteIdentity
+      runId: string
+      error: string
+    }
+  | {
+      type: 'question.status'
+      key: ConversationRouteIdentity
+      requestId: string
+      status: ChatQuestionRequest['status']
+      answers: ChatQuestionAnswers
+      result?: string
+      resume?: boolean
+    }
   | { type: 'turn.handoff'; operationId: string; id: string }
   | {
       type: 'turn.failed'
@@ -113,6 +164,11 @@ export type ConversationControllerAction =
       operationId: string
       at: number
     }
+  | {
+      type: 'turn.detached'
+      key: ConversationRouteIdentity
+      operationId: string
+    }
   | { type: 'catalog.project.added'; project: ProjectSummary }
   | { type: 'catalog.project.renamed'; project: ProjectSummary }
   | { type: 'catalog.projects.reordered'; projects: ProjectSummary[] }
@@ -128,6 +184,7 @@ const readyOperation = (): OperationState => ({ status: 'ready', error: '' })
 export const createNewConversationRecord = (): ConversationRecord => ({
   title: 'New conversation',
   messages: [],
+  plan: [],
   detail: readyOperation(),
   turn: idleOperation(),
 })
@@ -136,6 +193,7 @@ export const createConversationRecord = (id: string): ConversationRecord => ({
   id,
   title: 'New conversation',
   messages: [],
+  plan: [],
   detail: idleOperation(),
   turn: idleOperation(),
 })
@@ -144,6 +202,7 @@ export const initialConversationControllerState = (): ConversationControllerStat
   catalog: {
     conversations: [],
     projects: [],
+    models: [],
     status: 'idle',
     error: '',
     deletedProjectIds: [],
@@ -270,6 +329,21 @@ const updateAssistant = (
 ) => messages.map((message) =>
   message.role === 'assistant' && message.id === assistantId ? update(message) : message)
 
+const reconcileAssistantContent = (message: ChatMessage, content: string): ChatMessage => {
+  const textIndex = message.blocks.findIndex((block) => block.type === 'text')
+  const textBlock: ChatMessageBlock = {
+    id: `${message.id}-text`,
+    type: 'text',
+    content,
+  }
+  const blocks = textIndex >= 0
+    ? message.blocks.flatMap((block, index) => index === textIndex
+      ? (content ? [textBlock] : [])
+      : [block])
+    : content ? [...message.blocks, textBlock] : message.blocks
+  return { ...message, blocks, status: 'streaming' }
+}
+
 const safeSource = (value: unknown): SearchSource | undefined => {
   if (!value || typeof value !== 'object') return undefined
   const source = value as Record<string, unknown>
@@ -331,6 +405,11 @@ const updateProcessItems = (
   }
 }
 
+const browserProjection = (event: StreamEvent) => {
+  const data = event.data as Record<string, unknown>
+  return mapBrowserProjection(data.browser ?? data.browser_projection, event.run_id)
+}
+
 const recordFor = (
   state: ConversationControllerState,
   key: ConversationRouteIdentity,
@@ -355,10 +434,31 @@ const turnOwned = (record: ConversationRecord, operationId: string) =>
 const detailOwned = (record: ConversationRecord, operationId: string) =>
   record.detail.operationId === operationId
 
+const eventAlreadyApplied = (record: ConversationRecord, event: StreamEvent) =>
+  (record.activeRunId !== undefined && record.activeRunId !== event.run_id) ||
+  (record.lastSequence !== undefined &&
+    parseEventSequence(event.sequence) <= parseEventSequence(record.lastSequence))
+
 const reconcileStarted = (
   record: ConversationRecord,
   event: Extract<StreamEvent, { type: 'turn.started' }>,
 ): ConversationRecord => {
+  const active = {
+    activeRunId: event.run_id,
+    activeTurnId: event.turn_id,
+    lastSequence: event.sequence,
+    browser: browserProjection(event) ?? record.browser,
+  }
+  if ('checkpoint' in event.data) {
+    const checkpoint = event.data.checkpoint
+    return {
+      ...record,
+      ...active,
+      messages: updateAssistant(record.messages, record.activeAssistantId, (assistant) =>
+        reconcileAssistantContent(assistant, checkpoint.content)),
+      turn: { ...record.turn, status: 'loading', error: '' },
+    }
+  }
   const messages = [...record.messages]
   const userIndex = messages.length - 2
   const assistantIndex = messages.length - 1
@@ -379,9 +479,11 @@ const reconcileStarted = (
   }
   return {
     ...record,
+    ...active,
     id: event.data.conversation.id,
     title: event.data.conversation.title,
     messages,
+    plan: Array.isArray(event.data.plan) ? mapPlanItems(event.data.plan) : record.plan,
     detail: readyOperation(),
     turn: { ...record.turn, status: 'loading', error: '' },
     activeAssistantId: event.data.assistant_message.id,
@@ -393,6 +495,13 @@ const applyNonStartedEvent = (
   event: Exclude<StreamEvent, { type: 'turn.started' }>,
   at: number,
 ): ConversationRecord => {
+  record = {
+    ...record,
+    activeRunId: event.run_id,
+    activeTurnId: event.turn_id,
+    lastSequence: event.sequence,
+    browser: browserProjection(event) ?? record.browser,
+  }
   if (record.messages.at(-1)?.retryError && event.type === 'turn.completed') {
     record = { ...record, messages: updateAssistant(record.messages, record.activeAssistantId,
       (assistant) => assistant.retryError ? { ...assistant, retryError: undefined } : assistant) }
@@ -403,7 +512,8 @@ const applyNonStartedEvent = (
       messages: updateAssistant(record.messages, record.activeAssistantId, (assistant) =>
         updateProcessItems(assistant, (items) => {
           const last = items.at(-1)
-          if (last?.type === 'text' && last.lastSequence === event.sequence - 1) {
+          if (last?.type === 'text' && last.lastSequence !== undefined &&
+            parseEventSequence(last.lastSequence) + 1n === parseEventSequence(event.sequence)) {
             return [
               ...items.slice(0, -1),
               {
@@ -463,13 +573,99 @@ const applyNonStartedEvent = (
     }
   }
 
+  if (event.type === 'plan.updated') {
+    return { ...record, plan: mapPlanItems(event.data.plan) }
+  }
+
+  if (
+    event.type === 'tool.started' ||
+    event.type === 'tool.updated' ||
+    event.type === 'tool.completed'
+  ) {
+    const tool = event.data.tool
+    const item: ChatActivityItem = {
+      id: tool.id,
+      type: 'tool',
+      action: tool.name || 'tool',
+      target: tool.label || tool.name || 'Tool activity',
+    }
+    return {
+      ...record,
+      messages: updateAssistant(record.messages, record.activeAssistantId, (assistant) =>
+        updateProcessItems(assistant, (items) => {
+          const index = items.findIndex((entry) => entry.id === item.id)
+          if (index === -1) return [...items, item]
+          return items.map((entry, entryIndex) => entryIndex === index ? item : entry)
+        })),
+    }
+  }
+
+  if (event.type === 'child.started' || event.type === 'child.completed') {
+    const child = event.data.child
+    const item: ChatActivityItem = {
+      id: child.id,
+      type: 'trace',
+      kind: 'message',
+      label: child.label || 'Child agent',
+      detail: child.name,
+    }
+    return {
+      ...record,
+      messages: updateAssistant(record.messages, record.activeAssistantId, (assistant) =>
+        updateProcessItems(assistant, (items) => {
+          const index = items.findIndex((entry) => entry.id === item.id)
+          if (index === -1) return [...items, item]
+          return items.map((entry, entryIndex) => entryIndex === index ? item : entry)
+        })),
+    }
+  }
+
+  if (event.type === 'user.input_required') {
+    const request = mapQuestionRequest(event.data, event.run_id)
+    if (!request) {
+      return {
+        ...record,
+        turn: { status: 'error', error: 'The requested input could not be displayed.' },
+      }
+    }
+    return {
+      ...record,
+      messages: updateAssistant(record.messages, record.activeAssistantId, (assistant) => ({
+        ...assistant,
+        status: 'complete',
+        processDuration: elapsedProcessDuration(assistant, at),
+        blocks: [
+          ...terminalBlocks(assistant.blocks).filter((block) =>
+            block.type !== 'question' || block.request.id !== request.id),
+          {
+            id: `${assistant.id}-question-${request.id}`,
+            type: 'question',
+            request,
+          },
+        ],
+      })),
+      turn: readyOperation(),
+    }
+  }
+
   const failed = event.type === 'turn.failed'
   const cancelled = failed && event.data.error.code === 'cancelled'
   return {
     ...record,
     messages: updateAssistant(record.messages, record.activeAssistantId, (assistant) => ({
       ...assistant,
-      blocks: terminalBlocks(assistant.blocks),
+      blocks: terminalBlocks(assistant.blocks).map((block) =>
+        block.type === 'question' &&
+        (block.request.status === 'pending' || block.request.status === 'submitting')
+          ? {
+              ...block,
+              request: {
+                ...block.request,
+                status: 'cancelled' as const,
+                result: cancelled ? 'Run cancelled.' : 'Run ended.',
+              },
+            }
+          : block),
       status: failed && !cancelled ? 'error' : 'complete',
       errorMessage: failed && !cancelled ? event.data.error.message : undefined,
       retryError: undefined,
@@ -484,6 +680,12 @@ const applyNonStartedEvent = (
         : '',
     },
     activeAssistantId: undefined,
+    activeRunId: undefined,
+    activeTurnId: undefined,
+    browser: record.browser
+      ? { ...record.browser, status: 'closed', message: 'Browser preview ended with the run.' }
+      : undefined,
+    browserFrame: undefined,
   }
 }
 
@@ -537,6 +739,7 @@ function reduceConversationController(
           state.catalog.deletedConversationIds,
         ),
         projects: mergeProjects(state.catalog.projects, action.projects),
+        models: action.models ?? state.catalog.models,
         status: 'ready',
         error: '',
         operationId: undefined,
@@ -572,18 +775,62 @@ function reduceConversationController(
       lastAssistant.status === 'failed' && lastUser?.role === 'user'
       ? {
           message: lastUser.content,
-          model: lastAssistant.model === 'gpt-5.6-luna' ? 'gpt-5.6-luna' : 'gpt-5.6-sol',
-          reasoning_effort: effort === 'low' || effort === 'high' || effort === 'xhigh' || effort === 'max'
+          model: lastAssistant.model || 'gpt-5.6-sol',
+          reasoning_effort: effort === 'none' || effort === 'low' || effort === 'high' ||
+            effort === 'xhigh' || effort === 'max'
             ? effort : 'medium',
           speed: lastAssistant.speed === 'fast' ? 'fast' : 'standard',
         } : undefined
+    const run = parseActiveRunProjection(action.detail.active_run)
+    const plan = mapPlanItems(Array.isArray(action.detail.plan)
+      ? action.detail.plan
+      : run?.plan ?? [])
+    let messages = action.detail.messages.map(mapApiMessage)
+    let activeAssistantId: string | undefined
+    if (run) {
+      const sourceIndex = action.detail.messages.findLastIndex((message) =>
+        message.role === 'assistant' &&
+        (message.status === 'streaming' || message.status === 'waiting'))
+      const fallbackIndex = messages.findLastIndex((message) => message.role === 'assistant')
+      const activeIndex = sourceIndex >= 0 ? sourceIndex : fallbackIndex
+      activeAssistantId = messages[activeIndex]?.id
+      if (activeIndex >= 0) {
+        const assistant = messages[activeIndex]
+        const question = mapQuestionRequest(run.pending_question, run.id)
+        const baseBlocks = assistant.blocks.filter((block) =>
+          block.type !== 'todo-list' &&
+          (block.type !== 'question' || block.request.id !== question?.id))
+        messages = messages.with(activeIndex, {
+          ...assistant,
+          status: run.status === 'waiting' ? 'complete' : 'streaming',
+          blocks: [
+            ...baseBlocks,
+            ...(question ? [{
+              id: `${assistant.id}-question-${question.id}`,
+              type: 'question' as const,
+              request: question,
+            }] : []),
+          ],
+        })
+      }
+    }
     const next = replaceRecord(state, { kind: 'existing', id: action.id }, {
       ...record,
       id: action.id,
       title: mergeConversationMetadata(state.catalog.conversations.find((item) => item.id === action.id), action.detail).title,
-      messages: action.detail.messages.map(mapApiMessage),
+      messages,
+      plan,
       lastTurnInput: retryInput,
       detail: readyOperation(),
+      turn: run && run.status !== 'waiting'
+        ? { status: 'loading', error: '' }
+        : readyOperation(),
+      activeAssistantId,
+      activeRunId: run?.id,
+      activeTurnId: run?.turn_id,
+      lastSequence: run?.last_event_sequence ?? (run ? '0' : undefined),
+      browser: run ? mapBrowserProjection(run.browser_projection, run.id) : undefined,
+      browserFrame: undefined,
     })
     const conversation: ConversationSummary = {
       id: action.detail.id,
@@ -636,16 +883,25 @@ function reduceConversationController(
       messages,
       turn: { status: 'loading', error: '', operationId: action.operationId },
       activeAssistantId: messages.at(-1)?.id,
+      activeRunId: undefined,
+      activeTurnId: undefined,
+      lastSequence: undefined,
+      browserFrame: undefined,
     })
   }
   if (action.type === 'turn.event') {
     const record = recordFor(state, action.key)
     if (!turnOwned(record, action.operationId)) return state
+    if (eventAlreadyApplied(record, action.event)) return state
     if (action.event.type === 'turn.started') {
       const startedEvent = action.event
+      if ('checkpoint' in startedEvent.data) {
+        return replaceRecord(state, action.key, reconcileStarted(record, startedEvent))
+      }
+      const started = startedEvent.data
       const summary = mergeConversationMetadata(
-        state.catalog.conversations.find((item) => item.id === startedEvent.data.conversation.id),
-        startedEvent.data.conversation,
+        state.catalog.conversations.find((item) => item.id === started.conversation.id),
+        started.conversation,
       )
       const reconciled = { ...reconcileStarted(record, startedEvent), title: summary.title }
       const catalog = {
@@ -655,7 +911,7 @@ function reduceConversationController(
           summary,
         ),
         deletedConversationIds: state.catalog.deletedConversationIds.filter(
-          (id) => id !== startedEvent.data.conversation.id,
+          (id) => id !== started.conversation.id,
         ),
       }
       if (action.key.kind === 'new') {
@@ -668,7 +924,7 @@ function reduceConversationController(
           newConversation: createNewConversationRecord(),
           conversationsById: {
             ...state.conversationsById,
-            [startedEvent.data.conversation.id]: reconciled,
+            [started.conversation.id]: reconciled,
           },
         }
       }
@@ -699,6 +955,76 @@ function reduceConversationController(
         }
       : next
   }
+  if (action.type === 'run.event') {
+    const record = recordFor(state, action.key)
+    if (!record.activeRunId || eventAlreadyApplied(record, action.event)) return state
+    const updated = action.event.type === 'turn.started'
+      ? reconcileStarted(record, action.event)
+      : applyNonStartedEvent(record, action.event, action.at)
+    const next = replaceRecord(state, action.key, updated)
+    if (action.event.type !== 'turn.completed' && action.event.type !== 'turn.failed') return next
+    const id = action.key.kind === 'existing' ? action.key.id : record.id
+    const current = id
+      ? next.catalog.conversations.find((conversation) => conversation.id === id)
+      : undefined
+    return current
+      ? {
+          ...next,
+          catalog: {
+            ...next.catalog,
+            conversations: upsertConversation(next.catalog.conversations, {
+              ...current,
+              updated_at: new Date(action.at).toISOString(),
+            }),
+          },
+        }
+      : next
+  }
+  if (action.type === 'run.browser-frame') {
+    const record = recordFor(state, action.key)
+    if (record.activeRunId !== action.runId) return state
+    return replaceRecord(state, action.key, { ...record, browserFrame: action.frame })
+  }
+  if (action.type === 'run.cancelling') {
+    const record = recordFor(state, action.key)
+    if (record.activeRunId !== action.runId) return state
+    return replaceRecord(state, action.key, {
+      ...record,
+      turn: { ...record.turn, status: 'loading', error: '' },
+    })
+  }
+  if (action.type === 'run.connection.failed') {
+    const record = recordFor(state, action.key)
+    if (record.activeRunId !== action.runId) return state
+    return replaceRecord(state, action.key, {
+      ...record,
+      turn: { ...record.turn, error: action.error },
+    })
+  }
+  if (action.type === 'question.status') {
+    const record = recordFor(state, action.key)
+    return replaceRecord(state, action.key, {
+      ...record,
+      messages: record.messages.map((message) => ({
+        ...message,
+        blocks: message.blocks.map((block) =>
+          block.type === 'question' && block.request.id === action.requestId
+            ? {
+                ...block,
+                request: {
+                  ...block.request,
+                  status: action.status,
+                  answers: action.answers,
+                  ...(action.result ? { result: action.result } : {}),
+                },
+              }
+            : block),
+      })),
+      turn: action.resume
+        ? { ...record.turn, status: 'loading', error: '' }
+        : record.turn,
+    })
+  }
   if (action.type === 'turn.handoff') {
     const record = state.newConversation
     if (record.submissionId !== action.operationId || record.id !== action.id || record.turn.status === 'error') return state
@@ -718,6 +1044,14 @@ function reduceConversationController(
       action.at,
       action.type === 'turn.failed' ? action.retryable : undefined,
     ))
+  }
+  if (action.type === 'turn.detached') {
+    const record = recordFor(state, action.key)
+    if (!turnOwned(record, action.operationId)) return state
+    return replaceRecord(state, action.key, {
+      ...record,
+      turn: { ...record.turn, operationId: undefined },
+    })
   }
   if (action.type === 'catalog.projects.reordered') {
     const incoming = new Map(action.projects.map((project) => [project.id, project]))

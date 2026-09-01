@@ -25,7 +25,10 @@ describe('conversation service primitives', () => {
     } as Settings
     const input = { version: 2, run_id: 'run-1' }
 
-    await createAiClient(settings)(input, new AbortController().signal)
+    await createAiClient(settings)(input, new AbortController().signal, {
+      'x-request-id': 'request-1',
+      'x-correlation-id': 'correlation-1',
+    })
 
     expect(fetch).toHaveBeenCalledWith('http://ai.internal:8001/agent/stream', {
       method: 'POST',
@@ -33,6 +36,8 @@ describe('conversation service primitives', () => {
       headers: {
         'content-type': 'application/json',
         authorization: 'Bearer private-token',
+        'x-request-id': 'request-1',
+        'x-correlation-id': 'correlation-1',
       },
       body: JSON.stringify(input),
     })

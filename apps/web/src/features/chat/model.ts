@@ -28,7 +28,7 @@ export type ChatActivityItem =
       type: "text";
       content: string;
       /** Last stream event folded into this contiguous reasoning segment. */
-      lastSequence?: number;
+      lastSequence?: string;
     }
   | {
       id: string;

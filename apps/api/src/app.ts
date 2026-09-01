@@ -1014,7 +1014,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
         context.turnId = result.run.turnId
       }
       await agentExecutor.publishCommitted(result.event)
-      agentExecutor.startClaimed(result.run)
+      agentExecutor.startClaimed(result.run, requestHeaders(requestIdsFor(request)))
       return agentExecutor.stream(result.run.id)
     } catch (error) {
       if (error instanceof AuthError) throw error
@@ -1113,7 +1113,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     if (result.kind === 'conflict') {
       throw new AuthError('run_not_waiting', 'This run is not waiting for that input.', 409)
     }
-    agentExecutor.start(result.run.id)
+    agentExecutor.start(result.run.id, requestHeaders(requestIdsFor(request)))
     set.status = 202
     return publicRun(result.run)
   }, { params: runParams, body: resumeBody })
@@ -1135,7 +1135,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     if (result.kind === 'conflict') {
       throw new AuthError('run_terminal', 'This run has already finished.', 409)
     }
-    agentExecutor.cancel(result.run.id)
+    agentExecutor.cancel(result.run.id, requestHeaders(requestIdsFor(request)))
     set.status = 202
     return publicRun(result.run)
   }, { params: runParams })

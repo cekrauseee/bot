@@ -44,7 +44,7 @@ describe('database checker integration', () => {
       await client.query('insert into projects (id, slug) values ($1, $2)', [projectId, slug])
       await client.query('insert into agent_runs (id) values ($1)', [runId])
       const migration = await readFile(
-        new URL('../drizzle/0004_project_workspace_directories.sql', import.meta.url),
+        new URL('../drizzle/0006_yellow_scorpion.sql', import.meta.url),
         'utf8',
       )
       await client.query(migration)

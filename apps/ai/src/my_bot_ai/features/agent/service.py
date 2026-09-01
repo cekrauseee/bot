@@ -720,7 +720,7 @@ async def prepare_agent_request(
 
     if runtime_tools is None:
         runtime_client = RuntimeClient(
-            settings.runtime_base_url,
+            str(settings.runtime_base_url).rstrip("/"),
             token=settings.runtime_service_token,
         )
         runtime_tools = build_runtime_tools(

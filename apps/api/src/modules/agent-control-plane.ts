@@ -329,6 +329,7 @@ export class AgentRunExecutor {
   private readonly executing = new Set<string>()
   private readonly rerun = new Set<string>()
   private readonly claimed = new Map<string, AgentRun>()
+  private readonly requestHeaders = new Map<string, Record<string, string>>()
   private readonly source = randomUUID()
   private readonly unsubscribeFanout: () => void
   private readonly executionPromises = new Set<Promise<void>>()
@@ -351,8 +352,9 @@ export class AgentRunExecutor {
     }) ?? (() => undefined)
   }
 
-  start(runId: string) {
+  start(runId: string, headers?: Record<string, string>) {
     if (this.closing) return
+    if (headers) this.requestHeaders.set(runId, headers)
     if (this.executing.has(runId)) {
       this.rerun.add(runId)
       return
@@ -371,11 +373,11 @@ export class AgentRunExecutor {
     this.executionPromises.add(execution)
   }
 
-  startClaimed(run: AgentRun) {
+  startClaimed(run: AgentRun, headers?: Record<string, string>) {
     if (!run.executionToken || run.status !== 'running') throw new AgentRunLeaseLostError()
     if (this.closing) return
     this.claimed.set(run.id, run)
-    this.start(run.id)
+    this.start(run.id, headers)
   }
 
   private async recoverRuns(limit: number) {
@@ -414,6 +416,7 @@ export class AgentRunExecutor {
     this.recoveryTimer = undefined
     this.rerun.clear()
     this.claimed.clear()
+    this.requestHeaders.clear()
     for (const controller of this.controllers.values()) controller.abort()
     const recovery = this.recoveryPromise
     this.closePromise = (async () => {
@@ -424,10 +427,10 @@ export class AgentRunExecutor {
     return this.closePromise
   }
 
-  cancel(runId: string) {
+  cancel(runId: string, headers?: Record<string, string>) {
     const controller = this.controllers.get(runId)
     if (controller) controller.abort()
-    this.start(runId)
+    this.start(runId, headers)
   }
 
   private async dispatch(event: PublicAgentEvent) {
@@ -487,6 +490,8 @@ export class AgentRunExecutor {
 
   private async execute(runId: string) {
     if (this.closing) return
+    const headers = this.requestHeaders.get(runId)
+    this.requestHeaders.delete(runId)
     const handedOff = this.claimed.get(runId)
     this.claimed.delete(runId)
     const run = await this.database.transaction(async (db) => {
@@ -558,7 +563,7 @@ export class AgentRunExecutor {
         reasoning_effort: run.reasoningEffort,
         speed: run.speed,
         ...(resume ? { resume } : {}),
-      }, controller.signal)
+      }, controller.signal, headers)
       if (!response.ok || !response.body) throw new Error('provider_unavailable')
 
       reader = response.body.getReader()

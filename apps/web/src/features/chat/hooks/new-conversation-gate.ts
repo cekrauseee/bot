@@ -7,7 +7,9 @@ export function createNewConversationGate(accept: (id: string) => void, cancelle
   let accepted = false
   let queued = false
   return (event: StreamEvent) => {
-    if (event.type === 'turn.started') id = event.data.conversation.id
+    if (event.type === 'turn.started' && 'conversation' in event.data) {
+      id = event.data.conversation.id
+    }
     if (event.type === 'turn.failed') failed = true
     const progressed = hasResponseProgress(event)
     if (!id || !progressed || accepted || queued) return

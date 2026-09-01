@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useReducer, useRef } from 'react'
 
-import type { ProjectSummary } from '../model'
+import type {
+  ChatQuestionAnswers,
+  ChatQuestionRequest,
+  ProjectSummary,
+} from '../model'
 import { createNewConversationGate } from './new-conversation-gate'
 import {
   createConversationProject,
+  cancelAgentRun,
   renameConversationProject,
   renameConversation,
   reorderConversationProjects,
@@ -11,11 +16,18 @@ import {
   deleteConversation,
   loadConversationCatalog,
   loadConversationDetail,
+  mapBrowserFrame,
   moveConversationToProject,
+  parseActiveRunProjection,
+  parseEventSequence,
+  parseSocketMessage,
   setConversationPinned,
   reorderPinnedConversations,
   readEventStream,
+  resumeAgentRun,
   startConversationTurn,
+  agentRunSocketUrl,
+  answerForQuestion,
   ConversationApiError,
   type ModelName,
   type ReasoningEffort,
@@ -72,6 +84,10 @@ export function useConversationController(
   const catalogControllerRef = useRef<KeyedController | null>(null)
   const detailControllersRef = useRef(new Map<string, KeyedController>())
   const turnControllersRef = useRef(new Map<string, TurnOperation>())
+  const socketRef = useRef<WebSocket | null>(null)
+  const socketRunRef = useRef<string | undefined>(undefined)
+  const socketGenerationRef = useRef(0)
+  const reconnectTimerRef = useRef<number | undefined>(undefined)
   const previousIdentityRef = useRef(activeIdentity)
   const handoffRef = useRef<NewConversationHandoff | null>(null)
   const mountedRef = useRef(true)
@@ -88,6 +104,86 @@ export function useConversationController(
   useEffect(() => {
     onConversationStartedRef.current = onConversationStarted
   }, [onConversationStarted])
+
+  const closeRunSocket = useCallback(() => {
+    socketGenerationRef.current += 1
+    if (reconnectTimerRef.current !== undefined) {
+      window.clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = undefined
+    }
+    socketRunRef.current = undefined
+    const socket = socketRef.current
+    socketRef.current = null
+    if (socket && socket.readyState < 2) socket.close(1000, 'Detached')
+  }, [])
+
+  const connectRun = useCallback((
+    identity: ConversationRouteIdentity,
+    runId: string,
+    after = '0',
+  ) => {
+    const current = socketRef.current
+    if (socketRunRef.current === runId && current && current.readyState < 2) return
+    closeRunSocket()
+    let cursor = parseEventSequence(after)
+    socketRunRef.current = runId
+    const generation = socketGenerationRef.current
+    let reconnectAttempt = 0
+
+    const open = () => {
+      if (socketGenerationRef.current !== generation || socketRunRef.current !== runId) return
+      const socket = new WebSocket(agentRunSocketUrl(
+        runId,
+        cursor.toString(),
+        window.location.origin,
+      ))
+      socketRef.current = socket
+      socket.onmessage = (message) => {
+        if (socketGenerationRef.current !== generation || socketRunRef.current !== runId) return
+        try {
+          const parsed = parseSocketMessage(message.data)
+          if (parsed.run_id !== runId) throw new Error('The response stream was invalid. Try again.')
+          reconnectAttempt = 0
+          if (parsed.type === 'browser.frame') {
+            const frame = mapBrowserFrame(parsed.data)
+            if (frame) dispatch({ type: 'run.browser-frame', key: identity, runId, frame })
+            return
+          }
+          const sequence = parseEventSequence(parsed.sequence)
+          if (sequence <= cursor) return
+          cursor = sequence
+          dispatch({ type: 'run.event', key: identity, event: parsed, at: Date.now() })
+          if (parsed.type === 'turn.completed' ||
+            parsed.type === 'turn.failed' ||
+            parsed.type === 'user.input_required') {
+            socketRunRef.current = undefined
+            socketRef.current = null
+            socket.close(1000, 'Run paused or completed')
+          }
+        } catch {
+          dispatch({
+            type: 'run.connection.failed',
+            key: identity,
+            runId,
+            error: 'The live run connection returned an invalid event.',
+          })
+          socketRunRef.current = undefined
+          socketRef.current = null
+          socket.close(1002, 'Invalid event')
+        }
+      }
+      socket.onerror = () => socket.close()
+      socket.onclose = () => {
+        if (socketRef.current === socket) socketRef.current = null
+        if (socketGenerationRef.current !== generation || socketRunRef.current !== runId) return
+        const delay = Math.min(1_000 * (2 ** reconnectAttempt), 10_000)
+        reconnectAttempt += 1
+        reconnectTimerRef.current = window.setTimeout(open, delay)
+      }
+    }
+
+    open()
+  }, [closeRunSocket])
 
   const reloadCatalog = useCallback(async (force = true) => {
     if (catalogControllerRef.current && !force) return
@@ -131,6 +227,14 @@ export function useConversationController(
       const detail = await loadConversationDetail(id, controller.signal)
       if (controller.signal.aborted) return
       dispatch({ type: 'detail.load.succeeded', id, operationId, detail })
+      const run = parseActiveRunProjection(detail.active_run)
+      if (run) {
+        connectRun(
+          { kind: 'existing', id },
+          run.id,
+          run.last_event_sequence ?? '0',
+        )
+      }
     } catch (error) {
       dispatch(controller.signal.aborted
         ? { type: 'detail.load.aborted', id, operationId }
@@ -148,21 +252,37 @@ export function useConversationController(
         detailControllersRef.current.delete(id)
       }
     }
-  }, [])
+  }, [connectRun])
 
-  const abortTurnOperation = useCallback((operationId: string) => {
+  const abortTurnOperation = useCallback((operationId: string, detached = false) => {
     const operation = releaseTurnOperation(turnControllersRef.current, operationId)
     if (!operation) return
     operation.controller.abort()
-    dispatch({
-      type: 'turn.aborted',
-      key: operation.identity,
-      operationId,
-      at: Date.now(),
-    })
+    dispatch(detached
+      ? { type: 'turn.detached', key: operation.identity, operationId }
+      : {
+          type: 'turn.aborted',
+          key: operation.identity,
+          operationId,
+          at: Date.now(),
+        })
   }, [])
 
   const stop = useCallback((identity: ConversationRouteIdentity) => {
+    const record = selectActiveConversation(stateRef.current, identity)
+    if (record.activeRunId) {
+      const runId = record.activeRunId
+      dispatch({ type: 'run.cancelling', key: identity, runId })
+      void cancelAgentRun(runId)
+        .then(() => connectRun(identity, runId, record.lastSequence ?? '0'))
+        .catch((error) => dispatch({
+          type: 'run.connection.failed',
+          key: identity,
+          runId,
+          error: errorMessage(error, 'Unable to stop the run.'),
+        }))
+      return
+    }
     const operation = findTurnOperation(turnControllersRef.current, identity)
     if (operation) {
       abortTurnOperation(operation.operationId)
@@ -170,7 +290,7 @@ export function useConversationController(
     }
     const handoff = handoffRef.current
     if (identity.kind === 'new' && handoff) abortTurnOperation(handoff.operationId)
-  }, [abortTurnOperation])
+  }, [abortTurnOperation, connectRun])
 
   const send = useCallback(async (
     identity: ConversationRouteIdentity,
@@ -214,6 +334,7 @@ export function useConversationController(
       ),
     })
 
+    let activeRun: { id: string; after: string } | undefined
     const acceptNewConversation = createNewConversationGate((id) => {
       onAccepted?.()
       dispatch({ type: 'turn.handoff', operationId, id })
@@ -221,6 +342,7 @@ export function useConversationController(
       rekeyTurnOperation(turnControllersRef.current, operationId, operationIdentity)
       handoffRef.current = { from: 'new', to: id, operationId }
       onConversationStartedRef.current?.(id)
+      if (activeRun) connectRun(operationIdentity, activeRun.id, activeRun.after)
     }, () => controller.signal.aborted || !mountedRef.current || renderedConversationId.current !== undefined)
     if (identity.kind === 'existing') onAccepted?.()
 
@@ -233,7 +355,9 @@ export function useConversationController(
       await readEventStream(response, (event) => {
         // The terminal event follows persistence; Retry can start before the old
         // response body's final read resolves, without being silently rejected.
-        if (event.type === 'turn.completed' || event.type === 'turn.failed') {
+        if (event.type === 'turn.completed' ||
+          event.type === 'turn.failed' ||
+          event.type === 'user.input_required') {
           releaseTurnOperation(turnControllersRef.current, operationId)
         }
         dispatch({
@@ -245,6 +369,12 @@ export function useConversationController(
           deferHandoff: operationIdentity.kind === 'new',
         })
         if (operationIdentity.kind === 'new') acceptNewConversation(event)
+        if (event.type === 'turn.started' && 'conversation' in event.data) {
+          activeRun = { id: event.run_id, after: event.sequence }
+          if (operationIdentity.kind === 'existing') {
+            connectRun(operationIdentity, event.run_id, event.sequence)
+          }
+        }
       })
     } catch (error) {
       dispatch({
@@ -262,7 +392,7 @@ export function useConversationController(
     } finally {
       turnControllersRef.current.delete(operationId)
     }
-  }, [])
+  }, [connectRun])
 
   const retryTurn = useCallback((identity: ConversationRouteIdentity) => {
     const record = selectActiveConversation(stateRef.current, identity)
@@ -271,6 +401,45 @@ export function useConversationController(
     if (last?.status !== 'error' || last.retryable === false || !input) return
     return send(identity, input.message, input.model, input.reasoning_effort, input.speed, last.id)
   }, [send])
+
+  const answerQuestion = useCallback(async (
+    identity: ConversationRouteIdentity,
+    question: ChatQuestionRequest,
+    answers: ChatQuestionAnswers,
+  ) => {
+    const response = answerForQuestion(question, answers)
+    if (!response) return
+    dispatch({
+      type: 'question.status',
+      key: identity,
+      requestId: question.id,
+      status: 'submitting',
+      answers,
+    })
+    try {
+      await resumeAgentRun(question.runId, response.questionId, response.answer)
+      dispatch({
+        type: 'question.status',
+        key: identity,
+        requestId: question.id,
+        status: 'answered',
+        answers,
+        result: 'Answer submitted',
+        resume: true,
+      })
+      const record = selectActiveConversation(stateRef.current, identity)
+      connectRun(identity, question.runId, record.lastSequence ?? '0')
+    } catch (error) {
+      dispatch({
+        type: 'question.status',
+        key: identity,
+        requestId: question.id,
+        status: 'error',
+        answers,
+        result: errorMessage(error, 'Unable to submit the answer.'),
+      })
+    }
+  }, [connectRun])
 
   const retryActive = useCallback(() => {
     const identity = conversationRouteIdentity(conversationId)
@@ -348,22 +517,26 @@ export function useConversationController(
       handoffRef.current = null
     } else {
       if (previous.kind === 'new' && handoff) {
-        abortTurnOperation(handoff.operationId)
+        abortTurnOperation(handoff.operationId, true)
         handoffRef.current = null
       } else {
-        stop(previous)
+        const operation = findTurnOperation(turnControllersRef.current, previous)
+        if (operation) abortTurnOperation(operation.operationId, true)
       }
+      closeRunSocket()
     }
     previousIdentityRef.current = activeIdentity
-  }, [abortTurnOperation, activeKey, activeIdentity, stop])
+  }, [abortTurnOperation, activeKey, activeIdentity, closeRunSocket])
 
   useEffect(() => {
     if (activeIdentity.kind !== 'existing') return
     const record = state.conversationsById[activeIdentity.id]
     if (!record || record.detail.status === 'idle') {
       void ensureDetail(activeIdentity.id)
+    } else if (record.activeRunId && record.turn.status === 'loading') {
+      connectRun(activeIdentity, record.activeRunId, record.lastSequence ?? '0')
     }
-  }, [activeKey, activeIdentity, ensureDetail, state.conversationsById])
+  }, [activeKey, activeIdentity, connectRun, ensureDetail, state.conversationsById])
 
   useEffect(() => {
     const detailControllers = detailControllersRef.current
@@ -380,9 +553,10 @@ export function useConversationController(
         for (const operation of turnControllers.values()) {
           operation.controller.abort()
         }
+        closeRunSocket()
       })
     }
-  }, [])
+  }, [closeRunSocket])
 
   return {
     state,
@@ -391,6 +565,7 @@ export function useConversationController(
     activeConversation,
     retryActive,
     retryTurn,
+    answerQuestion,
     reloadCatalog,
     send,
     stop,

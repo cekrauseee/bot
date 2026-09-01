@@ -62,7 +62,7 @@ describe('pinned conversations', () => {
     state = reduce(state, { type: 'catalog.pins.updated', conversations: [summary('a', 1, clock(2))] })
     const message = { id: 'user', role: 'user' as const, content: 'Hello', created_at: clock(1), updated_at: clock(1) }
     state = reduce(state, { type: 'turn.event', key: { kind: 'existing', id: 'a' }, operationId: 'turn', at: Date.parse(clock(3)), event: {
-      type: 'turn.started', version: 1, sequence: 0, turn_id: 'turn', data: { conversation: summary('a'), user_message: message, assistant_message: { ...message, id: 'assistant', role: 'assistant' } },
+      type: 'turn.started', version: 2, sequence: '0', run_id: 'run', turn_id: 'turn', data: { conversation: summary('a'), user_message: message, assistant_message: { ...message, id: 'assistant', role: 'assistant' } },
     } })
     expect(state.catalog.conversations[0]).toMatchObject({ pinned_order: 1, pin_updated_at: clock(2) })
   })
