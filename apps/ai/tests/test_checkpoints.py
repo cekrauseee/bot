@@ -59,7 +59,9 @@ def test_checkpointer_selection_is_durable_outside_tests() -> None:
             "my_bot_ai.features.agent.checkpoints.postgres_checkpointer",
             side_effect=fake_postgres,
         ):
-            async with checkpointer_for_settings(Settings(environment="development")) as saver:
+            async with checkpointer_for_settings(
+                Settings(environment="development", database_url=LOCAL_DATABASE_URL)
+            ) as saver:
                 assert saver == "postgres"
             async with checkpointer_for_settings(
                 Settings(environment="production", database_url="postgresql://db/prod")
