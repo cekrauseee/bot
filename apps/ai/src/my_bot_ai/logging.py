@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import uuid
@@ -13,6 +14,7 @@ from fastapi import Request, Response
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 _RENDERER = "my_bot_ai_renderer"
+_HANDLER = "my_bot_ai_handler"
 _DENIED_KEYS = {
     "authorization", "cookie", "set_cookie", "token", "api_key", "service_token",
     "password", "secret", "otp", "oauth_state", "state", "email", "body",
@@ -76,21 +78,112 @@ def sanitize_event_dict(
     return sanitize_log_fields(event_dict)
 
 
+def add_service_context(
+    _logger: Any, _method_name: str, event_dict: dict[str, Any]
+) -> dict[str, Any]:
+    """Give stdlib records the same service fields as application records."""
+    event_dict.setdefault("service", "my_bot_ai")
+    event_dict.setdefault("schema_version", 1)
+    return event_dict
+
+
+def _replace_owned_handler(logger: logging.Logger, handler: logging.Handler) -> None:
+    for existing in tuple(logger.handlers):
+        if getattr(existing, _HANDLER, False):
+            logger.removeHandler(existing)
+            existing.close()
+    setattr(handler, _HANDLER, True)
+    logger.addHandler(handler)
+
+
+class PrettyConsoleRenderer(structlog.dev.ConsoleRenderer):
+    """Render a Pino Pretty-style header followed by one field per line."""
+
+    def __init__(self) -> None:
+        styles = self.get_default_column_styles(colors=True)
+        level_styles = self.get_default_level_styles(colors=True)
+
+        def level(_key: str, value: object) -> str:
+            name = str(value)
+            style = level_styles.get(name, "")
+            return f"{style}{styles.bright}{name.upper()}{styles.reset}"
+
+        def field(key: str, value: object) -> str:
+            rendered = json.dumps(value, ensure_ascii=False, default=str)
+            return (
+                f"\n    {styles.kv_key}{key}{styles.reset}: "
+                f"{styles.kv_value}{rendered}{styles.reset}"
+            )
+
+        def omitted(_key: str, _value: object) -> str:
+            return ""
+
+        super().__init__(
+            columns=[
+                structlog.dev.Column(
+                    "timestamp",
+                    structlog.dev.KeyValueColumnFormatter(
+                        key_style=None,
+                        value_style=styles.timestamp,
+                        reset_style=styles.reset,
+                        value_repr=str,
+                        prefix="[",
+                        postfix="]",
+                    ),
+                ),
+                structlog.dev.Column("level", level),
+                structlog.dev.Column(
+                    "logger",
+                    structlog.dev.KeyValueColumnFormatter(
+                        key_style=None,
+                        value_style=styles.bright + styles.logger_name,
+                        reset_style=styles.reset,
+                        value_repr=str,
+                        prefix="(",
+                        postfix="):",
+                    ),
+                ),
+                structlog.dev.Column(
+                    "event",
+                    structlog.dev.KeyValueColumnFormatter(
+                        key_style=None,
+                        value_style=styles.bright,
+                        reset_style=styles.reset,
+                        value_repr=str,
+                    ),
+                ),
+                structlog.dev.Column("service", omitted),
+                structlog.dev.Column("", field),
+            ]
+        )
+        self.sort_keys = False
+
+    def __call__(self, logger: Any, name: str, event_dict: dict[str, Any]) -> str:
+        return super().__call__(logger, name, event_dict).replace(" \n", "\n")
+
+
 def configure_logging(environment: str) -> None:
     """Configure one process-wide renderer and suppress duplicate access logs."""
-    renderer = (
-        structlog.processors.JSONRenderer()
-        if environment == "production"
-        else structlog.dev.ConsoleRenderer(colors=False)
+    production = environment == "production"
+    timestamp = (
+        structlog.processors.TimeStamper(fmt="iso", utc=True)
+        if production
+        else structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=False)
     )
+    renderer: Any = (
+        structlog.processors.JSONRenderer()
+        if production
+        else PrettyConsoleRenderer()
+    )
+    processors: list[Any] = [
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.add_log_level,
+    ]
+    if not production:
+        processors.append(structlog.stdlib.add_logger_name)
+    processors.extend([timestamp, sanitize_event_dict, renderer])
     structlog.configure(
-        processors=[
-            structlog.contextvars.merge_contextvars,
-            structlog.processors.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso", utc=True),
-            sanitize_event_dict,
-            renderer,
-        ],
+        processors=processors,
         logger_factory=structlog.stdlib.LoggerFactory(),
         wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=False,
@@ -100,11 +193,39 @@ def configure_logging(environment: str) -> None:
     )
     service_logger = logging.getLogger("my_bot_ai")
     service_logger.setLevel(logging.INFO)
-    if not service_logger.handlers:
-        handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("%(message)s"))
-        service_logger.addHandler(handler)
+    service_handler = logging.StreamHandler()
+    service_handler.setFormatter(logging.Formatter("%(message)s"))
+    _replace_owned_handler(service_logger, service_handler)
     service_logger.propagate = False
+
+    uvicorn_handler = logging.StreamHandler()
+    uvicorn_handler.setFormatter(
+        structlog.stdlib.ProcessorFormatter(
+            foreign_pre_chain=[
+                structlog.stdlib.add_log_level,
+                structlog.stdlib.add_logger_name,
+                timestamp,
+                add_service_context,
+                lambda _logger, _method, event: {
+                    **event,
+                    "environment": environment,
+                },
+                sanitize_event_dict,
+            ],
+            processors=[
+                structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+                renderer,
+            ],
+        )
+    )
+    uvicorn_logger = logging.getLogger("uvicorn")
+    uvicorn_logger.setLevel(logging.INFO)
+    _replace_owned_handler(uvicorn_logger, uvicorn_handler)
+    uvicorn_logger.propagate = False
+    for name in ("uvicorn.error", "uvicorn.asgi"):
+        child_logger = logging.getLogger(name)
+        child_logger.handlers.clear()
+        child_logger.propagate = True
     logging.getLogger("uvicorn.access").disabled = True
 
 

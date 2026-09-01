@@ -9,13 +9,20 @@ def test_development_server_uses_the_configured_origin(monkeypatch) -> None:
         dev,
         "get_settings",
         lambda: SimpleNamespace(
-            ai_base_url=SimpleNamespace(host="localhost", port=8123, scheme="http")
+            ai_base_url=SimpleNamespace(host="localhost", port=8123, scheme="http"),
+            environment="development",
         ),
     )
+    configured = []
+    monkeypatch.setattr(dev, "configure_logging", configured.append)
     monkeypatch.setattr(dev.uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
 
     dev.main()
 
-    assert calls == [
-        (("my_bot_ai.main:app",), {"host": "localhost", "port": 8123, "reload": True})
-    ]
+    assert configured == ["development"]
+    assert calls == [(("my_bot_ai.main:app",), {
+        "host": "localhost",
+        "port": 8123,
+        "reload": True,
+        "log_config": None,
+    })]

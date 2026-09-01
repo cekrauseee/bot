@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -21,6 +22,67 @@ def test_renderer_matches_environment() -> None:
     assert isinstance(structlog.get_config()["processors"][-1], structlog.processors.JSONRenderer)
     configure_logging("development")
     assert isinstance(structlog.get_config()["processors"][-1], structlog.dev.ConsoleRenderer)
+
+
+def test_development_renderer_is_colored_and_human_readable() -> None:
+    configure_logging("development")
+    renderer = structlog.get_config()["processors"][-1]
+    rendered = renderer(
+        None,
+        "info",
+        {
+            "timestamp": "2026-09-01 12:34:56",
+            "level": "info",
+            "event": "request_completed",
+            "logger": "my_bot_ai",
+            "duration_ms": 12.5,
+            "outcome": "success",
+        },
+    )
+    assert "\x1b[" in rendered
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", rendered)
+    lines = plain.splitlines()
+    assert lines[0] == "[2026-09-01 12:34:56] INFO (my_bot_ai): request_completed"
+    assert "    duration_ms: 12.5" in lines
+    assert '    outcome: "success"' in lines
+
+
+def test_uvicorn_records_use_the_shared_development_renderer() -> None:
+    configure_logging("development")
+    handler = next(
+        handler
+        for handler in logging.getLogger("uvicorn").handlers
+        if getattr(handler, "my_bot_ai_handler", False)
+    )
+    record = logging.LogRecord(
+        "uvicorn.error", logging.INFO, __file__, 1, "Uvicorn running", (), None
+    )
+    rendered = handler.format(record)
+    assert "\x1b[" in rendered
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", rendered)
+    lines = plain.splitlines()
+    assert "INFO (uvicorn.error): Uvicorn running" in lines[0]
+    assert '    environment: "development"' in lines
+
+
+def test_uvicorn_production_records_preserve_the_shared_json_schema() -> None:
+    configure_logging("production")
+    handler = next(
+        handler
+        for handler in logging.getLogger("uvicorn").handlers
+        if getattr(handler, "my_bot_ai_handler", False)
+    )
+    record = logging.LogRecord(
+        "uvicorn.error", logging.INFO, __file__, 1, "Uvicorn running", (), None
+    )
+    rendered = json.loads(handler.format(record))
+    assert rendered["event"] == "Uvicorn running"
+    assert rendered["level"] == "info"
+    assert rendered["logger"] == "uvicorn.error"
+    assert rendered["service"] == "my_bot_ai"
+    assert rendered["environment"] == "production"
+    assert rendered["schema_version"] == 1
+    assert rendered["timestamp"].endswith("Z")
 
 
 def test_invalid_request_id_is_replaced() -> None:

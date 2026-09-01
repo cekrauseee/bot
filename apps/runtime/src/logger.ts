@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import pino, { type DestinationStream, type Logger } from 'pino'
 import { RuntimeError } from './errors.js'
 
 type Category =
@@ -42,6 +43,35 @@ const sanitize = (value: unknown, seen = new WeakSet<object>()): unknown => {
   return result
 }
 type LogLevel = 'info' | 'warn' | 'error'
+export const createRuntimeLogger = (
+  environment: 'development' | 'production',
+  destination?: DestinationStream,
+): Logger => pino({
+  level: environment === 'production' ? 'info' : 'debug',
+  base: { service: 'my_bot_runtime', environment, schema_version: 1 },
+  messageKey: 'message',
+  timestamp: () => `,"timestamp":"${new Date().toISOString()}"`,
+  formatters: {
+    level: (label) => ({ level: label }),
+  },
+  hooks: {
+    logMethod(inputArgs, method) {
+      for (let index = 0; index < inputArgs.length; index += 1) {
+        const value = inputArgs[index]
+        if (value !== null && typeof value === 'object') inputArgs[index] = sanitize(value)
+      }
+      method.apply(this, inputArgs)
+    },
+  },
+  ...(environment === 'development'
+    ? { transport: { target: 'pino-pretty', options: { colorize: true, translateTime: 'SYS:standard' } } }
+    : {}),
+}, destination)
+
+const logger = createRuntimeLogger(
+  process.env.NODE_ENV === 'production' ? 'production' : 'development',
+)
+
 export const diagnostic = (error: unknown, status?: number, codeOverride?: string) => {
   const code = codeOverride ?? (error instanceof RuntimeError ? error.code : '')
   const category: Category =
@@ -65,16 +95,7 @@ export const runtimeLogger = (
   level: LogLevel = 'info',
 ) => {
   const safeMessage = /^[a-z][a-z0-9_.:-]{0,79}$/.test(message) ? message : 'runtime_event'
-  const record = {
-    timestamp: new Date().toISOString(),
-    level,
-    service: 'my_bot_runtime',
-    environment: process.env.NODE_ENV === 'production' ? 'production' : 'development',
-    schema_version: 1,
-    ...(sanitize(fields) as Record<string, unknown>),
-    message: safeMessage,
-  }
-  process.stderr.write(`${JSON.stringify(record)}\n`)
+  logger[level](fields, safeMessage)
 }
 export const requestIdentity = (
   headers: { [key: string]: string | string[] | undefined },

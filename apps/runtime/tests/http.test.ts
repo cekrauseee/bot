@@ -1,5 +1,6 @@
 import { once } from 'node:events'
 import type { AddressInfo } from 'node:net'
+import { Writable } from 'node:stream'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -7,7 +8,7 @@ import type { RuntimeToolRequest } from '../src/contracts.js'
 import { createRuntimeServer } from '../src/http.js'
 import { createFakeRuntimeProvider } from '../src/providers/fake.js'
 import { RuntimeService } from '../src/service.js'
-import { diagnostic, requestIdentity, runtimeLogger } from '../src/logger.js'
+import { createRuntimeLogger, diagnostic, requestIdentity } from '../src/logger.js'
 
 const body = {
   version: 2,
@@ -33,15 +34,21 @@ describe('runtime HTTP boundary', () => {
     expect(requestIdentity({ 'x-request-id': 'r'.repeat(200) }).request_id).not.toBe('r'.repeat(200))
   })
 
-  it('redacts nested operational payloads at the logger boundary', () => {
-    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
-    runtimeLogger({ event: 'test', nested: { prompt: 'private', path: '/secret', safe: true } }, 'test')
-    expect(String(write.mock.calls[0]?.[0])).not.toContain('private')
-    expect(String(write.mock.calls[0]?.[0])).not.toContain('/secret')
-    expect(String(write.mock.calls[0]?.[0])).toContain('schema_version')
-    runtimeLogger({ event: 'test' }, 'private message with spaces', 'error')
-    expect(String(write.mock.calls[1]?.[0])).not.toContain('private message with spaces')
-    expect(String(write.mock.calls[1]?.[0])).toContain('"level":"error"')
+  it('emits production records with the shared schema and recursive redaction', async () => {
+    let serialized = ''
+    const destination = new Writable({ write(chunk, _encoding, callback) { serialized += chunk.toString(); callback() } })
+    const logger = createRuntimeLogger('production', destination)
+    logger.error({ event: 'test', nested: { prompt: 'private', path: '/secret', safe: true } }, 'test')
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    const record = JSON.parse(serialized) as Record<string, unknown>
+    expect(record).toMatchObject({
+      level: 'error', service: 'my_bot_runtime', environment: 'production',
+      schema_version: 1, event: 'test', message: 'test', nested: { safe: true },
+    })
+    expect(record.timestamp).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/)
+    expect(serialized).not.toContain('private')
+    expect(serialized).not.toContain('/secret')
+    destination.end()
   })
 
   it('resolves a project context over HTTP while retaining shared-workspace access', async () => {
