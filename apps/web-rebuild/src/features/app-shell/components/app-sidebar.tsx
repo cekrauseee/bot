@@ -1,0 +1,451 @@
+import { useMemo, useState } from "react"
+import {
+  BotIcon,
+  ChevronDownIcon,
+  LogOutIcon,
+  RefreshCwIcon,
+  SquarePenIcon,
+} from "lucide-react"
+
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarMenuSkeleton,
+  SidebarRail,
+  SidebarTrigger,
+} from "@/components/ui/sidebar"
+import { Spinner } from "@/components/ui/spinner"
+import type { ConversationSummary } from "@/features/app-shell/api"
+import { SidebarConversationRow } from "@/features/app-shell/components/sidebar-conversation-row"
+import { SidebarCreateProjectDialog } from "@/features/app-shell/components/sidebar-create-project-dialog"
+import { SidebarProjectRow } from "@/features/app-shell/components/sidebar-project-row"
+import type { SidebarCatalogController } from "@/features/app-shell/hooks/use-sidebar-catalog"
+import type { User } from "@/features/auth/api"
+
+type AppSidebarProps = {
+  activeConversationId: string | null
+  catalog: SidebarCatalogController
+  onConversationSelect: (conversationId: string | null) => void
+  onSignOut: () => void
+  signingOut: boolean
+  signOutFailed: boolean
+  user: User
+}
+
+function getUserName(user: User) {
+  const name = [user.first_name, user.last_name].filter(Boolean).join(" ")
+  return name || user.email
+}
+
+function getUserInitials(user: User) {
+  const initials = [user.first_name, user.last_name]
+    .filter(Boolean)
+    .map((part) => part?.charAt(0))
+    .join("")
+
+  return (initials || user.email.charAt(0)).toUpperCase()
+}
+
+const newestFirst = (a: ConversationSummary, b: ConversationSummary) =>
+  Date.parse(b.updated_at) - Date.parse(a.updated_at)
+
+const swappedIds = <T extends { id: string }>(
+  items: T[],
+  fromIndex: number,
+  toIndex: number
+) => {
+  const ids = items.map((item) => item.id)
+  ;[ids[fromIndex], ids[toIndex]] = [ids[toIndex], ids[fromIndex]]
+  return ids
+}
+
+export function AppSidebar({
+  activeConversationId,
+  catalog,
+  onConversationSelect,
+  onSignOut,
+  signingOut,
+  signOutFailed,
+  user,
+}: AppSidebarProps) {
+  const userName = getUserName(user)
+  const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(
+    () => new Set()
+  )
+  const pinnedConversations = useMemo(
+    () =>
+      catalog.conversations
+        .filter((conversation) => conversation.pinned_order !== null)
+        .sort(
+          (a, b) =>
+            (a.pinned_order ?? Number.MAX_SAFE_INTEGER) -
+            (b.pinned_order ?? Number.MAX_SAFE_INTEGER)
+        ),
+    [catalog.conversations]
+  )
+  const recentConversations = useMemo(
+    () =>
+      catalog.conversations
+        .filter(
+          (conversation) =>
+            conversation.pinned_order === null &&
+            conversation.project_id === null
+        )
+        .sort(newestFirst),
+    [catalog.conversations]
+  )
+  const projects = useMemo(
+    () =>
+      [...catalog.projects].sort(
+        (a, b) =>
+          (a.sort_order ?? Number.MAX_SAFE_INTEGER) -
+          (b.sort_order ?? Number.MAX_SAFE_INTEGER)
+      ),
+    [catalog.projects]
+  )
+
+  const projectConversations = useMemo(() => {
+    const groups = new Map<string, ConversationSummary[]>()
+    for (const conversation of catalog.conversations) {
+      if (
+        conversation.project_id === null ||
+        conversation.pinned_order !== null
+      ) {
+        continue
+      }
+      const group = groups.get(conversation.project_id) ?? []
+      group.push(conversation)
+      groups.set(conversation.project_id, group)
+    }
+    for (const group of groups.values()) group.sort(newestFirst)
+    return groups
+  }, [catalog.conversations])
+
+  const setProjectOpen = (projectId: string, open: boolean) => {
+    setExpandedProjectIds((current) => {
+      const next = new Set(current)
+      if (open) next.add(projectId)
+      else next.delete(projectId)
+      return next
+    })
+  }
+
+  const moveConversation = async (
+    conversationId: string,
+    projectId: string | null
+  ) => {
+    const moved = await catalog.moveConversation(conversationId, projectId)
+    if (moved && projectId !== null) setProjectOpen(projectId, true)
+  }
+
+  const conversationRow = (
+    conversation: ConversationSummary,
+    reorder?: {
+      onMoveDown?: () => Promise<unknown>
+      onMoveUp?: () => Promise<unknown>
+    }
+  ) => (
+    <SidebarConversationRow
+      key={conversation.id}
+      conversation={conversation}
+      projects={projects}
+      active={activeConversationId === conversation.id}
+      pending={catalog.isPending("conversation", conversation.id)}
+      onSelect={() => onConversationSelect(conversation.id)}
+      onRename={(title) => catalog.renameConversation(conversation.id, title)}
+      onDelete={() => catalog.deleteConversation(conversation.id)}
+      onSetPinned={(pinned) =>
+        catalog.setConversationPinned(conversation.id, pinned)
+      }
+      onMove={(projectId) => moveConversation(conversation.id, projectId)}
+      onMoveUp={reorder?.onMoveUp}
+      onMoveDown={reorder?.onMoveDown}
+    />
+  )
+
+  const hasCatalog =
+    catalog.conversations.length > 0 || catalog.projects.length > 0
+
+  return (
+    <Sidebar collapsible="icon" aria-label="Application navigation">
+      <SidebarHeader>
+        <div className="flex h-8 items-center gap-2 px-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+          <BotIcon
+            aria-hidden="true"
+            className="size-4 shrink-0 group-data-[collapsible=icon]:hidden"
+          />
+          <span className="truncate text-sm font-semibold group-data-[collapsible=icon]:hidden">
+            myBot
+          </span>
+          <SidebarTrigger
+            className="ml-auto group-data-[collapsible=icon]:ml-0"
+            aria-label="Toggle sidebar"
+          />
+        </div>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              tooltip="New conversation"
+              isActive={activeConversationId === null}
+              onClick={() => onConversationSelect(null)}
+            >
+              <SquarePenIcon aria-hidden="true" />
+              <span>New conversation</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarHeader>
+
+      <SidebarContent>
+        {catalog.loading && !hasCatalog ? (
+          <SidebarGroup>
+            <SidebarGroupContent>
+              <SidebarMenu aria-label="Loading conversations and projects">
+                {Array.from({ length: 6 }, (_, index) => (
+                  <SidebarMenuItem key={index}>
+                    <SidebarMenuSkeleton showIcon />
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ) : catalog.catalogError && !hasCatalog ? (
+          <SidebarGroup>
+            <SidebarGroupLabel>Unable to load</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <p
+                className="px-2 pb-2 text-xs text-destructive group-data-[collapsible=icon]:sr-only"
+                role="alert"
+              >
+                {catalog.catalogError}
+              </p>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton onClick={() => void catalog.refresh()}>
+                    <RefreshCwIcon aria-hidden="true" />
+                    <span>Try again</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ) : (
+          <>
+            {catalog.actionError && (
+              <p
+                className="mx-4 my-2 text-xs text-destructive group-data-[collapsible=icon]:sr-only"
+                role="alert"
+              >
+                {catalog.actionError}
+              </p>
+            )}
+            {catalog.catalogError && (
+              <SidebarGroup className="pb-0">
+                <SidebarGroupContent>
+                  <p
+                    className="px-2 text-xs text-destructive group-data-[collapsible=icon]:sr-only"
+                    role="alert"
+                  >
+                    {catalog.catalogError}
+                  </p>
+                  <SidebarMenu>
+                    <SidebarMenuItem>
+                      <SidebarMenuButton
+                        tooltip="Try loading again"
+                        onClick={() => void catalog.refresh()}
+                      >
+                        <RefreshCwIcon aria-hidden="true" />
+                        <span>Try again</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            )}
+
+            {pinnedConversations.length > 0 && (
+              <SidebarGroup className="group-data-[collapsible=icon]:hidden">
+                <SidebarGroupLabel>Pinned</SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {pinnedConversations.map((conversation, index) =>
+                      conversationRow(conversation, {
+                        onMoveUp:
+                          index > 0
+                            ? () =>
+                                catalog.reorderPinnedConversations(
+                                  swappedIds(
+                                    pinnedConversations,
+                                    index,
+                                    index - 1
+                                  )
+                                )
+                            : undefined,
+                        onMoveDown:
+                          index < pinnedConversations.length - 1
+                            ? () =>
+                                catalog.reorderPinnedConversations(
+                                  swappedIds(
+                                    pinnedConversations,
+                                    index,
+                                    index + 1
+                                  )
+                                )
+                            : undefined,
+                      })
+                    )}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            )}
+
+            <SidebarGroup>
+              <SidebarGroupLabel>Projects</SidebarGroupLabel>
+              <SidebarCreateProjectDialog onCreate={catalog.createProject} />
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {projects.length > 0 ? (
+                    projects.map((project, index) => {
+                      const conversations =
+                        projectConversations.get(project.id) ?? []
+                      return (
+                        <SidebarProjectRow
+                          key={project.id}
+                          project={project}
+                          open={expandedProjectIds.has(project.id)}
+                          pending={catalog.isPending("project", project.id)}
+                          conversationCount={conversations.length}
+                          onOpenChange={(open) =>
+                            setProjectOpen(project.id, open)
+                          }
+                          onRename={(name) =>
+                            catalog.renameProject(project.id, name)
+                          }
+                          onDelete={() => catalog.deleteProject(project.id)}
+                          onMoveUp={
+                            index > 0
+                              ? () =>
+                                  catalog.reorderProjects(
+                                    swappedIds(projects, index, index - 1)
+                                  )
+                              : undefined
+                          }
+                          onMoveDown={
+                            index < projects.length - 1
+                              ? () =>
+                                  catalog.reorderProjects(
+                                    swappedIds(projects, index, index + 1)
+                                  )
+                              : undefined
+                          }
+                        >
+                          {conversations.map((conversation) =>
+                            conversationRow(conversation)
+                          )}
+                        </SidebarProjectRow>
+                      )
+                    })
+                  ) : (
+                    <SidebarMenuItem className="px-2 py-1 text-xs text-muted-foreground">
+                      No projects yet
+                    </SidebarMenuItem>
+                  )}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+
+            <SidebarGroup className="group-data-[collapsible=icon]:hidden">
+              <SidebarGroupLabel>Recents</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {recentConversations.length > 0 ? (
+                    recentConversations.map((conversation) =>
+                      conversationRow(conversation)
+                    )
+                  ) : (
+                    <SidebarMenuItem className="px-2 py-1 text-xs text-muted-foreground">
+                      No recent conversations
+                    </SidebarMenuItem>
+                  )}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </>
+        )}
+      </SidebarContent>
+
+      <SidebarFooter>
+        {signOutFailed && (
+          <p
+            role="alert"
+            className="px-2 text-xs text-destructive group-data-[collapsible=icon]:sr-only"
+          >
+            Sign out failed. Try again.
+          </p>
+        )}
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <SidebarMenuButton
+                    tooltip="Account"
+                    className="data-open:bg-sidebar-accent"
+                  />
+                }
+              >
+                <Avatar size="sm">
+                  {user.avatar_url && (
+                    <AvatarImage src={user.avatar_url} alt="" />
+                  )}
+                  <AvatarFallback>{getUserInitials(user)}</AvatarFallback>
+                </Avatar>
+                <span className="min-w-0 flex-1 truncate text-left">
+                  {userName}
+                </span>
+                <ChevronDownIcon
+                  aria-hidden="true"
+                  className="ml-auto transition-transform duration-150 group-data-open/menu-button:rotate-180 motion-reduce:transition-none"
+                />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                side="top"
+                align="start"
+                sideOffset={8}
+                className="min-w-56"
+              >
+                <DropdownMenuGroup>
+                  <DropdownMenuItem disabled={signingOut} onClick={onSignOut}>
+                    {signingOut ? (
+                      <Spinner aria-hidden="true" />
+                    ) : (
+                      <LogOutIcon aria-hidden="true" />
+                    )}
+                    <span>Sign out</span>
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
+      <SidebarRail />
+    </Sidebar>
+  )
+}

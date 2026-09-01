@@ -1,12 +1,4 @@
-type ApiErrorDetail = {
-  code?: string
-  message?: string
-  retry_after_seconds?: number
-}
-
-type ApiErrorBody = {
-  detail?: ApiErrorDetail | Array<{ msg?: string }>
-}
+import { ApiError, apiBaseUrl, apiRequest } from "@/lib/api"
 
 export type User = {
   id: string
@@ -23,57 +15,7 @@ export type OtpChallenge = {
   development_code?: string
 }
 
-export class AuthApiError extends Error {
-  readonly status: number
-  readonly code?: string
-  readonly retryAfterSeconds?: number
-
-  constructor(message: string, status: number, detail?: ApiErrorDetail) {
-    super(message)
-    this.name = "AuthApiError"
-    this.status = status
-    this.code = detail?.code
-    this.retryAfterSeconds = detail?.retry_after_seconds
-  }
-}
-
-const apiBaseUrl = (
-  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000"
-).replace(/\/$/, "")
-
-async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    ...init,
-    credentials: "include",
-    headers: init?.body
-      ? { "Content-Type": "application/json", ...init.headers }
-      : init?.headers,
-  })
-
-  if (response.ok) {
-    if (response.status === 204) return undefined as T
-    return (await response.json()) as T
-  }
-
-  let body: ApiErrorBody | undefined
-  try {
-    body = (await response.json()) as ApiErrorBody
-  } catch {
-    body = undefined
-  }
-
-  const detail = Array.isArray(body?.detail) ? undefined : body?.detail
-  const validationMessage = Array.isArray(body?.detail)
-    ? body.detail[0]?.msg
-    : undefined
-  throw new AuthApiError(
-    detail?.message ??
-      validationMessage ??
-      "The request could not be completed.",
-    response.status,
-    detail
-  )
-}
+export { ApiError as AuthApiError }
 
 export const authApi = {
   googleStartUrl: `${apiBaseUrl}/auth/google/start`,

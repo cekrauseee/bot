@@ -131,3 +131,10 @@
     @apply font-sans;
     }
 }
+
+@media (prefers-reduced-motion: reduce) {
+    [data-slot="sidebar-gap"],
+    [data-slot="sidebar-container"] {
+      transition-duration: 0s;
+    }
+}
