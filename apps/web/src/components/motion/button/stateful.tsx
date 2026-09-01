@@ -17,6 +17,7 @@ import {
 
 import { EASE_OUT, SPRING_SWAP } from "@/lib/ease";
 import { Button, type ButtonProps } from "./base";
+import { cn } from '@/lib/utils';
 
 export type ButtonState = "idle" | "loading" | "success" | "error";
 
@@ -27,26 +28,16 @@ export interface StatefulButtonProps extends Omit<ButtonProps, "children"> {
   successText?: ReactNode;
   errorText?: ReactNode;
   icon?: ReactNode;
+  loadingIcon?: ReactNode;
+  loadingIconKey?: string;
+  /** Allow a loading action such as Stop to remain interactive. */
+  disableWhileLoading?: boolean;
+  iconPosition?: 'start' | 'end';
+  errorTone?: 'default' | 'destructive';
+  contentClassName?: string;
 }
 
-const CASCADE_STAGGER = 0.025;
 const ROLL_BLUR = "blur(6px)";
-
-const CASCADE_LETTER_VARIANTS: Variants = {
-  initial: { opacity: 0, y: "105%", filter: ROLL_BLUR },
-  animate: (delay: number = 0) => ({
-    opacity: 1,
-    y: "0%",
-    filter: "blur(0px)",
-    transition: { ...SPRING_SWAP, delay },
-  }),
-  exit: (delay: number = 0) => ({
-    opacity: 0,
-    y: "-105%",
-    filter: ROLL_BLUR,
-    transition: { duration: 0.16, ease: EASE_OUT, delay: delay * 0.5 },
-  }),
-};
 
 const ICON_VARIANTS: Variants = {
   initial: { opacity: 0, width: 0, scale: 0.7, filter: ROLL_BLUR },
@@ -77,95 +68,65 @@ function IconSlot({
 
   return (
     <motion.span
-      key={keyId}
+      data-slot="stateful-icon"
+      aria-hidden="true"
       variants={ICON_VARIANTS}
       initial={reduce ? { opacity: 0 } : "initial"}
       animate={reduce ? { opacity: 1 } : "animate"}
       exit={reduce ? { opacity: 0 } : "exit"}
       transition={reduce ? { duration: 0.15 } : undefined}
-      className="inline-grid shrink-0 place-items-center overflow-hidden"
+      className="relative inline-grid h-4 w-6 shrink-0 place-items-center overflow-hidden"
     >
-      {children}
+      <AnimatePresence initial={false}>
+        <motion.span
+          key={keyId}
+          initial={reduce ? { opacity: 0 } : { opacity: 0, y: 3, scale: 0.8, filter: 'blur(4px)' }}
+          animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
+          exit={reduce ? { opacity: 0 } : { opacity: 0, y: -3, scale: 0.8, filter: 'blur(4px)' }}
+          transition={reduce ? { duration: 0.12 } : SPRING_SWAP}
+          className="absolute inset-0 grid place-items-center"
+        >
+          {children}
+        </motion.span>
+      </AnimatePresence>
     </motion.span>
   );
 }
 
-function TextSlot({
-  value,
-  children,
-}: {
-  value: string;
-  children: ReactNode;
-}) {
+function TextSlot({ value, children }: { value: string; children: ReactNode }) {
   const reduce = useReducedMotion();
   const measureRef = useRef<HTMLSpanElement>(null);
   const [width, setWidth] = useState<number>();
-  const label = typeof children === "string" ? children : null;
-  const cascade = label !== null && !reduce;
 
   useLayoutEffect(() => {
     const nextWidth = measureRef.current?.offsetWidth;
-    if (nextWidth !== undefined) {
-      setWidth((current) => (current === nextWidth ? current : nextWidth));
-    }
+    if (nextWidth !== undefined) setWidth((current) => current === nextWidth ? current : nextWidth);
   }, [children]);
 
   return (
     <motion.span
-      initial={false}
-      animate={{ width }}
-      transition={reduce ? { duration: 0 } : SPRING_SWAP}
-      className="relative inline-block min-w-max shrink-0 overflow-hidden whitespace-nowrap align-bottom"
+      data-slot="stateful-label"
+      initial={{ width: 0 }}
+      animate={{ width: width ?? 'auto' }}
+      exit={{ width: 0 }}
+      transition={reduce ? { duration: 0 } : { duration: 0.16, ease: EASE_OUT }}
+      className="relative inline-block shrink-0 overflow-hidden whitespace-nowrap align-bottom"
     >
-      <span ref={measureRef} aria-hidden className="invisible inline-block whitespace-nowrap">
-        {cascade
-          ? label.split("").map((char, index) => (
-              <span key={index} className="inline-block whitespace-pre">
-                {char}
-              </span>
-            ))
-          : children}
-      </span>
-
-      {cascade ? (
-        <>
-          <span className="sr-only">{label}</span>
-          <AnimatePresence initial={false}>
-            <motion.span
-              key={`cascade-${value}`}
-              aria-hidden
-              initial="initial"
-              animate="animate"
-              exit="exit"
-              className="absolute left-0 top-0 inline-block whitespace-pre"
-            >
-              {label.split("").map((char, index) => (
-                <motion.span
-                  key={index}
-                  custom={index * CASCADE_STAGGER}
-                  variants={CASCADE_LETTER_VARIANTS}
-                  className="inline-block whitespace-pre will-change-[opacity,filter,transform]"
-                >
-                  {char}
-                </motion.span>
-              ))}
-            </motion.span>
-          </AnimatePresence>
-        </>
-      ) : (
-        <AnimatePresence initial={false}>
-          <motion.span
-            key={`text-${value}`}
-            initial={reduce ? { opacity: 0 } : { opacity: 0, y: 14, filter: ROLL_BLUR }}
-            animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, filter: "blur(0px)" }}
-            exit={reduce ? { opacity: 0 } : { opacity: 0, y: -14, filter: ROLL_BLUR }}
-            transition={reduce ? { duration: 0.15 } : SPRING_SWAP}
-            className="absolute left-0 top-0 inline-block will-change-[opacity,filter,transform]"
-          >
-            {children}
-          </motion.span>
-        </AnimatePresence>
-      )}
+      <span ref={measureRef} aria-hidden className="invisible inline-block whitespace-nowrap">{children}</span>
+      <span className="sr-only">{children}</span>
+      <AnimatePresence initial={false}>
+        <motion.span
+          key={value}
+          aria-hidden
+          initial={reduce ? { opacity: 0 } : { opacity: 0, y: 3 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={reduce ? { opacity: 0 } : { opacity: 0, y: -3 }}
+          transition={{ duration: 0.12, ease: EASE_OUT }}
+          className="absolute left-0 top-0 inline-block whitespace-nowrap"
+        >
+          {children}
+        </motion.span>
+      </AnimatePresence>
     </motion.span>
   );
 }
@@ -179,6 +140,13 @@ export const StatefulButton = forwardRef<HTMLButtonElement, StatefulButtonProps>
       successText = "Done",
       errorText = "Try again",
       icon,
+      loadingIcon,
+      loadingIconKey = 'loading',
+      disableWhileLoading = true,
+      iconPosition = 'start',
+      errorTone = 'default',
+      contentClassName,
+      className,
       disabled,
       ...rest
     },
@@ -194,40 +162,32 @@ export const StatefulButton = forwardRef<HTMLButtonElement, StatefulButtonProps>
             ? errorText
             : children;
     const textKey = typeof stateText === "string" ? `${state}-${stateText}` : state;
+    const hasText = stateText !== null && stateText !== undefined && stateText !== false && stateText !== '';
+    const stateIcon = state === 'loading'
+      ? loadingIcon ?? <Loader2 className="size-4 motion-safe:animate-spin" />
+      : state === 'success' ? <Check className="size-4" />
+      : state === 'error' ? <X className="size-4" /> : icon;
 
     return (
       <Button
         ref={ref}
-        disabled={disabled || isBusy}
+        disabled={disabled || (isBusy && disableWhileLoading)}
         aria-busy={isBusy}
         whileHover={undefined}
+        className={cn(className, isBusy && 'disabled:opacity-100', state === 'error' && errorTone === 'destructive' &&
+          'border-destructive/20 bg-destructive/10 text-destructive hover:bg-destructive/15 hover:text-destructive focus-visible:outline-destructive')}
         {...rest}
       >
-        <span aria-live="polite" className="relative inline-flex items-center justify-center overflow-hidden">
+        <span aria-live="polite" className={cn('relative inline-flex items-center justify-center overflow-hidden', iconPosition === 'end' && 'flex-row-reverse', contentClassName)}>
           <AnimatePresence initial={false}>
-            {state === "loading" ? (
-              <IconSlot keyId="loading-icon">
-                <Loader2 aria-hidden="true" className="size-4 motion-safe:animate-spin" />
-              </IconSlot>
-            ) : null}
-            {state === "success" ? (
-              <IconSlot keyId="success-icon">
-                <Check aria-hidden="true" className="size-4" />
-              </IconSlot>
-            ) : null}
-            {state === "error" ? (
-              <IconSlot keyId="error-icon">
-                <X aria-hidden="true" className="size-4" />
+            {stateIcon ? (
+              <IconSlot key="state-icon" keyId={state === 'loading' ? loadingIconKey : state}>
+                {stateIcon}
               </IconSlot>
             ) : null}
           </AnimatePresence>
-
-          <TextSlot value={textKey}>{stateText}</TextSlot>
-
           <AnimatePresence initial={false}>
-            {state === "idle" && icon ? (
-              <IconSlot keyId="idle-icon">{icon}</IconSlot>
-            ) : null}
+            {hasText ? <TextSlot key="state-label" value={textKey}>{stateText}</TextSlot> : null}
           </AnimatePresence>
         </span>
       </Button>

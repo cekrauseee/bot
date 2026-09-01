@@ -136,16 +136,22 @@ export async function migrateDatabase() {
   })
 }
 
+export async function checkDatabase() {
+  await run(npmCommand, ['run', 'db:check'], {
+    label: 'Check the database schema and migration history',
+  })
+}
+
 export async function buildEmailPackage() {
   await run(npmCommand, ['run', 'email:build'], {
     label: 'Build the transactional email package for the API',
   })
 }
 
-export async function prepareDevelopment({ dependencies = 'if-missing' } = {}) {
+export async function prepareDevelopment({ dependencies = 'if-missing', environment } = {}) {
   await assertDevelopmentPrerequisites()
-  const environment = await prepareEnvironment()
-  printEnvironmentSummary(environment)
+  const preparedEnvironment = environment ?? await prepareEnvironment()
+  printEnvironmentSummary(preparedEnvironment)
 
   if (dependencies === 'always' || !(await dependenciesAreInstalled())) {
     await installDependencies()
@@ -154,5 +160,6 @@ export async function prepareDevelopment({ dependencies = 'if-missing' } = {}) {
   await buildEmailPackage()
   await startInfrastructure()
   await migrateDatabase()
-  return environment
+  await checkDatabase()
+  return preparedEnvironment
 }

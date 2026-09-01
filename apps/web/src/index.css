@@ -26,6 +26,8 @@
   --color-success: var(--success);
   --color-reasoning-fill: var(--reasoning-fill);
   --color-reasoning-track: var(--reasoning-track);
+  --color-message-user: var(--message-user);
+  --color-message-user-foreground: var(--message-user-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -70,6 +72,8 @@
   --success: oklch(0.55 0.15 145);
   --reasoning-fill: oklch(0.67 0.19 245);
   --reasoning-track: oklch(0.92 0.01 245);
+  --message-user: oklch(0.145 0 0);
+  --message-user-foreground: oklch(0.985 0 0);
   --border: oklch(0.9 0 0);
   --input: oklch(0.9 0 0);
   --ring: oklch(0.42 0 0);
@@ -90,40 +94,42 @@
 }
 
 .dark {
-  --background: oklch(0.12 0 0);
-  --foreground: oklch(0.97 0 0);
-  --card: oklch(0.16 0 0);
-  --card-foreground: oklch(0.97 0 0);
-  --popover: oklch(0.16 0 0);
-  --popover-foreground: oklch(0.97 0 0);
-  --primary: oklch(0.94 0 0);
-  --primary-foreground: oklch(0.17 0 0);
-  --secondary: oklch(0.22 0 0);
-  --secondary-foreground: oklch(0.97 0 0);
-  --muted: oklch(0.22 0 0);
-  --muted-foreground: oklch(0.72 0 0);
-  --accent: oklch(0.22 0 0);
-  --accent-foreground: oklch(0.97 0 0);
+  --background: oklch(0.205 0 0);
+  --foreground: oklch(0.93 0 0);
+  --card: oklch(0.255 0 0);
+  --card-foreground: oklch(0.93 0 0);
+  --popover: oklch(0.265 0 0);
+  --popover-foreground: oklch(0.93 0 0);
+  --primary: oklch(0.93 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.275 0 0);
+  --secondary-foreground: oklch(0.93 0 0);
+  --muted: oklch(0.31 0 0);
+  --muted-foreground: oklch(0.79 0 0);
+  --accent: oklch(0.31 0 0);
+  --accent-foreground: oklch(0.93 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --success: oklch(0.75 0.16 145);
   --reasoning-fill: oklch(0.72 0.18 250);
-  --reasoning-track: oklch(0.25 0.02 250);
-  --border: oklch(1 0 0 / 12%);
+  --reasoning-track: oklch(0.29 0.02 250);
+  --message-user: oklch(0.31 0 0);
+  --message-user-foreground: oklch(0.93 0 0);
+  --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 16%);
-  --ring: oklch(0.72 0 0);
+  --ring: oklch(0.74 0 0);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.68 0 0);
   --chart-3: oklch(0.52 0 0);
   --chart-4: oklch(0.4 0 0);
   --chart-5: oklch(0.3 0 0);
-  --sidebar: oklch(0.145 0 0);
-  --sidebar-foreground: oklch(0.97 0 0);
-  --sidebar-primary: oklch(0.94 0 0);
-  --sidebar-primary-foreground: oklch(0.17 0 0);
-  --sidebar-accent: oklch(0.22 0 0);
-  --sidebar-accent-foreground: oklch(0.97 0 0);
-  --sidebar-border: oklch(1 0 0 / 12%);
-  --sidebar-ring: oklch(0.72 0 0);
+  --sidebar: oklch(0.285 0 0);
+  --sidebar-foreground: oklch(0.93 0 0);
+  --sidebar-primary: oklch(0.93 0 0);
+  --sidebar-primary-foreground: oklch(0.205 0 0);
+  --sidebar-accent: oklch(0.33 0 0);
+  --sidebar-accent-foreground: oklch(0.93 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.74 0 0);
 }
 
 @layer base {
@@ -134,6 +140,7 @@
   html {
     @apply font-sans antialiased;
     color-scheme: light;
+    overscroll-behavior: none;
   }
 
   html.dark {
@@ -141,7 +148,26 @@
   }
 
   body {
-    @apply min-h-svh min-w-80 bg-background text-foreground;
+    @apply min-h-svh min-w-80 select-none bg-background text-foreground;
+    overscroll-behavior: none;
+  }
+
+  input,
+  textarea,
+  [contenteditable=""],
+  [contenteditable="true"],
+  [contenteditable="plaintext-only"] {
+    @apply select-text;
+  }
+
+  /* Controls stay unselectable inside readable content that opts into selection. */
+  button,
+  [role="button"],
+  [role="menuitem"],
+  [role="option"],
+  svg,
+  img {
+    @apply select-none;
   }
 
   button,
@@ -167,4 +193,33 @@
 ::selection {
   color: var(--foreground);
   background: color-mix(in oklch, var(--foreground) 16%, transparent);
+}
+
+/* Auth route handoff; leave the beUI theme transition's snapshots untouched. */
+html:not([data-beui-vt])::view-transition-group(root) {
+  animation-duration: 160ms;
+}
+
+html:not([data-beui-vt])::view-transition-old(root) {
+  animation-duration: 120ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html:not([data-beui-vt])::view-transition-new(root) {
+  animation-duration: 160ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not([data-beui-vt])::view-transition-group(root),
+  html:not([data-beui-vt])::view-transition-old(root),
+  html:not([data-beui-vt])::view-transition-new(root) {
+    animation: none;
+  }
+}
+
+[data-variant="solid"] [data-slot="message-bubble-content"]::selection,
+[data-variant="solid"] [data-slot="message-bubble-content"] *::selection {
+  color: var(--foreground);
+  background: var(--background);
 }

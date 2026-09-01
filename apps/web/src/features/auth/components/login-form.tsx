@@ -9,6 +9,7 @@ import { useLoginForm } from '@/features/auth/hooks/use-login-form'
 import { authApi } from '@/features/auth/services/auth-api'
 import { SPRING_SWAP } from '@/lib/ease'
 import { cn } from '@/lib/utils'
+import { AuthStepTransition } from './auth-step-transition'
 
 function CountdownValue({ value }: { value: number }) {
   const reduceMotion = useReducedMotion()
@@ -69,7 +70,7 @@ export function LoginForm() {
   }, [])
 
   useEffect(() => {
-    if (step === 'email') emailInputRef.current?.focus()
+    if (step === 'email') emailInputRef.current?.focus({ preventScroll: true })
   }, [step])
 
   useEffect(() => {
@@ -82,8 +83,7 @@ export function LoginForm() {
     }
   }, [codeError])
 
-  if (step === 'code') {
-    return (
+  const content = step === 'code' ? (
       <div key="code-step" className="flex flex-col gap-4">
         <div className="flex flex-col gap-1 text-start">
           <h1 className="text-balance text-xl font-semibold leading-tight tracking-tight">
@@ -160,10 +160,7 @@ export function LoginForm() {
 
         <span className="sr-only" aria-live="polite" role="status">{status}</span>
       </div>
-    )
-  }
-
-  return (
+    ) : (
     <div key="email-step" className="flex flex-col gap-5">
       <div className="flex flex-col gap-1 text-start">
         <h1 className="text-balance text-xl font-semibold leading-tight tracking-tight">
@@ -239,4 +236,6 @@ export function LoginForm() {
       </form>
     </div>
   )
+
+  return <AuthStepTransition step={step}>{content}</AuthStepTransition>
 }

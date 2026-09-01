@@ -9,17 +9,22 @@ myBot is a portfolio project for an AI agent inspired by the clarity and restrai
 The current implementation includes:
 
 - a Vite and React frontend;
-- lazy-loaded public login and protected root pages;
+- lazy-loaded public login and protected conversation routes;
 - light and dark appearances with the system preference as the default;
 - beUI inputs, buttons, and theme transition installed through its shadcn registry;
-- an Elysia application API with health and authentication endpoints;
-- an independent FastAPI boundary for future model capabilities;
+- an Elysia application API with health, authentication, conversation, and streaming endpoints;
+- an authenticated FastAPI boundary using LangChain and OpenAI Responses;
+- durable LangGraph checkpoints, resumable questions, plans, and recursive child agents;
+- a private Vercel Sandbox runtime for a global filesystem, unprivileged processes, and run-scoped browsers;
 - passwordless email OTP and Google OpenID Connect login;
 - PostgreSQL user, identity, and session persistence;
 - Redis-backed OTP challenges and abuse limits;
-- a repository-owned React Email component rendered locally and sent through Resend.
+- a repository-owned React Email component rendered locally and sent through Resend;
+- persistent multi-conversation text chat with reasoning summaries, web search, and Markdown responses;
+- GPT-5.6 Sol, Terra, and Luna plus Grok 4.6 and 4.3 with provider-aware reasoning and processing controls;
+- durable background runs, cursor-based replay, and transient browser picture-in-picture frames.
 
-Agent conversations, model integration, and production deployment are not implemented yet.
+Production deployment is not implemented yet. Real model calls require the corresponding server-side provider key. Runtime tools additionally require Vercel Sandbox credentials.
 
 ## Core Concepts
 
@@ -27,6 +32,8 @@ Agent conversations, model integration, and production deployment are not implem
 - **Feature-based frontend:** pages compose domain features, while reusable infrastructure and brand components remain shared.
 - **Registry-owned UI source:** beUI components are copied into the application by the shadcn CLI and reviewed as local source.
 - **Separated backends:** Node.js owns product data and HTTP behavior; Python is reserved for model-provider and AI workloads.
+- **Global agent workspace:** conversations share one durable user filesystem, while browsers and run state retain explicit ownership.
+- **Project folders:** projects associate conversations with stable workspace directories. Runs start there without restricting access to other workspace files; folder creation is lazy and no filesystem interface is exposed.
 - **Progressive backend:** each service exposes only verified behavior; new domains add their own feature modules and tests.
 
 ## Boundaries

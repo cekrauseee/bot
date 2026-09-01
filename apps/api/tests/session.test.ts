@@ -23,6 +23,7 @@ describe('session cookies', () => {
       SESSION_SECRET: 'session-secret-that-is-at-least-32-characters-long',
       OTP_PEPPER: 'otp-pepper-that-is-at-least-32-characters-long',
       RATE_LIMIT_PEPPER: 'rate-limit-pepper-that-is-at-least-32-characters',
+      AI_SERVICE_TOKEN: 'ai-service-token-that-is-at-least-32-characters',
       GOOGLE_CLIENT_ID: 'client.apps.googleusercontent.com',
       GOOGLE_CLIENT_SECRET: 'google-client-secret',
       RESEND_API_KEY: 're_live_valid-key',

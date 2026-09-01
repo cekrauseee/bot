@@ -10,6 +10,7 @@ export type OtpRequest = {
   challenge_id: string
   expires_in_seconds: number
   resend_after_seconds: number
+  development_code?: string
 }
 
 type ApiErrorDetail = {

@@ -30,10 +30,16 @@ OTP request responses are identical for new and existing email addresses. Errors
 - Production cookies are host-only, `Secure`, `HttpOnly`, `SameSite=Lax`, and use the `__Host-` prefix.
 - Credentialed CORS uses one configured web origin. Production state-changing requests require the same `Origin`.
 
+## Development OTP
+
+With API `ENVIRONMENT=development`, OTP issuance skips Resend and includes `development_code` in the non-cacheable challenge response. The Vite development frontend prefills the six-digit code after both request and resend; users still submit verification normally. Issuance skips cooldown and email/IP request limits and returns `resend_after_seconds: 0`, even if old cooldown keys still exist. Each request atomically deletes the previous challenge and installs a new one. Random code generation, HMAC storage, expiry, verification attempt limits, and single-use consumption are unchanged.
+
+Test and production environments use the email sender and never expose the code in the response. Production frontend builds ignore the development field. This convenience removes email ownership proof in development: use only isolated development databases and never expose a development API publicly or point it at real user data.
+
 ## Email Template
 
 `packages/email/emails/login-otp.tsx` is the versioned React Email component and source of truth. The `@my-bot/email` workspace package exports the component and subject. The API supplies the generated OTP and expiry as props and sends the element through the Resend Node SDK `react` field without a hosted template or generated HTML/text artifacts. The API sends from `RESEND_FROM`; production uses `myBot <mybot@cekrause.eu>`.
 
 ## Production Topology
 
-Configure the web and API as sibling HTTPS subdomains. Register the exact API callback URI in the Google OAuth client. Set the web build's `VITE_API_BASE_URL` to the API sibling origin. If a serving proxy is present, list its immediate IP address in `TRUSTED_PROXY_HOSTS`; the API then accepts only a single valid `X-Forwarded-For` address from that peer, and ignores forwarded headers from direct or untrusted peers.
+Configure the web and API as sibling HTTPS subdomains. Register the exact `GOOGLE_REDIRECT_URI` in the Google OAuth client and set `VITE_API_BASE_URL` in the canonical root environment to the API sibling origin. The API uses the direct socket peer for IP-based limits and does not trust forwarded client-IP headers.

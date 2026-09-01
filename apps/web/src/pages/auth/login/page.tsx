@@ -1,24 +1,27 @@
-import { ThemeToggle } from '@/components/motion/theme-toggle'
+import { useEffect } from 'react'
+
 import { LoginForm } from '@/features/auth/components/login-form'
+import { PageEntrance, PageEntranceItem } from '@/components/page-entrance'
 
 export function LoginPage() {
-  return (
-    <main className="relative flex min-h-svh flex-col">
-      <header className="mx-auto flex w-full max-w-4xl justify-end px-5 py-4 sm:px-6">
-        <ThemeToggle
-          className="relative size-9 rounded-full border border-border bg-background text-foreground shadow-sm transition-colors after:absolute after:left-1/2 after:top-1/2 after:size-11 after:-translate-x-1/2 after:-translate-y-1/2 hover:bg-muted"
-          iconClassName="size-3.5"
-          start="top-right"
-          variant="circle"
-        />
-      </header>
+  useEffect(() => {
+    document.title = 'Sign in · myBot'
+  }, [])
 
+  return (
+    <PageEntrance>
+    <main className="relative flex min-h-svh flex-col">
       <section className="mx-auto flex w-full max-w-xl flex-1 items-center px-5 py-8 sm:px-6">
         <div className="mx-auto flex w-full max-w-xs flex-col gap-5">
-          <span className="text-sm font-semibold tracking-tight">myBot</span>
+          <PageEntranceItem index={0} count={3}>
+            <span className="text-sm font-semibold tracking-tight">myBot</span>
+          </PageEntranceItem>
 
-          <LoginForm />
+          <PageEntranceItem index={1} count={3}>
+            <LoginForm />
+          </PageEntranceItem>
 
+          <PageEntranceItem index={2} count={3}>
           <p className="text-start text-xs leading-relaxed text-muted-foreground">
             By continuing, you agree to the{' '}
             <a
@@ -36,8 +39,10 @@ export function LoginPage() {
             </a>
             .
           </p>
+          </PageEntranceItem>
         </div>
       </section>
     </main>
+    </PageEntrance>
   )
 }

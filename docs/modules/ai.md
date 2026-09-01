@@ -2,13 +2,14 @@
 
 ## Responsibility
 
-`apps/ai` is the Python boundary for model providers, inference orchestration, and future AI-specific workloads. It does not own browser authentication, user persistence, sessions, transactional email, or product HTTP contracts.
+`apps/ai` is the Python boundary for model providers and agent execution. It does not own browser authentication, user persistence, sessions, transactional email, or product HTTP contracts.
 
 ## Structure
 
 - `src/my_bot_ai/main.py`: FastAPI application factory and exported ASGI app.
 - `src/my_bot_ai/config.py`: typed service configuration.
 - `src/my_bot_ai/features`: feature-owned routers and future model integrations.
+- `src/my_bot_ai/features/agent`: authenticated agent request schema, LangChain model factory, event normalization, and SSE framing.
 - `tests`: isolated service tests.
 
 ## Current Contract
@@ -19,8 +20,18 @@
 {"status": "ok", "service": "ai"}
 ```
 
-The service runs on port `8001` in local development. The application API does not call it yet, so it can evolve without coupling product authentication or storage to a model runtime.
+The service runs on port `8001` in local development and is called only by the application API.
+
+`POST /agent/stream` accepts only `Authorization: Bearer <AI_SERVICE_TOKEN>`. Its strict v2 request includes user, workspace, run, conversation, and turn identifiers; the frozen working directory; ordered text messages; task-plan context; model settings; and optional resume input. The response envelope repeats the run and turn identifiers and emits ordered provider-neutral events for checkpoints, reasoning, text, web search, plan updates, runtime tools, child agents, questions, browser frames, completion, and failure.
+
+The model catalog supports GPT-5.6 Sol, Terra, and Luna through OpenAI plus Grok 4.6 and 4.3 through xAI. Each model resolves only supported reasoning efforts and processing modes. OpenAI uses the Responses API, built-in web search, reasoning summaries, and `store=false`; xAI exposes only explicit reasoning summaries. Provider-native blocks, raw chain-of-thought, credentials, and provider errors never cross the service boundary.
+
+The root LangGraph uses the application run UUID as its thread ID and a PostgreSQL checkpointer as durable authority. Child agents derive deterministic nested thread IDs from tool calls, can delegate recursively, and share the root run's runtime tools. Resume processing verifies the pending question and reconciles the latest checkpoint before invoking again, so stale API text or an already-consumed answer is not replayed.
+
+Runtime tools call `apps/runtime` with `RUNTIME_SERVICE_TOKEN`. Filesystem and shell operations start in the run's persisted `working_directory`; absolute paths remain constrained to `/workspace`. Browser captures are removed from model-visible tool results and emitted as transient frames.
+
+The service reads the canonical root `.env`. `ENVIRONMENT`, `AI_BASE_URL`, `AI_SERVICE_TOKEN`, and `RUNTIME_BASE_URL` are required. `DATABASE_URL`, `RUNTIME_SERVICE_TOKEN`, `OPENAI_API_KEY`, and `XAI_API_KEY` activate their corresponding durable or external capabilities. Its development runner binds to the host and port declared by `AI_BASE_URL`. A real turn returns a safe service-unavailable response when the selected provider is not configured. Production requires a strong internal token, at least one provider key, PostgreSQL checkpoints, and a strong runtime token.
 
 ## Dependency Management
 
-`pyproject.toml` defines the Python 3.14 runtime and development dependencies. `uv.lock` records the resolved environment. Keep product-neutral AI libraries here; dependencies used only by the Node application API belong to `apps/api`. The minimal `package.json` is a Turbo discovery wrapper: its `dev`, `lint`, and `test` scripts delegate to `uv`; it does not duplicate Python dependencies in npm.
+`pyproject.toml` defines Python, FastAPI, LangChain, LangGraph PostgreSQL checkpoints, OpenAI, xAI, and structured logging dependencies. `uv.lock` records the resolved environment. The minimal `package.json` is a Turbo discovery wrapper: its scripts delegate to `uv`; it does not duplicate Python dependencies in npm.

@@ -1,19 +1,18 @@
 import {
-  Check,
-  Circle,
   FileText,
   Globe2,
-  ImageIcon,
   MessageSquare,
   PencilLine,
   Search,
-  Sparkles,
   SquareTerminal,
+  Waypoints,
   Wrench,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import type { ReactNode } from "react";
 import { EASE_OUT, SPRING_LAYOUT } from "@/lib/ease";
 import { cn } from "@/lib/utils";
+import { MarkdownContent } from "../messages/markdown-response";
 import type {
   AgentActivityItem,
   AgentActivitySearch,
@@ -24,53 +23,113 @@ import type {
   AgentSearchResult,
 } from "./types";
 
+function ActivityRowLayout({
+  icon,
+  label,
+  detail,
+  trailing,
+  labelClassName,
+  detailClassName,
+}: {
+  icon?: ReactNode;
+  label: ReactNode;
+  detail?: ReactNode;
+  trailing?: ReactNode;
+  labelClassName?: string;
+  detailClassName?: string;
+}) {
+  const title = [label, detail]
+    .filter(
+      (value): value is string | number =>
+        typeof value === "string" || typeof value === "number",
+    )
+    .map(String)
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <div
+      title={title || undefined}
+      className="flex min-h-6 w-full min-w-0 max-w-full items-center gap-2 rounded-md leading-5"
+    >
+      {icon ? (
+        <span
+          aria-hidden="true"
+          className="grid size-3.5 shrink-0 place-items-center text-muted-foreground [&_svg]:size-3.5 [&_svg]:stroke-[1.5]"
+        >
+          {icon}
+        </span>
+      ) : null}
+      <span className="min-w-0 flex-1 truncate text-muted-foreground">
+        <span className={labelClassName}>{label}</span>
+        {detail != null ? (
+          <>
+            <span className="text-muted-foreground">
+              {" · "}
+            </span>
+            <span
+              className={cn(
+                "text-muted-foreground",
+                detailClassName,
+              )}
+            >
+              {detail}
+            </span>
+          </>
+        ) : null}
+      </span>
+      {trailing ? <span className="shrink-0">{trailing}</span> : null}
+    </div>
+  );
+}
+
 function StepRow({ item }: { item: AgentActivityStep }) {
   const state = item.status ?? "complete";
 
   return (
-    <div className="flex min-h-7 items-start gap-2.5 rounded-md px-1.5 py-1">
-      <span
-        aria-hidden="true"
-        className="mt-0.5 grid size-4 shrink-0 place-items-center text-muted-foreground/70"
-      >
-        {state === "complete" ? (
-          <Check className="size-4" strokeWidth={1.8} />
-        ) : state === "active" ? (
-          <span className="relative grid size-3 place-items-center">
-            <motion.span
-              className="absolute inset-0 rounded-full bg-foreground/10"
-              animate={{ opacity: [0.35, 0.8, 0.35] }}
-              transition={{ duration: 1.5, repeat: Number.POSITIVE_INFINITY }}
-            />
-            <span className="size-1.5 rounded-full bg-foreground/60" />
-          </span>
-        ) : (
-          <Circle className="size-3" strokeWidth={1.5} />
-        )}
-      </span>
-      <span
-        className={cn(
-          "min-w-0 flex-1 leading-5",
-          state === "pending" ? "text-muted-foreground/55" : "text-foreground/90",
-        )}
-      >
-        {item.label}
-      </span>
-      {item.meta ? (
-        <span className="shrink-0 leading-5 text-muted-foreground/55">
-          {item.meta}
-        </span>
+    <NarrativeRow
+      className={
+        state === "pending"
+          ? "text-muted-foreground"
+          : state === "active"
+            ? "text-foreground"
+            : undefined
+      }
+    >
+      {item.label}
+      {item.meta != null ? (
+        <span className="text-muted-foreground"> · {item.meta}</span>
       ) : null}
+    </NarrativeRow>
+  );
+}
+
+function NarrativeRow({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div
+      className={cn(
+        "min-h-6 w-full min-w-0 max-w-full whitespace-pre-wrap py-0.5 text-sm leading-6 text-foreground/90 [overflow-wrap:anywhere]",
+        className,
+      )}
+    >
+      {children}
     </div>
   );
 }
 
 function TextRow({ item }: { item: AgentActivityText }) {
-  return (
-    <div className="rounded-md px-1.5 py-1 leading-5 text-foreground/80">
-      {item.content}
-    </div>
-  );
+  if (item.format === "markdown" && typeof item.content === "string") {
+    return (
+      <div className="w-full min-w-0 max-w-full text-sm leading-6 text-foreground/90 [overflow-wrap:anywhere]">
+        <MarkdownContent
+          content={item.content}
+          status={item.status ?? "complete"}
+          variant="reasoning"
+        />
+      </div>
+    );
+  }
+  return <NarrativeRow>{item.content}</NarrativeRow>;
 }
 
 function SearchResultRow({
@@ -78,35 +137,50 @@ function SearchResultRow({
 }: {
   result: AgentSearchResult;
 }) {
+  const title = [result.title, result.domain]
+    .filter(
+      (value): value is string | number =>
+        typeof value === "string" || typeof value === "number",
+    )
+    .map(String)
+    .filter(Boolean)
+    .join(" · ");
   const content = (
     <>
       <span
         aria-hidden="true"
-        className="grid size-5 shrink-0 place-items-center text-muted-foreground"
+        className="grid size-3.5 shrink-0 place-items-center text-muted-foreground [&_svg]:size-3.5 [&_svg]:stroke-[1.5]"
       >
         {result.icon ?? <Globe2 className="size-3" strokeWidth={2} />}
       </span>
-      <span className="min-w-0 truncate font-medium text-foreground/90">
+      <span className="min-w-0 flex-1 truncate text-muted-foreground">
         {result.title}
+        {result.domain ? (
+          <>
+            <span className="text-muted-foreground">
+              {" · "}
+            </span>
+            <span className="text-muted-foreground">
+              {result.domain}
+            </span>
+          </>
+        ) : null}
       </span>
-      {result.domain ? (
-        <span className="min-w-0 truncate text-muted-foreground/55">
-          {result.domain}
-        </span>
-      ) : null}
     </>
   );
   const className = cn(
-    "flex min-h-7 items-center gap-2 rounded-md px-1.5 py-1 text-left outline-none transition-colors",
-    result.url && "focus-visible:ring-2 focus-visible:ring-ring",
+    "flex min-h-6 w-full min-w-0 max-w-full items-center gap-2 rounded-md text-left leading-5 outline-none transition-colors",
+    result.url && "hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
   );
 
   return result.url ? (
-    <a href={result.url} className={className}>
+    <a href={result.url} title={title || undefined} className={className}>
       {content}
     </a>
   ) : (
-    <div className={className}>{content}</div>
+    <div title={title || undefined} className={className}>
+      {content}
+    </div>
   );
 }
 
@@ -124,18 +198,24 @@ function SearchRow({ item }: { item: AgentActivitySearch }) {
       };
 
   return (
-    <div className="flex flex-col gap-0.5">
-      <div className="flex min-h-7 items-center gap-2.5 rounded-md px-1.5 py-1 text-foreground/80">
-        <Search aria-hidden="true" className="size-4 shrink-0" strokeWidth={1.7} />
-        <span className="min-w-0 truncate">{item.query}</span>
-      </div>
+    <div className="flex w-full min-w-0 max-w-full flex-col gap-2">
+      <ActivityRowLayout
+        icon={<Search />}
+        label={item.query}
+        trailing={item.moreCount ? (
+          <span className="text-muted-foreground">
+            +{item.moreCount} more
+          </span>
+        ) : undefined}
+      />
       {item.results?.length ? (
-        <div className="flex flex-col gap-0.5 pl-4">
+        <div className="flex min-w-0 max-w-full flex-col gap-2 ps-5.5">
           <AnimatePresence initial mode="popLayout">
             {item.results.map((result) => (
               <motion.div
                 layout="position"
                 key={result.id}
+                className="w-full min-w-0 max-w-full"
                 initial={enter}
                 animate={visible}
                 exit={exit}
@@ -147,89 +227,79 @@ function SearchRow({ item }: { item: AgentActivitySearch }) {
           </AnimatePresence>
         </div>
       ) : null}
-      <AnimatePresence initial>
-        {item.moreCount ? (
-          <motion.div
-            key="more-results"
-            initial={enter}
-            animate={visible}
-            exit={exit}
-            transition={transition}
-            className="px-1.5 py-1 pl-8 text-muted-foreground/55"
-          >
-            +{item.moreCount} more
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
     </div>
   );
 }
 
 function ActionIcon({ action }: { action: string }) {
-  if (action === "read") return <FileText className="size-4" />;
-  if (action === "edit" || action === "write") {
+  const normalized = action.toLowerCase();
+  if (normalized === "read") return <FileText className="size-4" />;
+  if (
+    normalized === "edit" ||
+    normalized === "write" ||
+    normalized === "updated"
+  ) {
     return <PencilLine className="size-4" />;
   }
-  if (action === "run") return <SquareTerminal className="size-4" />;
+  if (normalized === "run" || normalized === "executed") {
+    return <SquareTerminal className="size-4" />;
+  }
   return <Wrench className="size-4" />;
 }
 
 function ToolRow({ item }: { item: AgentActivityTool }) {
   const action = item.action.charAt(0).toUpperCase() + item.action.slice(1);
+  const changes =
+    typeof item.additions === "number" || typeof item.deletions === "number" ? (
+      <span className="flex items-center gap-2 font-mono text-xs tabular-nums">
+        {typeof item.additions === "number" ? (
+          <span className="text-success">+{item.additions}</span>
+        ) : null}
+        {typeof item.deletions === "number" ? (
+          <span className="text-destructive">−{item.deletions}</span>
+        ) : null}
+      </span>
+    ) : undefined;
 
   return (
-    <div className="flex min-h-8 min-w-0 items-center gap-2.5 rounded-md px-1.5 py-0.5 leading-5">
-      <span
-        aria-hidden="true"
-        className="grid size-4 shrink-0 place-items-center text-muted-foreground/70"
-      >
-        <ActionIcon action={item.action} />
-      </span>
-      <span className="shrink-0 font-medium text-foreground/90">{action}</span>
-      <span className="min-w-0 flex-1 truncate rounded-lg bg-muted/80 px-2.5 py-1 font-mono text-xs text-muted-foreground/70">
-        {item.target}
-      </span>
-      {typeof item.additions === "number" || typeof item.deletions === "number" ? (
-        <span className="flex shrink-0 items-center gap-2 font-mono tabular-nums">
-          {typeof item.additions === "number" ? (
-            <span className="text-success">+{item.additions}</span>
-          ) : null}
-          {typeof item.deletions === "number" ? (
-            <span className="text-destructive">−{item.deletions}</span>
-          ) : null}
-        </span>
-      ) : null}
-    </div>
+    <ActivityRowLayout
+      icon={<ActionIcon action={item.action} />}
+      label={action}
+      detail={item.target}
+      trailing={changes}
+      detailClassName="font-mono"
+    />
   );
 }
 
 function TraceIcon({ kind }: { kind: AgentActivityTrace["kind"] }) {
-  if (kind === "thinking") return <Sparkles className="size-4" />;
-  if (kind === "message") return <MessageSquare className="size-4" />;
+  if (kind === "message" || kind === "request") {
+    return <MessageSquare className="size-4" />;
+  }
   if (kind === "write") return <PencilLine className="size-4" />;
   if (kind === "run") return <SquareTerminal className="size-4" />;
-  if (kind === "read") return <ImageIcon className="size-4" />;
-  return <Wrench className="size-4" />;
+  if (kind === "read") return <FileText className="size-4" />;
+  return <Waypoints className="size-4" />;
 }
 
 function TraceRow({ item }: { item: AgentActivityTrace }) {
+  if (item.kind === "thinking" || item.kind === "message") {
+    return (
+      <NarrativeRow>
+        {item.label}
+        {item.detail != null ? (
+          <span className="text-muted-foreground"> · {item.detail}</span>
+        ) : null}
+      </NarrativeRow>
+    );
+  }
+
   return (
-    <div className="grid min-h-8 grid-cols-[1rem_auto_minmax(0,1fr)] items-center gap-2.5 rounded-md px-1.5 py-0.5">
-      <span
-        aria-hidden="true"
-        className="grid size-4 place-items-center text-muted-foreground/70"
-      >
-        {item.icon ?? <TraceIcon kind={item.kind} />}
-      </span>
-      <span className="font-medium text-foreground/90">{item.label}</span>
-      {item.detail ? (
-        <span className="min-w-0 truncate rounded-lg bg-muted/80 px-2.5 py-1 font-mono text-xs text-muted-foreground/70">
-          {item.detail}
-        </span>
-      ) : (
-        <span />
-      )}
-    </div>
+    <ActivityRowLayout
+      icon={item.icon ?? <TraceIcon kind={item.kind} />}
+      label={item.label}
+      detail={item.detail}
+    />
   );
 }
 

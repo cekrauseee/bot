@@ -1,58 +1,22 @@
 import { AgentActivity } from "@/features/chat/components/activity";
-import type { AgentActivityItem } from "@/features/chat/components/activity";
 import {
   TaskList,
   type TaskItem,
 } from "@/features/chat/components/tasks/task-list";
 import { ToolApproval } from "@/features/chat/components/tools/tool-approval";
+import { AskUserQuestion } from "@/features/chat/components/questions/ask-user-question";
 import type {
   ChatApprovalDecision,
-  ChatActivityItem,
   ChatMessageBlock,
+  ChatQuestionAnswers,
+  ChatQuestionRequest,
   ChatTodo,
   ChatToolApproval,
 } from "@/features/chat/model";
 import type { ToolApprovalParameter } from "@/features/chat/components/tools/tool-approval";
-
-function activityItem(item: ChatActivityItem): AgentActivityItem {
-  switch (item.type) {
-    case "step":
-      return {
-        id: item.id,
-        type: "step",
-        label: item.label,
-        status: item.status,
-        meta: item.meta,
-      };
-    case "text":
-      return { id: item.id, type: "text", content: item.content };
-    case "search":
-      return {
-        id: item.id,
-        type: "search",
-        query: item.query,
-        moreCount: item.moreCount,
-        results: item.results?.map((result) => ({ ...result })),
-      };
-    case "tool":
-      return {
-        id: item.id,
-        type: "tool",
-        action: item.action,
-        target: item.target,
-        additions: item.additions,
-        deletions: item.deletions,
-      };
-    case "trace":
-      return {
-        id: item.id,
-        type: "trace",
-        kind: item.kind,
-        label: item.label,
-        detail: item.detail,
-      };
-  }
-}
+import type { SearchSource } from "@/features/chat/model";
+import { MarkdownResponse } from "./markdown-response";
+import { toAgentActivityItem } from "./response-process-model";
 
 function taskItem(item: ChatTodo): TaskItem {
   return {
@@ -73,30 +37,63 @@ function approvalParameter(
 export function MessageBlockRenderer({
   block,
   onApprovalDecision,
+  onQuestionSubmit,
+  responseStatus = "complete",
+  sources = [],
+  createdAt,
 }: {
   block: ChatMessageBlock;
   onApprovalDecision?: (
     blockId: string,
     decision: ChatApprovalDecision,
   ) => void;
+  onQuestionSubmit?: (
+    request: ChatQuestionRequest,
+    answers: ChatQuestionAnswers,
+  ) => void;
+  responseStatus?: "streaming" | "complete" | "error";
+  sources?: SearchSource[];
+  createdAt?: string;
 }) {
   switch (block.type) {
+    case "reasoning":
+      return (
+        <AgentActivity
+          items={[{
+            id: block.id,
+            type: "text",
+            content: block.content,
+            format: "markdown",
+            status: block.status === "working" ? "streaming" : "complete",
+          }]}
+          status={block.status ?? "complete"}
+          summary="Reasoning"
+          defaultOpen
+          collapseOnComplete={false}
+          className="max-w-3xl"
+        />
+      );
     case "text":
       return (
-        <p className="max-w-xl px-1 text-sm leading-5 text-foreground/85">
-          {block.content}
-        </p>
+        <MarkdownResponse
+          content={block.content}
+          status={responseStatus}
+          sources={sources}
+          createdAt={createdAt}
+        />
       );
     case "activity":
       return (
-        <AgentActivity
-          items={block.items.map(activityItem)}
+          <AgentActivity
+          items={block.items.map((item) =>
+            toAgentActivityItem(item, block.status === "working"),
+          )}
           status={block.status ?? "working"}
           duration={block.duration}
           summary={block.summary}
           defaultOpen
           collapseOnComplete={false}
-          className="max-w-xl text-xs leading-4 text-foreground/80"
+          className="max-w-3xl text-xs leading-4 text-foreground/80"
         />
       );
     case "todo-list":
@@ -128,6 +125,15 @@ export function MessageBlockRenderer({
               : undefined
           }
           defaultOpen={block.defaultOpen}
+        />
+      );
+    case "question":
+      return (
+        <AskUserQuestion
+          request={block.request}
+          onSubmit={onQuestionSubmit
+            ? (answers) => onQuestionSubmit(block.request, answers)
+            : undefined}
         />
       );
   }

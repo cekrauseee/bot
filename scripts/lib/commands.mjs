@@ -4,7 +4,7 @@ export const commandSections = [
     commands: [
       ['help', 'Show this command guide'],
       ['setup', 'Prepare a fresh development environment'],
-      ['dev', 'Run the web, application API, and AI service together'],
+      ['dev', 'Run the web, API, AI, and runtime services together'],
     ],
   },
   {
@@ -18,12 +18,13 @@ export const commandSections = [
     title: 'Operations',
     commands: [
       ['auth:check', 'Check Google and Resend environment variables'],
-      ['db:generate', 'Generate a database migration from the API schema'],
-      ['db:migrate', 'Apply pending database migrations'],
-      ['db:check', 'Check the database migration history'],
       ['infra:start', 'Start PostgreSQL and Redis'],
       ['infra:stop', 'Stop PostgreSQL and Redis without deleting data'],
       ['infra:reset', 'Reset PostgreSQL and Redis containers and data'],
+      ['db:generate', 'Generate a database migration from the API schema'],
+      ['db:migrate', 'Apply pending database migrations'],
+      ['db:check', 'Check the database migration history'],
+      ['db:seed', 'Seed complete local conversations and Markdown examples'],
     ],
   },
   {
@@ -46,11 +47,23 @@ export const commandSections = [
     ],
   },
   {
+    title: 'Runtime service',
+    commands: [
+      ['runtime:dev', 'Run the isolated runtime service with reload'],
+      ['runtime:lint', 'Lint the runtime service'],
+      ['runtime:typecheck', 'Type-check the runtime service'],
+      ['runtime:test', 'Run runtime service tests'],
+      ['runtime:build', 'Build the runtime service'],
+      ['runtime:start', 'Start the built runtime service'],
+    ],
+  },
+  {
     title: 'Web',
     commands: [
       ['web:dev', 'Run the Vite application'],
       ['web:lint', 'Lint the web application'],
       ['web:typecheck', 'Type-check the web application'],
+      ['web:test', 'Run web application unit tests'],
       ['web:build', 'Type-check and build the web application'],
     ],
   },

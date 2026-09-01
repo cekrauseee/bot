@@ -1,0 +1,81 @@
+import json
+import logging
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+import structlog
+from starlette.requests import Request
+
+from my_bot_ai.logging import _completed, configure_logging, lifecycle_event, safe_identifier
+
+
+def test_renderer_matches_environment() -> None:
+    configure_logging("production")
+    assert isinstance(structlog.get_config()["processors"][-1], structlog.processors.JSONRenderer)
+    configure_logging("development")
+    assert isinstance(structlog.get_config()["processors"][-1], structlog.dev.ConsoleRenderer)
+
+
+def test_invalid_request_id_is_replaced() -> None:
+    value = safe_identifier("bad value with\nsecrets")
+    assert value != "bad value with\nsecrets"
+    assert len(value) == 36
+
+
+def test_terminal_event_is_bounded_and_redacted() -> None:
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/agent/stream",
+            "headers": [],
+            "query_string": b"",
+            "router": SimpleNamespace(path="/agent/stream"),
+        }
+    )
+    request.state.turn_id = "turn-1"
+    request.state.conversation_id = "conversation-1"
+    request.state.model = "gpt-5.6-sol"
+    request.state.reasoning_effort = "medium"
+    logger = Mock()
+
+    _completed(logger, request, 200, "success", 0)
+
+    fields = logger.info.call_args.kwargs
+    assert fields["event"] == "request_completed"
+    assert fields["http_method"] == "post"
+    assert fields["http_route"] == "/agent/stream"
+    assert fields["outcome"] == "success"
+    assert "content" not in json.dumps(fields)
+    assert "authorization" not in json.dumps(fields).lower()
+
+
+def test_emitted_production_record_is_iso_and_recursively_redacted() -> None:
+    configure_logging("production")
+    records: list[str] = []
+
+    class Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record.getMessage())
+
+    service_logger = logging.getLogger("my_bot_ai")
+    handler = Capture()
+    service_logger.addHandler(handler)
+    try:
+        lifecycle_event(
+            "operational_event",
+            nested={"authorization": "secret", "safe": True},
+            rows=[{"content": "private", "safe": "value"}],
+        )
+    finally:
+        service_logger.removeHandler(handler)
+
+    record = json.loads(records[-1])
+    assert record["level"] == "info"
+    assert record["service"] == "my_bot_ai"
+    assert record["environment"] == "production"
+    assert record["event"] == "operational_event"
+    assert record["nested"] == {"safe": True}
+    assert record["rows"] == [{"safe": "value"}]
+    assert record["timestamp"].endswith("Z")
+    assert "secret" not in json.dumps(record)

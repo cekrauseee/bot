@@ -7,14 +7,13 @@
       name="description"
       content="Sign in to myBot."
     />
-    <title>Sign in · myBot</title>
+    <title>myBot</title>
     <script>
       (() => {
-        const storedTheme = localStorage.getItem('my-bot-theme')
-        const isDark =
-          storedTheme === 'dark' ||
-          ((storedTheme === null || storedTheme === 'system') &&
-            window.matchMedia('(prefers-color-scheme: dark)').matches)
+        // Theme selection is system-only. Clear the legacy manual preference
+        // before next-themes initializes so it cannot override the OS setting.
+        localStorage.removeItem('my-bot-theme')
+        const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches
 
         document.documentElement.classList.toggle('dark', isDark)
         document.documentElement.style.colorScheme = isDark ? 'dark' : 'light'

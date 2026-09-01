@@ -1,12 +1,13 @@
 # myBot
 
-myBot is a portfolio project for a modern AI agent. The current foundation includes passwordless email and Google authentication backed by a Node.js application API, plus an independent Python service for future model integrations.
+myBot is a portfolio project for a durable cloud agent. It includes passwordless email and Google authentication, persistent streamed conversations, a LangGraph model service, and an isolated tool runtime.
 
 ## Repository
 
 - `apps/web`: Vite, React, React Router, Tailwind CSS 4, and beUI.
 - `apps/api`: Node.js, TypeScript, Elysia, Drizzle, PostgreSQL, and Redis.
 - `apps/ai`: Python 3.14 and FastAPI boundary for model capabilities.
+- `apps/runtime`: Node.js boundary for Vercel Sandbox filesystem, shell, and browser tools.
 - `packages/email`: React Email source and consumable package for transactional messages.
 
 ## Development

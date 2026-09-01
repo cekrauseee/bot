@@ -51,6 +51,7 @@ describe('HTTP contract', () => {
       SESSION_SECRET: 'session-secret-that-is-at-least-32-characters-long',
       OTP_PEPPER: 'otp-pepper-that-is-at-least-32-characters-long',
       RATE_LIMIT_PEPPER: 'rate-limit-pepper-that-is-at-least-32-characters',
+      AI_SERVICE_TOKEN: 'ai-service-token-that-is-at-least-32-characters',
       GOOGLE_CLIENT_ID: 'client.apps.googleusercontent.com',
       GOOGLE_CLIENT_SECRET: 'google-client-secret',
       RESEND_API_KEY: 're_live_valid-key',
@@ -75,6 +76,25 @@ describe('HTTP contract', () => {
     expect(response.status).toBe(202)
     expect(await response.json()).toEqual({ challenge_id: 'challenge', expires_in_seconds: 600, resend_after_seconds: 60 })
   })
+
+  it.each(['development', 'test', 'production'] as const)(
+    'only exposes an OTP in a non-cacheable development response: %s', async (environment) => {
+      services.otp.issue.mockResolvedValueOnce({
+        challengeId: 'challenge', expiresInSeconds: 600, resendAfterSeconds: 60,
+        developmentCode: '123456',
+      })
+      const app = createApp({ ...settings, environment }, services)
+      const response = await app.handle(new Request('http://localhost/auth/otp/request', {
+        method: 'POST', headers: { 'content-type': 'application/json', origin: settings.webOrigin },
+        body: JSON.stringify({ email: 'developer@example.com' }),
+      }))
+      expect(response.status).toBe(202)
+      expect(response.headers.get('cache-control')).toBe('no-store')
+      const body = await response.json()
+      if (environment === 'development') expect(body.development_code).toBe('123456')
+      else expect(body).not.toHaveProperty('development_code')
+    },
+  )
 
   it('preserves FastAPI validation semantics for representative auth bodies', async () => {
     const controlBody = '{"a":"bad' + String.fromCharCode(1) + '"}'
@@ -189,6 +209,11 @@ describe('HTTP contract', () => {
     expect(verify.requestBody.content['application/json'].schema.properties.code.pattern).toBe('^\\d{6}$')
     expect(verify.responses['200']).toBeDefined()
     expect(verify.responses['422']).toBeDefined()
+    expect(document.paths['/conversations']).toBeDefined()
+    expect(document.paths['/conversations/{conversationId}']).toBeDefined()
+    const turn = document.paths['/conversations/{conversationId}/turns'].post
+    expect(turn.requestBody.content['application/json'].schema.properties.model.enum)
+      .toEqual(['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'grok-4.6', 'grok-4.3'])
   })
 
   it('returns redirect and state cookie for Google start', async () => {

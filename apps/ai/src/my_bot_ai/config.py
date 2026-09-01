@@ -4,6 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import AnyHttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,8 +30,15 @@ class Settings(BaseSettings):
         env_file=repository_env_path(), env_file_encoding="utf-8", extra="ignore"
     )
 
-    environment: Literal["development", "test", "production"] = "development"
+    environment: Literal["development", "test", "production"]
     service_name: Literal["ai"] = "ai"
+    ai_base_url: AnyHttpUrl
+    database_url: str | None = None
+    openai_api_key: str | None = None
+    xai_api_key: str | None = None
+    ai_service_token: str
+    runtime_base_url: AnyHttpUrl
+    runtime_service_token: str | None = None
 
 
 @lru_cache

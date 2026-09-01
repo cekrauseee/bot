@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useNavigate } from 'react-router'
 
 import { AuthApiError, authApi } from '@/features/auth/services/auth-api'
 
@@ -8,6 +9,7 @@ export type AuthActionStatus = 'idle' | 'loading' | 'success' | 'error'
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export function useLoginForm() {
+  const navigate = useNavigate()
   const [step, setStep] = useState<LoginStep>('email')
   const [email, setEmail] = useState('')
   const [code, setCode] = useState('')
@@ -80,7 +82,9 @@ export function useLoginForm() {
         setChallengeId(result.challenge_id)
         setResendIn(Math.max(0, result.resend_after_seconds))
         setStatus(`A verification code was sent to ${normalizedEmail}.`)
-        setCode('')
+        setCode(import.meta.env.DEV && /^\d{6}$/.test(result.development_code ?? '')
+          ? result.development_code!
+          : '')
         setStep('code')
       } catch (error) {
         applyApiError(error, target)
@@ -125,13 +129,13 @@ export function useLoginForm() {
         await authApi.verifyOtp(challengeId, code)
         setVerifyStatus('success')
         setStatus("Code verified. You're signed in.")
-        window.location.assign('/')
+        void navigate('/', { replace: true, viewTransition: true })
       } catch (error) {
         applyApiError(error, 'code')
         setVerifyStatus('error')
       }
     },
-    [applyApiError, challengeId, code],
+    [applyApiError, challengeId, code, navigate],
   )
 
   const changeEmail = useCallback(() => {

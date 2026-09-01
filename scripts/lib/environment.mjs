@@ -4,7 +4,18 @@ import path from 'node:path'
 
 import { projectRoot } from './project.mjs'
 
-const LOCAL_SECRET_KEYS = ['SESSION_SECRET', 'OTP_PEPPER', 'RATE_LIMIT_PEPPER']
+const LOCAL_SECRET_KEYS = [
+  'SESSION_SECRET',
+  'OTP_PEPPER',
+  'RATE_LIMIT_PEPPER',
+  'AI_SERVICE_TOKEN',
+  'RUNTIME_SERVICE_TOKEN',
+]
+const LOCAL_DEFAULTS = new Map([
+  ['RUNTIME_BASE_URL', 'http://localhost:8002'],
+  ['RUNTIME_PORT', '8002'],
+  ['RUNTIME_ENVIRONMENT', 'development'],
+])
 const GOOGLE_CONFIG_KEYS = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET']
 const RESEND_CONFIG_KEYS = ['RESEND_API_KEY']
 const DEFAULT_SENDER = 'myBot <mybot@cekrause.eu>'
@@ -61,6 +72,29 @@ function setEnvironmentValue(contents, key, value) {
   return `${contents.trimEnd()}\n${line}\n`
 }
 
+export function alignEnvironment(template, current) {
+  const currentLines = new Map()
+  for (const line of current.split(/\r?\n/)) {
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(line)
+    if (match) currentLines.set(match[1], line)
+  }
+
+  const templateKeys = new Set()
+  const aligned = template.split(/\r?\n/).map((line) => {
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(line)
+    if (!match) return line
+    templateKeys.add(match[1])
+    return currentLines.get(match[1]) ?? line
+  })
+  const unsupported = [...currentLines.keys()].filter((key) => !templateKeys.has(key))
+  if (unsupported.length) {
+    throw new Error(`Unsupported .env variables: ${unsupported.sort().join(', ')}`)
+  }
+
+  while (aligned.at(-1) === '') aligned.pop()
+  return `${aligned.join('\n')}\n`
+}
+
 function createUniqueSecret(createSecret, usedSecrets) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const candidate = createSecret()
@@ -70,7 +104,7 @@ function createUniqueSecret(createSecret, usedSecrets) {
     }
   }
 
-  throw new Error('Unable to generate three independent local authentication secrets')
+  throw new Error('Unable to generate independent local service secrets')
 }
 
 async function copyIfMissing(source, destination) {
@@ -125,15 +159,14 @@ export async function prepareEnvironment(
 ) {
   const envExample = path.join(root, '.env.example')
   const envPath = path.join(root, '.env')
-  const webEnvExample = path.join(root, 'apps/web/.env.example')
-  const webEnvPath = path.join(root, 'apps/web/.env')
 
   const createdEnv = await copyIfMissing(envExample, envPath)
-  const createdWebEnv = await copyIfMissing(webEnvExample, webEnvPath)
+  const templateContents = await readFile(envExample, 'utf8')
   const originalContents = await readFile(envPath, 'utf8')
-  let contents = originalContents
+  let contents = alignEnvironment(templateContents, originalContents)
   let values = parseEnvironment(contents)
   const generatedSecretKeys = []
+  const configuredDefaultKeys = []
   const usedSecrets = new Set(
     LOCAL_SECRET_KEYS.map((key) => values.get(key)).filter(
       (value) => value && !isPlaceholder(value),
@@ -149,6 +182,14 @@ export async function prepareEnvironment(
     }
   }
 
+  for (const [key, value] of LOCAL_DEFAULTS) {
+    if (!values.has(key) || isPlaceholder(values.get(key) ?? '')) {
+      contents = setEnvironmentValue(contents, key, value)
+      configuredDefaultKeys.push(key)
+      values.set(key, value)
+    }
+  }
+
   if ((values.get('RESEND_FROM') ?? '').includes('@example.com')) {
     contents = setEnvironmentValue(contents, 'RESEND_FROM', `"${DEFAULT_SENDER}"`)
     values.set('RESEND_FROM', DEFAULT_SENDER)
@@ -161,19 +202,21 @@ export async function prepareEnvironment(
 
   return {
     createdEnv,
-    createdWebEnv,
     generatedSecretKeys,
+    configuredDefaultKeys,
     authentication: externalAuthenticationStatus(values),
   }
 }
 
 export function printEnvironmentSummary(result) {
   if (result.createdEnv) console.log('✓ Created .env')
-  if (result.createdWebEnv) console.log('✓ Created apps/web/.env')
   if (result.generatedSecretKeys.length > 0) {
     console.log(
-      `✓ Generated ${result.generatedSecretKeys.length} independent local auth secrets`,
+      `✓ Generated ${result.generatedSecretKeys.length} independent local service secrets`,
     )
+  }
+  if (result.configuredDefaultKeys.length > 0) {
+    console.log(`✓ Configured ${result.configuredDefaultKeys.length} local runtime defaults`)
   }
 
   if (result.authentication.configured) {

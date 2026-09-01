@@ -1,0 +1,1185 @@
+import type {
+  ChatActivityItem,
+  ChatBrowserFrame,
+  ChatBrowserSession,
+  ChatMessage,
+  ChatMessageBlock,
+  ChatModelOption,
+  ChatQuestionAnswers,
+  ChatQuestionRequest,
+  ChatTodo,
+  ConversationSummary,
+  ProjectSummary,
+  SearchSource,
+} from '../model'
+import {
+  mapBrowserProjection,
+  mapApiMessage,
+  mapPlanItems,
+  mapQuestionRequest,
+  parseActiveRunProjection,
+  parseEventSequence,
+  type ConversationDetail,
+  type SearchStep,
+  type StreamEvent,
+  type TurnInput,
+} from '../services/conversation-api'
+import { mergeConversationPin } from './pinned-conversations'
+import { mergeConversationMetadata } from './conversation-metadata'
+import { mergeProject, orderedProjects } from './project-order'
+
+export type ResourceStatus =
+  | 'idle'
+  | 'loading'
+  | 'ready'
+  | 'refreshing'
+  | 'error'
+  | 'not-found'
+
+export type OperationState = {
+  operationId?: string
+  status: ResourceStatus
+  error: string
+}
+
+export type ConversationRecord = {
+  submissionId?: string
+  viewKey?: string
+  lastTurnInput?: TurnInput
+  id?: string
+  title: string
+  messages: ChatMessage[]
+  detail: OperationState
+  turn: OperationState
+  activeAssistantId?: string
+  activeRunId?: string
+  activeTurnId?: string
+  lastSequence?: string
+  plan: ChatTodo[]
+  browser?: ChatBrowserSession
+  browserFrame?: ChatBrowserFrame
+}
+
+export type ConversationControllerState = {
+  catalog: {
+    conversations: ConversationSummary[]
+    projects: ProjectSummary[]
+    models: ChatModelOption[]
+    status: ResourceStatus
+    error: string
+    operationId?: string
+    deletedProjectIds: string[]
+    deletedConversationIds: string[]
+  }
+  newConversation: ConversationRecord
+  conversationsById: Record<string, ConversationRecord>
+}
+
+export type ConversationRouteIdentity =
+  | { kind: 'new' }
+  | { kind: 'existing'; id: string }
+
+export type ConversationControllerAction =
+  | { type: 'catalog.load.started'; operationId: string; refreshing: boolean }
+  | {
+      type: 'catalog.load.succeeded'
+      operationId: string
+      conversations: ConversationSummary[]
+      projects: ProjectSummary[]
+      models?: ChatModelOption[]
+    }
+  | { type: 'catalog.load.failed'; operationId: string; error: string }
+  | { type: 'catalog.load.aborted'; operationId: string }
+  | { type: 'detail.load.started'; id: string; operationId: string }
+  | { type: 'detail.load.succeeded'; id: string; operationId: string; detail: ConversationDetail }
+  | {
+      type: 'detail.load.failed'
+      id: string
+      operationId: string
+      status: 'error' | 'not-found'
+      error: string
+    }
+  | { type: 'detail.load.aborted'; id: string; operationId: string }
+  | {
+      type: 'turn.started'
+      key: ConversationRouteIdentity
+      operationId: string
+      optimisticMessages: ChatMessage[]
+      input?: TurnInput
+      retryMessageId?: string
+    }
+  | {
+      type: 'turn.event'
+      key: ConversationRouteIdentity
+      operationId: string
+      event: StreamEvent
+      at: number
+      deferHandoff?: boolean
+    }
+  | {
+      type: 'run.event'
+      key: ConversationRouteIdentity
+      event: StreamEvent
+      at: number
+    }
+  | {
+      type: 'run.browser-frame'
+      key: ConversationRouteIdentity
+      runId: string
+      frame: ChatBrowserFrame
+    }
+  | {
+      type: 'run.cancelling'
+      key: ConversationRouteIdentity
+      runId: string
+    }
+  | {
+      type: 'run.connection.failed'
+      key: ConversationRouteIdentity
+      runId: string
+      error: string
+    }
+  | {
+      type: 'question.status'
+      key: ConversationRouteIdentity
+      requestId: string
+      status: ChatQuestionRequest['status']
+      answers: ChatQuestionAnswers
+      result?: string
+      resume?: boolean
+    }
+  | { type: 'turn.handoff'; operationId: string; id: string }
+  | {
+      type: 'turn.failed'
+      key: ConversationRouteIdentity
+      operationId: string
+      error: string
+      cancelled: boolean
+      retryable?: boolean
+      at: number
+    }
+  | {
+      type: 'turn.aborted'
+      key: ConversationRouteIdentity
+      operationId: string
+      at: number
+    }
+  | {
+      type: 'turn.detached'
+      key: ConversationRouteIdentity
+      operationId: string
+    }
+  | { type: 'catalog.project.added'; project: ProjectSummary }
+  | { type: 'catalog.project.renamed'; project: ProjectSummary }
+  | { type: 'catalog.projects.reordered'; projects: ProjectSummary[] }
+  | { type: 'catalog.conversation.renamed'; conversation: ConversationSummary }
+  | { type: 'catalog.project.removed'; id: string }
+  | { type: 'catalog.conversation.upserted'; conversation: ConversationSummary }
+  | { type: 'catalog.pins.updated'; conversations: ConversationSummary[] }
+  | { type: 'catalog.conversation.removed'; id: string }
+
+const idleOperation = (): OperationState => ({ status: 'idle', error: '' })
+const readyOperation = (): OperationState => ({ status: 'ready', error: '' })
+
+export const createNewConversationRecord = (): ConversationRecord => ({
+  title: 'New conversation',
+  messages: [],
+  plan: [],
+  detail: readyOperation(),
+  turn: idleOperation(),
+})
+
+export const createConversationRecord = (id: string): ConversationRecord => ({
+  id,
+  title: 'New conversation',
+  messages: [],
+  plan: [],
+  detail: idleOperation(),
+  turn: idleOperation(),
+})
+
+export const initialConversationControllerState = (): ConversationControllerState => ({
+  catalog: {
+    conversations: [],
+    projects: [],
+    models: [],
+    status: 'idle',
+    error: '',
+    deletedProjectIds: [],
+    deletedConversationIds: [],
+  },
+  newConversation: createNewConversationRecord(),
+  conversationsById: {},
+})
+
+export const conversationRouteIdentity = (
+  conversationId: string | undefined,
+): ConversationRouteIdentity => conversationId
+  ? { kind: 'existing', id: conversationId }
+  : { kind: 'new' }
+
+export const conversationRouteKey = (identity: ConversationRouteIdentity) =>
+  identity.kind === 'new' ? 'new' : `existing:${identity.id}`
+
+export const sameConversationRoute = (
+  left: ConversationRouteIdentity,
+  right: ConversationRouteIdentity,
+) => conversationRouteKey(left) === conversationRouteKey(right)
+
+export const selectActiveConversation = (
+  state: ConversationControllerState,
+  identity: ConversationRouteIdentity,
+) => identity.kind === 'new'
+  ? state.newConversation
+  : state.conversationsById[identity.id] ?? createConversationRecord(identity.id)
+
+export const detailFailureStatus = (status: number | undefined): 'error' | 'not-found' =>
+  status === 404 ? 'not-found' : 'error'
+
+export const shouldLoadConversationDetail = (
+  status: ResourceStatus | undefined,
+  force = false,
+) => force || status === undefined || status === 'idle'
+
+export const createOptimisticMessages = (
+  message: string,
+  optimisticId: string,
+  startedAt: number,
+): ChatMessage[] => [{
+  id: `pending-user-${optimisticId}`,
+  role: 'user',
+  createdAt: new Date(startedAt).toISOString(),
+  blocks: [{
+    id: `pending-user-${optimisticId}-text`,
+    type: 'text',
+    content: message,
+  }],
+  status: 'complete',
+}, {
+  id: `pending-assistant-${optimisticId}`,
+  role: 'assistant',
+  createdAt: new Date(startedAt).toISOString(),
+  blocks: [],
+  status: 'streaming',
+  processStartedAt: startedAt,
+}]
+
+const upsertConversation = (
+  conversations: ConversationSummary[],
+  conversation: ConversationSummary,
+) => [
+  mergeConversationMetadata(conversations.find((item) => item.id === conversation.id), conversation),
+  ...conversations.filter((item) => item.id !== conversation.id),
+]
+
+const replaceConversation = (
+  conversations: ConversationSummary[],
+  conversation: ConversationSummary,
+) => {
+  if (conversations.some((item) => item.id === conversation.id)) {
+    return conversations.map((item) =>
+      item.id === conversation.id ? mergeConversationMetadata(item, conversation) : item)
+  }
+  return [...conversations, conversation].sort(
+    (left, right) => Date.parse(right.updated_at) - Date.parse(left.updated_at),
+  )
+}
+
+const mergeConversations = (
+  current: ConversationSummary[],
+  loaded: ConversationSummary[],
+  deletedIds: string[],
+) => {
+  const conversations = new Map(loaded.map((conversation) => [conversation.id, conversation]))
+  for (const conversation of current) {
+    const candidate = conversations.get(conversation.id)
+    if (!candidate || Date.parse(conversation.updated_at) >= Date.parse(candidate.updated_at)) {
+      conversations.set(conversation.id, mergeConversationMetadata(candidate, conversation))
+    } else {
+      conversations.set(conversation.id, mergeConversationMetadata(conversation, candidate))
+    }
+  }
+  return [...conversations.values()]
+    .filter((conversation) => !deletedIds.includes(conversation.id))
+    .sort((left, right) => Date.parse(right.updated_at) - Date.parse(left.updated_at))
+}
+
+const mergeProjects = (current: ProjectSummary[], loaded: ProjectSummary[]) => {
+  const projects = new Map(loaded.map((project) => [project.id, project]))
+  for (const project of current) {
+    projects.set(project.id, mergeProject(projects.get(project.id), project))
+  }
+  return orderedProjects([...projects.values()])
+}
+
+const terminalBlocks = (blocks: ChatMessageBlock[]) => blocks.map((block) =>
+  block.type === 'activity' || block.type === 'reasoning'
+    ? { ...block, status: 'complete' as const }
+    : block)
+
+const elapsedProcessDuration = (message: ChatMessage, at: number) =>
+  message.processStartedAt
+    ? Math.max(1, Math.round((at - message.processStartedAt) / 1000))
+    : message.processDuration
+
+const updateAssistant = (
+  messages: ChatMessage[],
+  assistantId: string | undefined,
+  update: (message: ChatMessage) => ChatMessage,
+) => messages.map((message) =>
+  message.role === 'assistant' && message.id === assistantId ? update(message) : message)
+
+const reconcileAssistantContent = (message: ChatMessage, content: string): ChatMessage => {
+  const textIndex = message.blocks.findIndex((block) => block.type === 'text')
+  const textBlock: ChatMessageBlock = {
+    id: `${message.id}-text`,
+    type: 'text',
+    content,
+  }
+  const blocks = textIndex >= 0
+    ? message.blocks.flatMap((block, index) => index === textIndex
+      ? (content ? [textBlock] : [])
+      : [block])
+    : content ? [...message.blocks, textBlock] : message.blocks
+  return { ...message, blocks, status: 'streaming' }
+}
+
+const safeSource = (value: unknown): SearchSource | undefined => {
+  if (!value || typeof value !== 'object') return undefined
+  const source = value as Record<string, unknown>
+  const title = typeof source.title === 'string' ? source.title : ''
+  const rawUrl = typeof source.url === 'string' ? source.url : undefined
+  let url: string | undefined
+  let domain = typeof source.domain === 'string' ? source.domain : undefined
+  if (rawUrl) {
+    try {
+      const parsed = new URL(rawUrl)
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined
+      url = parsed.toString()
+      domain ??= parsed.hostname
+    } catch {
+      return undefined
+    }
+  }
+  if (!title && !url) return undefined
+  return {
+    id: typeof source.id === 'string' ? source.id : url ?? title,
+    title: title || url!,
+    ...(domain ? { domain } : {}),
+    ...(url ? { url } : {}),
+  }
+}
+
+const searchItem = (step: SearchStep) => ({
+  id: step.id,
+  type: 'search' as const,
+  query: step.query || step.label,
+  results: (step.sources ?? []).map(safeSource).filter(
+    (source): source is SearchSource => source !== undefined,
+  ),
+})
+
+const updateProcessItems = (
+  assistant: ChatMessage,
+  update: (items: ChatActivityItem[]) => ChatActivityItem[],
+) => {
+  const processIndex = assistant.blocks.findIndex((block) => block.type === 'activity')
+  if (processIndex === -1) {
+    return {
+      ...assistant,
+      blocks: [{
+        id: `${assistant.id}-activity`,
+        type: 'activity' as const,
+        status: 'working' as const,
+        items: update([]),
+      }, ...assistant.blocks],
+    }
+  }
+
+  return {
+    ...assistant,
+    blocks: assistant.blocks.map((block, index) =>
+      index === processIndex && block.type === 'activity'
+        ? { ...block, items: update(block.items) }
+        : block),
+  }
+}
+
+const browserProjection = (event: StreamEvent) => {
+  const data = event.data as Record<string, unknown>
+  return mapBrowserProjection(data.browser ?? data.browser_projection, event.run_id)
+}
+
+const recordFor = (
+  state: ConversationControllerState,
+  key: ConversationRouteIdentity,
+) => key.kind === 'new'
+  ? state.newConversation
+  : state.conversationsById[key.id] ?? createConversationRecord(key.id)
+
+const replaceRecord = (
+  state: ConversationControllerState,
+  key: ConversationRouteIdentity,
+  record: ConversationRecord,
+): ConversationControllerState => key.kind === 'new'
+  ? { ...state, newConversation: record }
+  : {
+      ...state,
+      conversationsById: { ...state.conversationsById, [key.id]: record },
+    }
+
+const turnOwned = (record: ConversationRecord, operationId: string) =>
+  record.turn.operationId === operationId
+
+const detailOwned = (record: ConversationRecord, operationId: string) =>
+  record.detail.operationId === operationId
+
+const eventAlreadyApplied = (record: ConversationRecord, event: StreamEvent) =>
+  (record.activeRunId !== undefined && record.activeRunId !== event.run_id) ||
+  (record.lastSequence !== undefined &&
+    parseEventSequence(event.sequence) <= parseEventSequence(record.lastSequence))
+
+const reconcileStarted = (
+  record: ConversationRecord,
+  event: Extract<StreamEvent, { type: 'turn.started' }>,
+): ConversationRecord => {
+  const active = {
+    activeRunId: event.run_id,
+    activeTurnId: event.turn_id,
+    lastSequence: event.sequence,
+    browser: browserProjection(event) ?? record.browser,
+  }
+  if ('checkpoint' in event.data) {
+    const checkpoint = event.data.checkpoint
+    return {
+      ...record,
+      ...active,
+      messages: updateAssistant(record.messages, record.activeAssistantId, (assistant) =>
+        reconcileAssistantContent(assistant, checkpoint.content)),
+      turn: { ...record.turn, status: 'loading', error: '' },
+    }
+  }
+  const messages = [...record.messages]
+  const userIndex = messages.length - 2
+  const assistantIndex = messages.length - 1
+  if (userIndex >= 0) messages[userIndex] = {
+    ...mapApiMessage(event.data.user_message),
+    renderKey: messages[userIndex].renderKey ?? messages[userIndex].id,
+  }
+  if (assistantIndex >= 0) {
+    const optimisticAssistant = messages[assistantIndex]
+    messages[assistantIndex] = {
+      ...mapApiMessage(event.data.assistant_message),
+      renderKey: optimisticAssistant.renderKey ?? optimisticAssistant.id,
+      retryError: optimisticAssistant.retryError,
+      retryAttempted: optimisticAssistant.retryAttempted,
+      processStartedAt: optimisticAssistant.processStartedAt,
+      processDuration: undefined,
+    }
+  }
+  return {
+    ...record,
+    ...active,
+    id: event.data.conversation.id,
+    title: event.data.conversation.title,
+    messages,
+    plan: Array.isArray(event.data.plan) ? mapPlanItems(event.data.plan) : record.plan,
+    detail: readyOperation(),
+    turn: { ...record.turn, status: 'loading', error: '' },
+    activeAssistantId: event.data.assistant_message.id,
+  }
+}
+
+const applyNonStartedEvent = (
+  record: ConversationRecord,
+  event: Exclude<StreamEvent, { type: 'turn.started' }>,
+  at: number,
+): ConversationRecord => {
+  record = {
+    ...record,
+    activeRunId: event.run_id,
+    activeTurnId: event.turn_id,
+    lastSequence: event.sequence,
+    browser: browserProjection(event) ?? record.browser,
+  }
+  if (record.messages.at(-1)?.retryError && event.type === 'turn.completed') {
+    record = { ...record, messages: updateAssistant(record.messages, record.activeAssistantId,
+      (assistant) => assistant.retryError ? { ...assistant, retryError: undefined } : assistant) }
+  }
+  if (event.type === 'reasoning.delta') {
+    return {
+      ...record,
+      messages: updateAssistant(record.messages, record.activeAssistantId, (assistant) =>
+        updateProcessItems(assistant, (items) => {
+          const last = items.at(-1)
+          if (last?.type === 'text' && last.lastSequence !== undefined &&
+            BigInt(last.lastSequence) + 1n === parseEventSequence(event.sequence)) {
+            return [
+              ...items.slice(0, -1),
+              {
+                ...last,
+                content: last.content + event.data.delta,
+                lastSequence: event.sequence,
+              },
+            ]
+          }
+          return [...items, {
+            id: `${assistant.id}-reasoning-${event.sequence}`,
+            type: 'text',
+            content: event.data.delta,
+            lastSequence: event.sequence,
+          }]
+        })),
+    }
+  }
+
+  if (event.type === 'text.delta') {
+    return {
+      ...record,
+      messages: updateAssistant(record.messages, record.activeAssistantId, (assistant) => {
+        const existing = assistant.blocks.find((block) => block.type === 'text')
+        const completedProcess = terminalBlocks(assistant.blocks)
+        return {
+          ...assistant,
+          processDuration: elapsedProcessDuration(assistant, at),
+          blocks: existing
+            ? assistant.blocks.map((block) => block.type === 'text'
+              ? { ...block, content: block.content + event.data.delta }
+              : block)
+            : [
+                ...completedProcess,
+                { id: `${assistant.id}-text`, type: 'text', content: event.data.delta },
+              ],
+        }
+      }),
+    }
+  }
+
+  if (
+    event.type === 'step.started' ||
+    event.type === 'step.updated' ||
+    event.type === 'step.completed'
+  ) {
+    return {
+      ...record,
+      messages: updateAssistant(record.messages, record.activeAssistantId, (assistant) => {
+        const item: ChatActivityItem = searchItem(event.data.step)
+        return updateProcessItems(assistant, (items) => {
+          const index = items.findIndex((entry) => entry.id === item.id)
+          if (index === -1) return [...items, item]
+          return items.map((entry, entryIndex) => entryIndex === index ? item : entry)
+        })
+      }),
+    }
+  }
+
+  if (event.type === 'plan.updated') {
+    return { ...record, plan: mapPlanItems(event.data.plan) }
+  }
+
+  if (
+    event.type === 'tool.started' ||
+    event.type === 'tool.updated' ||
+    event.type === 'tool.completed'
+  ) {
+    const tool = event.data.tool
+    const item: ChatActivityItem = {
+      id: tool.id,
+      type: 'tool',
+      action: tool.name || 'tool',
+      target: tool.label || tool.name || 'Tool activity',
+    }
+    return {
+      ...record,
+      messages: updateAssistant(record.messages, record.activeAssistantId, (assistant) =>
+        updateProcessItems(assistant, (items) => {
+          const index = items.findIndex((entry) => entry.id === item.id)
+          if (index === -1) return [...items, item]
+          return items.map((entry, entryIndex) => entryIndex === index ? item : entry)
+        })),
+    }
+  }
+
+  if (event.type === 'child.started' || event.type === 'child.completed') {
+    const child = event.data.child
+    const item: ChatActivityItem = {
+      id: child.id,
+      type: 'trace',
+      kind: 'message',
+      label: child.label || 'Child agent',
+      detail: child.name,
+    }
+    return {
+      ...record,
+      messages: updateAssistant(record.messages, record.activeAssistantId, (assistant) =>
+        updateProcessItems(assistant, (items) => {
+          const index = items.findIndex((entry) => entry.id === item.id)
+          if (index === -1) return [...items, item]
+          return items.map((entry, entryIndex) => entryIndex === index ? item : entry)
+        })),
+    }
+  }
+
+  if (event.type === 'user.input_required') {
+    const request = mapQuestionRequest(event.data, event.run_id)
+    if (!request) {
+      return {
+        ...record,
+        turn: { status: 'error', error: 'The requested input could not be displayed.' },
+      }
+    }
+    return {
+      ...record,
+      messages: updateAssistant(record.messages, record.activeAssistantId, (assistant) => ({
+        ...assistant,
+        status: 'complete',
+        processDuration: elapsedProcessDuration(assistant, at),
+        blocks: [
+          ...terminalBlocks(assistant.blocks).filter((block) =>
+            block.type !== 'question' || block.request.id !== request.id),
+          {
+            id: `${assistant.id}-question-${request.id}`,
+            type: 'question',
+            request,
+          },
+        ],
+      })),
+      turn: readyOperation(),
+    }
+  }
+
+  const failed = event.type === 'turn.failed'
+  const cancelled = failed && event.data.error.code === 'cancelled'
+  return {
+    ...record,
+    messages: updateAssistant(record.messages, record.activeAssistantId, (assistant) => ({
+      ...assistant,
+      blocks: terminalBlocks(assistant.blocks).map((block) =>
+        block.type === 'question' &&
+        (block.request.status === 'pending' || block.request.status === 'submitting')
+          ? {
+              ...block,
+              request: {
+                ...block.request,
+                status: 'cancelled' as const,
+                result: cancelled ? 'Run cancelled.' : 'Run ended.',
+              },
+            }
+          : block),
+      status: failed && !cancelled ? 'error' : 'complete',
+      errorMessage: failed && !cancelled ? event.data.error.message : undefined,
+      retryError: undefined,
+      retryable: failed && !cancelled ? event.data.error.retryable : undefined,
+      processStartedAt: undefined,
+      processDuration: elapsedProcessDuration(assistant, at),
+    })),
+    turn: {
+      status: failed && !cancelled ? 'error' : 'ready',
+      error: failed && !cancelled
+        ? event.data.error.message || 'Unable to complete the response. Try again.'
+        : '',
+    },
+    activeAssistantId: undefined,
+    activeRunId: undefined,
+    activeTurnId: undefined,
+    browser: record.browser
+      ? { ...record.browser, status: 'closed', message: 'Browser preview ended with the run.' }
+      : undefined,
+    browserFrame: undefined,
+  }
+}
+
+const finalizeTurn = (
+  record: ConversationRecord,
+  cancelled: boolean,
+  error: string,
+  at: number,
+  retryable = true,
+): ConversationRecord => ({
+  ...record,
+  messages: updateAssistant(record.messages, record.activeAssistantId, (assistant) => ({
+    ...assistant,
+    blocks: terminalBlocks(assistant.blocks),
+    status: cancelled ? 'complete' : 'error',
+    errorMessage: cancelled ? undefined : error,
+    retryError: undefined,
+    retryable: cancelled ? undefined : retryable,
+    processStartedAt: undefined,
+    processDuration: elapsedProcessDuration(assistant, at),
+  })),
+  turn: { status: cancelled ? 'ready' : 'error', error: cancelled ? '' : error },
+  activeAssistantId: undefined,
+})
+
+function reduceConversationController(
+  state: ConversationControllerState,
+  action: ConversationControllerAction,
+): ConversationControllerState {
+  if (action.type === 'catalog.load.started') {
+    return {
+      ...state,
+      catalog: {
+        ...state.catalog,
+        status: action.refreshing ? 'refreshing' : 'loading',
+        // Keep retry feedback mounted until a failed catalog is recovered.
+        error: state.catalog.error,
+        operationId: action.operationId,
+      },
+    }
+  }
+  if (action.type === 'catalog.load.succeeded') {
+    if (state.catalog.operationId !== action.operationId) return state
+    return {
+      ...state,
+      catalog: {
+        ...state.catalog,
+        conversations: mergeConversations(
+          state.catalog.conversations,
+          action.conversations,
+          state.catalog.deletedConversationIds,
+        ),
+        projects: mergeProjects(state.catalog.projects, action.projects),
+        models: action.models ?? state.catalog.models,
+        status: 'ready',
+        error: '',
+        operationId: undefined,
+      },
+    }
+  }
+  if (action.type === 'catalog.load.failed' || action.type === 'catalog.load.aborted') {
+    if (state.catalog.operationId !== action.operationId) return state
+    return {
+      ...state,
+      catalog: {
+        ...state.catalog,
+        status: action.type === 'catalog.load.aborted' ? 'idle' : 'error',
+        error: action.type === 'catalog.load.aborted' ? '' : action.error,
+        operationId: undefined,
+      },
+    }
+  }
+  if (action.type === 'detail.load.started') {
+    const record = state.conversationsById[action.id] ?? createConversationRecord(action.id)
+    return replaceRecord(state, { kind: 'existing', id: action.id }, {
+      ...record,
+      detail: { status: 'loading', error: '', operationId: action.operationId },
+    })
+  }
+  if (action.type === 'detail.load.succeeded') {
+    const record = state.conversationsById[action.id]
+    if (!record || !detailOwned(record, action.operationId)) return state
+    const lastAssistant = action.detail.messages.at(-1)
+    const lastUser = action.detail.messages.at(-2)
+    const effort = lastAssistant?.reasoning_effort
+    const retryInput: TurnInput | undefined = lastAssistant?.role === 'assistant' &&
+      lastAssistant.status === 'failed' && lastUser?.role === 'user'
+      ? {
+          message: lastUser.content,
+          model: lastAssistant.model || 'gpt-5.6-sol',
+          reasoning_effort: effort === 'none' || effort === 'low' || effort === 'high' ||
+            effort === 'xhigh' || effort === 'max'
+            ? effort : 'medium',
+          speed: lastAssistant.speed === 'fast' ? 'fast' : 'standard',
+        } : undefined
+    const run = parseActiveRunProjection(action.detail.active_run)
+    const plan = mapPlanItems(Array.isArray(action.detail.plan)
+      ? action.detail.plan
+      : run?.plan ?? [])
+    let messages = action.detail.messages.map(mapApiMessage)
+    let activeAssistantId: string | undefined
+    if (run) {
+      const sourceIndex = action.detail.messages.findLastIndex((message) =>
+        message.role === 'assistant' &&
+        (message.status === 'streaming' || message.status === 'waiting'))
+      const fallbackIndex = messages.findLastIndex((message) => message.role === 'assistant')
+      const activeIndex = sourceIndex >= 0 ? sourceIndex : fallbackIndex
+      activeAssistantId = messages[activeIndex]?.id
+      if (activeIndex >= 0) {
+        const assistant = messages[activeIndex]
+        const question = mapQuestionRequest(run.pending_question, run.id)
+        const baseBlocks = assistant.blocks.filter((block) =>
+          block.type !== 'todo-list' &&
+          (block.type !== 'question' || block.request.id !== question?.id))
+        messages = messages.with(activeIndex, {
+          ...assistant,
+          status: run.status === 'waiting' ? 'complete' : 'streaming',
+          blocks: [
+            ...baseBlocks,
+            ...(question ? [{
+              id: `${assistant.id}-question-${question.id}`,
+              type: 'question' as const,
+              request: question,
+            }] : []),
+          ],
+        })
+      }
+    }
+    const next = replaceRecord(state, { kind: 'existing', id: action.id }, {
+      ...record,
+      id: action.id,
+      title: mergeConversationMetadata(state.catalog.conversations.find((item) => item.id === action.id), action.detail).title,
+      messages,
+      plan,
+      lastTurnInput: retryInput,
+      detail: readyOperation(),
+      turn: run && run.status !== 'waiting'
+        ? { status: 'loading', error: '' }
+        : readyOperation(),
+      activeAssistantId,
+      activeRunId: run?.id,
+      activeTurnId: run?.turn_id,
+      lastSequence: run?.last_event_sequence ?? (run ? '0' : undefined),
+      browser: run ? mapBrowserProjection(run.browser_projection, run.id) : undefined,
+      browserFrame: undefined,
+    })
+    const conversation: ConversationSummary = {
+      id: action.detail.id,
+      title: action.detail.title,
+      title_updated_at: action.detail.title_updated_at,
+      project_id: action.detail.project_id,
+      pinned_order: action.detail.pinned_order,
+      pin_updated_at: action.detail.pin_updated_at,
+      created_at: action.detail.created_at,
+      updated_at: action.detail.updated_at,
+    }
+    return {
+      ...next,
+      catalog: {
+        ...next.catalog,
+        conversations: replaceConversation(next.catalog.conversations, conversation),
+      },
+    }
+  }
+  if (action.type === 'detail.load.failed' || action.type === 'detail.load.aborted') {
+    const record = state.conversationsById[action.id]
+    if (!record || !detailOwned(record, action.operationId)) return state
+    return replaceRecord(state, { kind: 'existing', id: action.id }, {
+      ...record,
+      detail: action.type === 'detail.load.aborted'
+        ? idleOperation()
+        : { status: action.status, error: action.error },
+    })
+  }
+  if (action.type === 'turn.started') {
+    const record = recordFor(state, action.key)
+    const retrying = action.retryMessageId && record.messages.at(-1)?.id === action.retryMessageId &&
+      record.messages.at(-1)?.status === 'error'
+    if (action.retryMessageId && !retrying) return state
+    const optimistic = action.optimisticMessages
+    const messages = retrying
+      ? [...record.messages.slice(0, -1), {
+          ...optimistic[1],
+          id: record.messages.at(-1)!.id,
+          renderKey: record.messages.at(-1)!.renderKey ?? record.messages.at(-1)!.id,
+          retryError: record.messages.at(-1)!.errorMessage || 'The response could not be completed.',
+          retryAttempted: true,
+        }]
+      : [...(action.key.kind === 'new' && !record.id ? [] : record.messages), ...optimistic]
+    return replaceRecord(state, action.key, {
+      ...record,
+      submissionId: action.operationId,
+      viewKey: record.viewKey ?? (action.key.kind === 'new' ? `new:${action.operationId}` : undefined),
+      lastTurnInput: action.input,
+      messages,
+      turn: { status: 'loading', error: '', operationId: action.operationId },
+      activeAssistantId: messages.at(-1)?.id,
+      activeRunId: undefined,
+      activeTurnId: undefined,
+      lastSequence: undefined,
+      browserFrame: undefined,
+    })
+  }
+  if (action.type === 'turn.event') {
+    const record = recordFor(state, action.key)
+    if (!turnOwned(record, action.operationId)) return state
+    if (eventAlreadyApplied(record, action.event)) return state
+    if (action.event.type === 'turn.started') {
+      const startedEvent = action.event
+      if ('checkpoint' in startedEvent.data) {
+        return replaceRecord(state, action.key, reconcileStarted(record, startedEvent))
+      }
+      const started = startedEvent.data
+      const summary = mergeConversationMetadata(
+        state.catalog.conversations.find((item) => item.id === started.conversation.id),
+        started.conversation,
+      )
+      const reconciled = { ...reconcileStarted(record, startedEvent), title: summary.title }
+      const catalog = {
+        ...state.catalog,
+        conversations: upsertConversation(
+          state.catalog.conversations,
+          summary,
+        ),
+        deletedConversationIds: state.catalog.deletedConversationIds.filter(
+          (id) => id !== started.conversation.id,
+        ),
+      }
+      if (action.key.kind === 'new') {
+        if (action.deferHandoff) {
+          return { ...state, catalog, newConversation: reconciled }
+        }
+        return {
+          ...state,
+          catalog,
+          newConversation: createNewConversationRecord(),
+          conversationsById: {
+            ...state.conversationsById,
+            [started.conversation.id]: reconciled,
+          },
+        }
+      }
+      return {
+        ...replaceRecord(state, action.key, reconciled),
+        catalog,
+      }
+    }
+    const nextRecord = applyNonStartedEvent(record, action.event, action.at)
+    const next = replaceRecord(state, action.key, nextRecord)
+    if (action.event.type !== 'turn.completed' && action.event.type !== 'turn.failed') {
+      return next
+    }
+    const id = action.key.kind === 'existing' ? action.key.id : record.id
+    const current = id
+      ? next.catalog.conversations.find((conversation) => conversation.id === id)
+      : undefined
+    return current
+      ? {
+          ...next,
+          catalog: {
+            ...next.catalog,
+            conversations: upsertConversation(next.catalog.conversations, {
+              ...current,
+              updated_at: new Date(action.at).toISOString(),
+            }),
+          },
+        }
+      : next
+  }
+  if (action.type === 'run.event') {
+    const record = recordFor(state, action.key)
+    if (!record.activeRunId || eventAlreadyApplied(record, action.event)) return state
+    const updated = action.event.type === 'turn.started'
+      ? reconcileStarted(record, action.event)
+      : applyNonStartedEvent(record, action.event, action.at)
+    const next = replaceRecord(state, action.key, updated)
+    if (action.event.type !== 'turn.completed' && action.event.type !== 'turn.failed') return next
+    const id = action.key.kind === 'existing' ? action.key.id : record.id
+    const current = id
+      ? next.catalog.conversations.find((conversation) => conversation.id === id)
+      : undefined
+    return current
+      ? {
+          ...next,
+          catalog: {
+            ...next.catalog,
+            conversations: upsertConversation(next.catalog.conversations, {
+              ...current,
+              updated_at: new Date(action.at).toISOString(),
+            }),
+          },
+        }
+      : next
+  }
+  if (action.type === 'run.browser-frame') {
+    const record = recordFor(state, action.key)
+    if (record.activeRunId !== action.runId) return state
+    return replaceRecord(state, action.key, { ...record, browserFrame: action.frame })
+  }
+  if (action.type === 'run.cancelling') {
+    const record = recordFor(state, action.key)
+    if (record.activeRunId !== action.runId) return state
+    return replaceRecord(state, action.key, {
+      ...record,
+      turn: { ...record.turn, status: 'loading', error: '' },
+    })
+  }
+  if (action.type === 'run.connection.failed') {
+    const record = recordFor(state, action.key)
+    if (record.activeRunId !== action.runId) return state
+    return replaceRecord(state, action.key, {
+      ...record,
+      turn: { ...record.turn, error: action.error },
+    })
+  }
+  if (action.type === 'question.status') {
+    const record = recordFor(state, action.key)
+    return replaceRecord(state, action.key, {
+      ...record,
+      messages: record.messages.map((message) => ({
+        ...message,
+        blocks: message.blocks.map((block) =>
+          block.type === 'question' && block.request.id === action.requestId
+            ? {
+                ...block,
+                request: {
+                  ...block.request,
+                  status: action.status,
+                  answers: action.answers,
+                  ...(action.result ? { result: action.result } : {}),
+                },
+              }
+            : block),
+      })),
+      turn: action.resume
+        ? { ...record.turn, status: 'loading', error: '' }
+        : record.turn,
+    })
+  }
+  if (action.type === 'turn.handoff') {
+    const record = state.newConversation
+    if (record.submissionId !== action.operationId || record.id !== action.id || record.turn.status === 'error') return state
+    return {
+      ...state,
+      newConversation: createNewConversationRecord(),
+      conversationsById: { ...state.conversationsById, [action.id]: record },
+    }
+  }
+  if (action.type === 'turn.failed' || action.type === 'turn.aborted') {
+    const record = recordFor(state, action.key)
+    if (!turnOwned(record, action.operationId)) return state
+    return replaceRecord(state, action.key, finalizeTurn(
+      record,
+      action.type === 'turn.aborted' || action.cancelled,
+      action.type === 'turn.aborted' ? '' : action.error,
+      action.at,
+      action.type === 'turn.failed' ? action.retryable : undefined,
+    ))
+  }
+  if (action.type === 'turn.detached') {
+    const record = recordFor(state, action.key)
+    if (!turnOwned(record, action.operationId)) return state
+    return replaceRecord(state, action.key, {
+      ...record,
+      turn: { ...record.turn, operationId: undefined },
+    })
+  }
+  if (action.type === 'catalog.projects.reordered') {
+    const incoming = new Map(action.projects.map((project) => [project.id, project]))
+    return {
+      ...state,
+      catalog: {
+        ...state.catalog,
+        projects: orderedProjects(state.catalog.projects.map((current) => {
+          const order = incoming.get(current.id)
+          return order ? mergeProject(current, {
+            ...current, sort_order: order.sort_order, order_updated_at: order.order_updated_at,
+          }) : current
+        })),
+      },
+    }
+  }
+  if (action.type === 'catalog.conversation.renamed') {
+    const current = state.catalog.conversations.find((item) => item.id === action.conversation.id)
+    if (!current || state.catalog.deletedConversationIds.includes(current.id)) return state
+    const conversation = mergeConversationMetadata(current, {
+      ...current, title: action.conversation.title, title_updated_at: action.conversation.title_updated_at,
+    })
+    const record = state.conversationsById[current.id]
+    return {
+      ...state,
+      catalog: { ...state.catalog, conversations: replaceConversation(state.catalog.conversations, conversation) },
+      conversationsById: record ? {
+        ...state.conversationsById, [current.id]: { ...record, title: conversation.title },
+      } : state.conversationsById,
+    }
+  }
+  if (action.type === 'catalog.project.renamed') {
+    return {
+      ...state,
+      catalog: {
+        ...state.catalog,
+        projects: orderedProjects(state.catalog.projects.map((project) =>
+          project.id === action.project.id ? mergeProject(project, action.project) : project)),
+      },
+    }
+  }
+  if (action.type === 'catalog.project.removed') {
+    return {
+      ...state,
+      catalog: {
+        ...state.catalog,
+        deletedProjectIds: [...new Set([...state.catalog.deletedProjectIds, action.id])],
+      },
+    }
+  }
+  if (action.type === 'catalog.project.added') {
+    return {
+      ...state,
+      catalog: {
+        ...state.catalog,
+        projects: orderedProjects([
+          mergeProject(state.catalog.projects.find((project) => project.id === action.project.id), action.project),
+          ...state.catalog.projects.filter((project) => project.id !== action.project.id),
+        ]),
+      },
+    }
+  }
+  if (action.type === 'catalog.pins.updated') {
+    return {
+      ...state,
+      catalog: {
+        ...state.catalog,
+        conversations: state.catalog.conversations.map((current) => {
+          const incoming = action.conversations.find((item) => item.id === current.id)
+          return incoming ? mergeConversationPin(current, {
+            ...current,
+            pinned_order: incoming.pinned_order,
+            pin_updated_at: incoming.pin_updated_at,
+          }) : current
+        }),
+      },
+    }
+  }
+  if (action.type === 'catalog.conversation.upserted') {
+    return {
+      ...state,
+      catalog: {
+        ...state.catalog,
+        conversations: replaceConversation(state.catalog.conversations, action.conversation),
+        deletedConversationIds: state.catalog.deletedConversationIds.filter(
+          (id) => id !== action.conversation.id,
+        ),
+      },
+    }
+  }
+  if (action.type === 'catalog.conversation.removed') {
+    const conversationsById = { ...state.conversationsById }
+    delete conversationsById[action.id]
+    return {
+      ...state,
+      conversationsById,
+      catalog: {
+        ...state.catalog,
+        conversations: state.catalog.conversations.filter(
+          (conversation) => conversation.id !== action.id,
+        ),
+        deletedConversationIds: [
+          action.id,
+          ...state.catalog.deletedConversationIds.filter((id) => id !== action.id),
+        ],
+      },
+    }
+  }
+  return state
+}
+
+// A response started before deletion must never restore the project or its membership.
+export function conversationControllerReducer(
+  state: ConversationControllerState,
+  action: ConversationControllerAction,
+): ConversationControllerState {
+  const next = reduceConversationController(state, action)
+  const deleted = next.catalog.deletedProjectIds
+  if (!deleted.length || next === state) return next
+  if (
+    !next.catalog.projects.some((project) => deleted.includes(project.id)) &&
+    !next.catalog.conversations.some((conversation) =>
+      conversation.project_id && deleted.includes(conversation.project_id))
+  ) return next
+  const projects = next.catalog.projects.filter((project) => !deleted.includes(project.id))
+  const conversations = next.catalog.conversations.map((conversation) =>
+    conversation.project_id && deleted.includes(conversation.project_id)
+      ? { ...conversation, project_id: null }
+      : conversation)
+  return { ...next, catalog: { ...next.catalog, projects, conversations } }
+}

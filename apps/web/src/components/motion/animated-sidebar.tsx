@@ -26,6 +26,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { SharedLayoutBg } from "@/components/motion/shared-layout-bg";
+import { Tooltip, type TooltipSide } from "@/components/motion/tooltip";
 import {
   AnimatedSidebarContext,
   useAnimatedSidebar,
@@ -35,6 +36,7 @@ import {
   EASE_OUT,
   SPRING_LAYOUT,
   SPRING_PRESS,
+  SPRING_SIDEBAR,
 } from "@/lib/ease";
 import { cn } from "@/lib/utils";
 
@@ -48,16 +50,6 @@ const SIDEBAR_KEYBOARD_SHORTCUT = "b";
 const PANEL_TRANSITION = {
   duration: 0.36,
   ease: EASE_DRAWER,
-} as const;
-
-// The desktop rail settles at a hard zero-width boundary. Keep the spring
-// critically damped so it cannot overshoot, pause against that boundary, and
-// then snap back during the final frame.
-const SIDEBAR_MORPH_TRANSITION = {
-  type: "spring",
-  stiffness: 380,
-  damping: 35,
-  mass: 0.75,
 } as const;
 
 const LABEL_ENTER_TRANSITION = {
@@ -445,7 +437,7 @@ function MobileSidebar({
         }}
         className={cn(
           "pointer-events-auto fixed inset-y-0 flex h-dvh w-(--sidebar-width-mobile) max-w-[88vw] flex-col overflow-hidden",
-          "border-border bg-background shadow-2xl will-change-transform",
+          "border-sidebar-border bg-sidebar shadow-2xl will-change-transform",
           side === "left" ? "left-0 border-r" : "right-0 border-l",
           !context.openMobile && "pointer-events-none",
           className,
@@ -521,12 +513,17 @@ export const AnimatedSidebar = forwardRef<HTMLElement, AnimatedSidebarProps>(
         data-side={side}
         animate={{ width }}
         transition={
-          context.reduce ? { duration: 0 } : SIDEBAR_MORPH_TRANSITION
+          context.reduce ? { duration: 0 } : SPRING_SIDEBAR
         }
         style={style}
         className={cn(
-          "group/sidebar relative hidden h-auto shrink-0 md:block will-change-[width]",
+          "group/sidebar relative hidden h-auto shrink-0 overflow-hidden md:block will-change-[width]",
           "peer",
+          variant === "sidebar" &&
+            !offcanvas &&
+            (side === "left"
+              ? "border-border border-r"
+              : "border-border border-l"),
           side === "right" && "order-last",
           className,
         )}
@@ -541,10 +538,10 @@ export const AnimatedSidebar = forwardRef<HTMLElement, AnimatedSidebarProps>(
             context.reduce ? REDUCED_TRANSITION : PANEL_TRANSITION
           }
           className={cn(
-            "sticky top-0 flex h-svh w-full flex-col overflow-hidden bg-background",
-            collapsible === "offcanvas" && "w-[var(--sidebar-width)]",
-            variant === "sidebar" &&
-              (side === "left" ? "border-border border-r" : "border-border border-l"),
+            // Keep the panel's useful layout at its expanded width while the
+            // outer rail animates. This prevents labels and controls from
+            // reflowing through intermediate widths during collapse/open.
+            "sticky top-0 flex h-svh w-[var(--sidebar-width)] min-w-[var(--sidebar-width)] flex-col overflow-hidden bg-sidebar text-sidebar-foreground",
             variant === "floating" &&
               "m-2 h-[calc(100svh-1rem)] rounded-2xl border border-border shadow-sm",
             variant === "inset" && "m-2 h-[calc(100svh-1rem)] rounded-2xl",
@@ -597,6 +594,7 @@ export function AnimatedSidebarTrigger({
       className={cn(
         "inline-flex size-10 shrink-0 items-center justify-center rounded-xl outline-none",
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        "[&_svg]:size-4 [&_svg]:shrink-0",
         className,
       )}
     >
@@ -719,7 +717,7 @@ export const AnimatedSidebarContent = forwardRef<
       ref={forwardedRef}
       data-slot="sidebar-content"
       className={cn(
-        "flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden overscroll-contain px-2 py-2",
+        "flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden overscroll-none px-2 py-2",
         className,
       )}
     />
@@ -999,6 +997,9 @@ export interface AnimatedSidebarMenuButtonProps {
   ariaExpanded?: boolean;
   disabled?: boolean;
   closeOnSelect?: boolean;
+  expandSidebarOnSelect?: boolean;
+  tooltip?: ReactNode;
+  tooltipSide?: TooltipSide;
   target?: "_blank" | "_self" | "_parent" | "_top";
   rel?: string;
   onSelect?: () => void;
@@ -1014,6 +1015,9 @@ export function AnimatedSidebarMenuButton({
   ariaExpanded,
   disabled = false,
   closeOnSelect,
+  expandSidebarOnSelect = true,
+  tooltip,
+  tooltipSide = "right",
   target,
   rel,
   onSelect,
@@ -1040,7 +1044,12 @@ export function AnimatedSidebarMenuButton({
     // leaves its children unreachable — a pointer can still fall back to the
     // rail or the shortcut, a finger has nothing. Selecting a group unfolds
     // the panel that is about to hold it.
-    if (ariaExpanded !== undefined && panel.collapsed && !context.isMobile) {
+    if (
+      expandSidebarOnSelect &&
+      ariaExpanded !== undefined &&
+      panel.collapsed &&
+      !context.isMobile
+    ) {
       context.setOpen(true);
     }
   };
@@ -1115,7 +1124,7 @@ export function AnimatedSidebarMenuButton({
     className,
   );
 
-  return href ? (
+  const control = href ? (
     <motion.a
       href={href}
       target={target}
@@ -1127,7 +1136,7 @@ export function AnimatedSidebarMenuButton({
       aria-expanded={ariaExpanded}
       aria-disabled={disabled || undefined}
       aria-label={panel.collapsed ? textLabel : undefined}
-      title={panel.collapsed ? textLabel : undefined}
+      title={panel.collapsed && !tooltip ? textLabel : undefined}
       tabIndex={disabled ? -1 : undefined}
       onClick={select}
       whileTap={context.reduce || disabled ? undefined : { scale: 0.98 }}
@@ -1143,7 +1152,7 @@ export function AnimatedSidebarMenuButton({
       aria-current={isActive ? "page" : undefined}
       aria-expanded={ariaExpanded}
       aria-label={panel.collapsed ? textLabel : undefined}
-      title={panel.collapsed ? textLabel : undefined}
+      title={panel.collapsed && !tooltip ? textLabel : undefined}
       onClick={select}
       whileTap={context.reduce || disabled ? undefined : { scale: 0.98 }}
       transition={SPRING_PRESS}
@@ -1151,5 +1160,18 @@ export function AnimatedSidebarMenuButton({
     >
       {content}
     </motion.button>
+  );
+
+  return tooltip ? (
+    <Tooltip
+      content={tooltip}
+      side={tooltipSide}
+      disabled={!panel.collapsed}
+      wrapperClassName="flex w-full"
+    >
+      {control}
+    </Tooltip>
+  ) : (
+    control
   );
 }

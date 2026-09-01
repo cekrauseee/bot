@@ -27,12 +27,14 @@ import { useHoverGesture } from "@/lib/hooks/use-hover-gesture";
 import { useTapGesture } from "@/lib/hooks/use-tap-gesture";
 import { cn } from "@/lib/utils";
 
-type Side = "top" | "right" | "bottom" | "left";
+export type TooltipSide = "top" | "right" | "bottom" | "left";
 
 export interface TooltipProps {
   content: ReactNode;
   children: ReactElement;
-  side?: Side;
+  side?: TooltipSide;
+  /** Keep the wrapper mounted without exposing tooltip behavior. */
+  disabled?: boolean;
   /** Delay before showing (ms). Default 120. */
   delay?: number;
   className?: string;
@@ -44,14 +46,14 @@ export interface TooltipProps {
 const GAP = 8;
 
 // Centering transform for the fixed-positioned anchor point, per side.
-const anchorTransform: Record<Side, string> = {
+const anchorTransform: Record<TooltipSide, string> = {
   top: "translate(-50%, -100%)",
   bottom: "translate(-50%, 0)",
   left: "translate(-100%, -50%)",
   right: "translate(0, -50%)",
 };
 
-const transformOrigin: Record<Side, string> = {
+const transformOrigin: Record<TooltipSide, string> = {
   top: "center bottom",
   bottom: "center top",
   left: "right center",
@@ -60,14 +62,14 @@ const transformOrigin: Record<Side, string> = {
 
 // Offset is in the direction *away* from the trigger — content originates near
 // the trigger and rises into resting position.
-const offsetFrom: Record<Side, { x?: number; y?: number }> = {
+const offsetFrom: Record<TooltipSide, { x?: number; y?: number }> = {
   top: { y: 8 },
   bottom: { y: -8 },
   left: { x: 8 },
   right: { x: -8 },
 };
 
-function buildVariants(side: Side): Variants {
+function buildVariants(side: TooltipSide): Variants {
   const o = offsetFrom[side];
   return {
     initial: {
@@ -118,6 +120,7 @@ export function Tooltip({
   content,
   children,
   side = "top",
+  disabled = false,
   delay = 120,
   className,
   wrapperClassName,
@@ -141,7 +144,7 @@ export function Tooltip({
     const r = el.getBoundingClientRect();
     const cx = r.left + r.width / 2;
     const cy = r.top + r.height / 2;
-    const point: Record<Side, { top: number; left: number }> = {
+    const point: Record<TooltipSide, { top: number; left: number }> = {
       top: { top: r.top - GAP, left: cx },
       bottom: { top: r.bottom + GAP, left: cx },
       left: { top: cy, left: r.left - GAP },
@@ -151,6 +154,7 @@ export function Tooltip({
   }, [side]);
 
   const show = useCallback(() => {
+    if (disabled) return;
     if (timer.current) clearTimeout(timer.current);
     const warm = Date.now() - lastHiddenAt < WARM_WINDOW_MS;
     timer.current = setTimeout(
@@ -160,7 +164,7 @@ export function Tooltip({
       },
       warm ? 0 : delay,
     );
-  }, [delay, place]);
+  }, [delay, disabled, place]);
 
   const hide = useCallback(() => {
     if (timer.current) {
@@ -179,6 +183,10 @@ export function Tooltip({
   const tap = useTapGesture<boolean>();
 
   const toggleOnTap = useCallback(() => {
+    if (disabled) {
+      tap.drop();
+      return;
+    }
     const gesture = tap.take();
     if (!gesture) return;
     if (gesture.pointerType === "mouse") {
@@ -192,16 +200,16 @@ export function Tooltip({
     if (timer.current) clearTimeout(timer.current);
     place();
     setOpen(true);
-  }, [hide, place, tap]);
+  }, [disabled, hide, place, tap]);
 
   // ...and closed again by the next tap that lands somewhere else. The label
   // covers nothing interactive, so that tap passes through to what it hit.
-  useDismiss(open, hide, anchorRef);
+  useDismiss(open && !disabled, hide, anchorRef);
 
   // Keep the tooltip pinned to the trigger while it's open and the page scrolls
   // or resizes (fixed coords are viewport-relative).
   useEffect(() => {
-    if (!open) return;
+    if (!open || disabled) return;
     const onMove = () => place();
     window.addEventListener("scroll", onMove, true);
     window.addEventListener("resize", onMove);
@@ -209,7 +217,7 @@ export function Tooltip({
       window.removeEventListener("scroll", onMove, true);
       window.removeEventListener("resize", onMove);
     };
-  }, [open, place]);
+  }, [disabled, open, place]);
 
   const variants = useMemo(
     () => (reduce ? REDUCED_VARIANTS : buildVariants(side)),
@@ -226,9 +234,11 @@ export function Tooltip({
   // ThemeToggle does — then runs the tooltip's instead of its own. Composing
   // with `props.onClick` cannot save it either, because a component element's
   // props hold nothing the component does internally.
-  const trigger = cloneElement(children as ReactElement<Record<string, unknown>>, {
-    "aria-describedby": id,
-  });
+  const trigger = disabled
+    ? children
+    : cloneElement(children as ReactElement<Record<string, unknown>>, {
+        "aria-describedby": id,
+      });
 
   return (
     <>
@@ -250,9 +260,20 @@ export function Tooltip({
         onPointerLeave={(event: PointerEvent) => {
           if (hover.leave(event)) hide();
         }}
-        onFocus={show}
+        onFocus={(event) => {
+          // Pointer activation (and focus restored by the activated control)
+          // can produce focus without keyboard intent. Only focus-visible
+          // focus should open the label; taps still use the explicit gesture
+          // path below, while keyboard users retain the accessible tooltip.
+          if (event.target instanceof Element && event.target.matches(":focus-visible")) {
+            show();
+          }
+        }}
         onBlur={hide}
-        onPointerDown={(event: PointerEvent) => tap.start(event, open)}
+        onPointerDown={(event: PointerEvent) => {
+          if (disabled) tap.drop();
+          else tap.start(event, open);
+        }}
         // A gesture the platform took away sends no click, and a key press
         // starts an activation that never had a pointer behind it. Either way
         // the record has to go, or the next click reads a finger that has long
@@ -266,7 +287,7 @@ export function Tooltip({
       {typeof document !== "undefined"
         ? createPortal(
             <AnimatePresence>
-              {open && coords ? (
+              {open && !disabled && coords ? (
                 <span
                   aria-hidden
                   className="pointer-events-none fixed z-[9999]"
@@ -285,7 +306,7 @@ export function Tooltip({
                     exit="exit"
                     style={{ transformOrigin: transformOrigin[side] }}
                     className={cn(
-                      "block whitespace-nowrap rounded-lg border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground shadow-lg",
+                      "block whitespace-nowrap rounded-lg border border-foreground/10 bg-foreground px-2.5 py-1 text-xs font-medium text-background shadow-lg",
                       className,
                     )}
                   >

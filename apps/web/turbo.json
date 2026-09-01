@@ -3,7 +3,6 @@
   "extends": ["//"],
   "tasks": {
     "build": {
-      "inputs": ["$TURBO_DEFAULT$", "!dist/**", ".env*"],
       "env": ["VITE_API_BASE_URL"]
     }
   }

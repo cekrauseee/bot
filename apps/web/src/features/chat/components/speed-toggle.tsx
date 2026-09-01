@@ -14,8 +14,8 @@ type SpeedToggleProps = {
 
 const SPEED_TOOLTIP_CONTENT = (
   <span className="flex flex-col gap-0.5 text-left">
-    <span className="text-xs font-medium">Speed 1.5×</span>
-    <span className="text-xs font-normal text-primary-foreground/60">Higher usage</span>
+    <span className="text-xs font-medium">Faster responses</span>
+    <span className="text-xs font-normal text-background/60">Higher usage</span>
   </span>
 )
 
@@ -40,14 +40,14 @@ export function SpeedToggle({
     <Tooltip
       side="top"
       content={SPEED_TOOLTIP_CONTENT}
-      className="rounded-xl border-transparent bg-primary px-3 py-2 text-primary-foreground shadow-xl"
+      className="rounded-xl border-transparent bg-foreground px-3 py-2 text-background shadow-xl"
       wrapperClassName="shrink-0"
     >
       <Button
         variant="ghost"
         size="icon"
         pressScale={0.96}
-        aria-label={`${stateLabel}. Speed 1.5× with higher usage.`}
+        aria-label={`${stateLabel}. Faster responses with higher usage.`}
         aria-pressed={currentValue}
         onClick={toggle}
         className={cn(

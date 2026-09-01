@@ -25,33 +25,23 @@ describe('configuration', () => {
   })
 
   it.each([
-    'my-wsproxy.example.com',
-    'my-wsproxy.example.com:443',
-    'my-wsproxy.example.com/v1',
-    'my-wsproxy.example.com:8443/v1/neon',
-    '127.0.0.1:8080/proxy',
-  ])('accepts the Neon WebSocket proxy address %s', (proxy) => {
-    expect(loadSettings({ ...base, NEON_WS_PROXY: proxy }).neonWsProxy).toBe(proxy)
+    'ENVIRONMENT',
+    'DATABASE_URL',
+    'REDIS_URL',
+    'WEB_BASE_URL',
+    'API_BASE_URL',
+    'AI_BASE_URL',
+    'SESSION_SECRET',
+    'OTP_PEPPER',
+    'RATE_LIMIT_PEPPER',
+    'AI_SERVICE_TOKEN',
+    'GOOGLE_REDIRECT_URI',
+    'RESEND_FROM',
+  ])('requires the explicit setting %s', (key) => {
+    expect(() => loadSettings({ ...base, [key]: '' })).toThrow(new RegExp(`${key} is required`))
   })
 
-  it.each([
-    'https://proxy.example.com',
-    'user:password@proxy.example.com',
-    'proxy.example.com?address=neon',
-    'proxy.example.com#fragment',
-    '-proxy.example.com',
-    'proxy..example.com',
-    'proxy.example.com:0',
-    'proxy.example.com:65536',
-    'proxy.example.com:abc',
-    'proxy.example.com/',
-    'proxy.example.com/v 1',
-  ])('rejects an invalid Neon WebSocket proxy address %s', (proxy) => {
-    expect(() => loadSettings({ ...base, NEON_WS_PROXY: proxy })).toThrow(/NEON_WS_PROXY/)
-  })
-
-  it('rejects CIDR proxy entries and non-origin web URLs', () => {
-    expect(() => loadSettings({ ...base, TRUSTED_PROXY_HOSTS: '10.0.0.0/8' })).toThrow()
+  it('rejects non-origin web URLs', () => {
     expect(() => loadSettings({ ...base, WEB_BASE_URL: 'http://localhost:5173/app' })).toThrow()
   })
 
@@ -66,6 +56,7 @@ describe('configuration', () => {
       SESSION_SECRET: 'session-secret-that-is-at-least-32-characters-long',
       OTP_PEPPER: 'otp-pepper-that-is-at-least-32-characters-long',
       RATE_LIMIT_PEPPER: 'rate-limit-pepper-that-is-at-least-32-characters',
+      AI_SERVICE_TOKEN: 'ai-service-token-that-is-at-least-32-characters',
       GOOGLE_CLIENT_ID: 'client.apps.googleusercontent.com',
       GOOGLE_CLIENT_SECRET: 'google-client-secret',
       RESEND_API_KEY: 're_live_valid-key',
@@ -74,9 +65,9 @@ describe('configuration', () => {
     expect(loadSettings(production).secureCookies).toBe(true)
     expect(() => loadSettings({ ...production, DATABASE_URL: 'postgresql://user:password@db.example.com/mybot' }))
       .toThrow(/must target a Neon host/)
-    expect(loadSettings({ ...production, DATABASE_URL: 'postgresql://user:password@db.example.com/mybot', NEON_WS_PROXY: 'proxy.example.com' }).neonWsProxy)
-      .toBe('proxy.example.com')
     expect(() => loadSettings({ ...production, GOOGLE_REDIRECT_URI: 'https://other.example.com/auth/google/callback' })).toThrow()
     expect(() => loadSettings({ ...production, RESEND_FROM: '' })).toThrow()
+    expect(() => loadSettings({ ...production, AI_SERVICE_TOKEN: 'replace-with-token' }))
+      .toThrow(/AI_SERVICE_TOKEN/)
   })
 })

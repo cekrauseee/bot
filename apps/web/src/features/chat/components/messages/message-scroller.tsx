@@ -1,6 +1,6 @@
 "use client";
 
-import { useReducedMotion } from "motion/react";
+import { animate, useReducedMotion } from "motion/react";
 import {
   type ComponentPropsWithRef,
   type Ref,
@@ -16,9 +16,24 @@ import {
   type PreviewRailItem,
 } from "@/components/motion/preview-rail";
 import { cn } from "@/lib/utils";
+import { TranscriptInteractionContext } from "../shared/transcript-interaction-context";
+import { ScrollToBottomButton } from "./scroll-to-bottom-button";
+import { createTurnSpacer } from "../../motion/turn-spacer";
 
 const PREVIEW_TITLE_LENGTH = 56;
 const PREVIEW_DESCRIPTION_LENGTH = 88;
+type ScrollTransition = {
+  duration: number;
+  ease: readonly [number, number, number, number];
+};
+const DEFAULT_SCROLL: ScrollTransition = {
+  duration: 0.2,
+  ease: [0.2, 0.2, 0.8, 1],
+};
+const TURN_ANCHOR_SCROLL: ScrollTransition = {
+  duration: 0.24,
+  ease: [0.3, 0, 0.12, 1],
+};
 
 function truncateMessageText(text: string, limit: number) {
   if (text.length <= limit) return text;
@@ -79,10 +94,13 @@ export interface MessageScrollerProps extends ComponentPropsWithRef<"div"> {
   followOutput?: boolean;
   /** Distance from the end that still counts as following the output. */
   followThreshold?: number;
-  /** Smoothly follow growing content. */
+  /** Animate explicit navigation and optional output following. */
   smooth?: boolean;
   /** Reports when the reader leaves or returns to the live edge. */
   onFollowChange?: (following: boolean) => void;
+  onInitialPosition?: (viewport: HTMLElement) => void;
+  /** A newly submitted user message to position at the top of this view. */
+  anchorMessageKey?: string;
   /** Accessible label for the scrollable transcript. */
   label?: string;
   /** Marks the transcript as waiting for more streamed content. */
@@ -110,6 +128,8 @@ export function MessageScroller({
   followThreshold = 56,
   smooth = true,
   onFollowChange,
+  onInitialPosition,
+  anchorMessageKey,
   label = "Conversation",
   busy,
   navigation,
@@ -126,10 +146,16 @@ export function MessageScroller({
 }: MessageScrollerProps) {
   const reduce = useReducedMotion() ?? false;
   const viewportRef = useRef<HTMLElement>(null);
+  const initialPositionCallback = useRef(onInitialPosition);
+  useLayoutEffect(() => { initialPositionCallback.current = onInitialPosition; }, [onInitialPosition]);
   const contentRef = useRef<HTMLDivElement>(null);
+  const spacerRef = useRef<HTMLDivElement>(null);
+  const turnSpacerRef = useRef<ReturnType<typeof createTurnSpacer> | null>(null);
+  const anchorMessageKeyRef = useRef(anchorMessageKey);
   const followingRef = useRef(followOutput);
   const programmaticScrollRef = useRef(false);
-  const scrollTimerRef = useRef<number | undefined>(undefined);
+  const readingDisclosureRef = useRef(false);
+  const scrollAnimationRef = useRef<ReturnType<typeof animate> | null>(null);
   const frameRef = useRef<number | undefined>(undefined);
   const railFrameRef = useRef<number | undefined>(undefined);
   const railIdRef = useRef(new WeakMap<HTMLElement, string>());
@@ -138,6 +164,7 @@ export function MessageScroller({
   const [railItems, setRailItems] = useState<PreviewRailItem[]>([]);
   const [activeRailId, setActiveRailId] = useState("");
   const [railOverflowing, setRailOverflowing] = useState(false);
+  const [awayFromEnd, setAwayFromEnd] = useState(false);
   const {
     onScroll: onViewportScroll,
     onWheel: onViewportWheel,
@@ -263,59 +290,170 @@ export function MessageScroller({
     });
   }, [navigation, syncRailItems, updateActiveRailItem]);
 
-  const scrollToEnd = useCallback((behavior: ScrollBehavior) => {
+  const updateEndVisibility = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    setAwayFromEnd(
+      viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight > followThreshold,
+    );
+  }, [followThreshold]);
+
+  const cancelScrollAnimation = useCallback(() => {
+    scrollAnimationRef.current?.stop();
+    scrollAnimationRef.current = null;
+    programmaticScrollRef.current = false;
+  }, []);
+
+  const scrollViewportTo = useCallback((
+    top: number,
+    behavior: ScrollBehavior,
+    transition: ScrollTransition = DEFAULT_SCROLL,
+  ) => {
     const viewport = viewportRef.current;
     if (!viewport) return;
 
+    cancelScrollAnimation();
     programmaticScrollRef.current = true;
-    if (typeof viewport.scrollTo === "function") {
-      viewport.scrollTo({ top: viewport.scrollHeight, behavior });
-    } else {
-      viewport.scrollTop = viewport.scrollHeight;
-    }
-    if (scrollTimerRef.current) window.clearTimeout(scrollTimerRef.current);
-    scrollTimerRef.current = window.setTimeout(() => {
+    // Capture the destination once; content streamed during this jump cannot
+    // extend the animation or turn it into automatic output following.
+    const destination = Math.max(0, Math.min(top, viewport.scrollHeight - viewport.clientHeight));
+    const writePosition = (position: number) => {
+      if (typeof viewport.scrollTo === "function") {
+        viewport.scrollTo({ top: position, behavior: "instant" });
+      } else {
+        viewport.scrollTop = position;
+      }
+    };
+    const complete = () => {
+      scrollAnimationRef.current = null;
       programmaticScrollRef.current = false;
-    }, behavior === "smooth" ? 320 : 0);
-  }, []);
+      updateEndVisibility();
+      updateActiveRailItem();
+    };
+
+    if (behavior !== "smooth" || Math.abs(destination - viewport.scrollTop) < 1) {
+      writePosition(destination);
+      complete();
+      return;
+    }
+
+    scrollAnimationRef.current = animate(viewport.scrollTop, destination, {
+      type: "tween",
+      duration: transition.duration,
+      ease: transition.ease,
+      onUpdate: writePosition,
+      onComplete: complete,
+    });
+  }, [cancelScrollAnimation, updateActiveRailItem, updateEndVisibility]);
+
+  const scrollToEnd = useCallback((behavior: ScrollBehavior) => {
+    const viewport = viewportRef.current;
+    if (viewport) scrollViewportTo(viewport.scrollHeight, behavior);
+  }, [scrollViewportTo]);
+
+  const jumpToEnd = useCallback((keyboard: boolean) => {
+    readingDisclosureRef.current = false;
+    setFollowing(true);
+    // Keep keyboard focus in the transcript when the control disappears.
+    if (keyboard) viewportRef.current?.focus({ preventScroll: true });
+    scrollToEnd(reduce || !smooth ? "instant" : "smooth");
+  }, [reduce, scrollToEnd, setFollowing, smooth]);
 
   const handleScroll = useCallback(() => {
+    turnSpacerRef.current?.onScroll(!programmaticScrollRef.current);
+    updateEndVisibility();
     const viewport = viewportRef.current;
-    if (!viewport || programmaticScrollRef.current) return;
+    if (!viewport || programmaticScrollRef.current || readingDisclosureRef.current) return;
 
     const distance =
       viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
     setFollowing(distance <= followThreshold);
     updateActiveRailItem();
-  }, [followThreshold, setFollowing, updateActiveRailItem]);
+  }, [followThreshold, setFollowing, updateActiveRailItem, updateEndVisibility]);
 
   const leaveLiveEdge = useCallback(() => {
-    programmaticScrollRef.current = false;
-  }, []);
+    readingDisclosureRef.current = false;
+    cancelScrollAnimation();
+  }, [cancelScrollAnimation]);
+
+  const pauseForDisclosure = useCallback(() => {
+    readingDisclosureRef.current = true;
+    setFollowing(false);
+    cancelScrollAnimation();
+    if (frameRef.current) {
+      cancelAnimationFrame(frameRef.current);
+      frameRef.current = undefined;
+      if (viewportRef.current) initialPositionCallback.current?.(viewportRef.current);
+    }
+  }, [cancelScrollAnimation, setFollowing]);
 
   useLayoutEffect(() => {
-    followingRef.current = followOutput;
-    if (!followOutput) return;
-
-    frameRef.current = requestAnimationFrame(() => scrollToEnd("auto"));
+    const viewport = viewportRef.current;
+    const content = contentRef.current;
+    const spacer = spacerRef.current;
+    if (!viewport || !content || !spacer) return;
+    const turnSpacer = createTurnSpacer(viewport, content, spacer);
+    turnSpacerRef.current = turnSpacer;
+    // Position newly opened history once, independently of live-output following.
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = undefined;
+      const target = turnSpacer.start(anchorMessageKeyRef.current);
+      if (target === null) scrollToEnd("auto");
+      else scrollViewportTo(target, "instant");
+      initialPositionCallback.current?.(viewport);
+    });
     return () => {
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
+      frameRef.current = undefined;
+      turnSpacer.dispose();
+      turnSpacerRef.current = null;
     };
-  }, [followOutput, scrollToEnd]);
+  }, [scrollToEnd, scrollViewportTo]);
+
+  useLayoutEffect(() => {
+    anchorMessageKeyRef.current = anchorMessageKey;
+    // The initial positioning pass also reveals history, so it owns first mount.
+    if (frameRef.current !== undefined) return;
+    const target = turnSpacerRef.current?.start(anchorMessageKey);
+    if (target === undefined || target === null) return;
+    readingDisclosureRef.current = false;
+    setFollowing(false);
+    scrollViewportTo(
+      target,
+      reduce || !smooth ? "instant" : "smooth",
+      TURN_ANCHOR_SCROLL,
+    );
+  }, [anchorMessageKey, reduce, scrollViewportTo, setFollowing, smooth]);
 
   useEffect(() => {
     const content = contentRef.current;
-    if (!content || typeof ResizeObserver === "undefined") return;
+    const viewport = viewportRef.current;
+    if (!content || !viewport || typeof ResizeObserver === "undefined") return;
+    let observedHeight = content.scrollHeight;
+    let observedViewportHeight = viewport.clientHeight;
 
     const observer = new ResizeObserver(() => {
+      turnSpacerRef.current?.resize();
       scheduleRailSync();
-      if (!followOutput || !followingRef.current) return;
-      scrollToEnd(reduce || !smooth ? "auto" : "smooth");
+      const nextHeight = content.scrollHeight;
+      const nextViewportHeight = viewport.clientHeight;
+      const geometryChanged = nextHeight !== observedHeight || nextViewportHeight !== observedViewportHeight;
+      observedHeight = nextHeight;
+      observedViewportHeight = nextViewportHeight;
+      // ResizeObserver reports once when observation starts. The layout effect
+      // already owns that initial jump to the live edge.
+      if (geometryChanged && followOutput && followingRef.current) {
+        scrollToEnd(reduce || !smooth ? "auto" : "smooth");
+      }
+      updateEndVisibility();
     });
-    observer.observe(content);
+    // The spacer changes the outer content height. Observe the message group
+    // itself so consuming space does not feed back into this ResizeObserver.
+    observer.observe(content.querySelector('[data-slot="message-group"]') ?? content);
+    observer.observe(viewport);
 
     return () => observer.disconnect();
-  }, [followOutput, reduce, scheduleRailSync, scrollToEnd, smooth]);
+  }, [followOutput, reduce, scheduleRailSync, scrollToEnd, smooth, updateEndVisibility]);
 
   useEffect(() => {
     if (navigation !== "rail") {
@@ -353,7 +491,7 @@ export function MessageScroller({
 
   useEffect(
     () => () => {
-      if (scrollTimerRef.current) window.clearTimeout(scrollTimerRef.current);
+      scrollAnimationRef.current?.stop();
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
       if (railFrameRef.current) cancelAnimationFrame(railFrameRef.current);
     },
@@ -367,6 +505,7 @@ export function MessageScroller({
       if (!viewport || !target) return;
 
       const lastItem = railItems.at(-1)?.id === item.id;
+      readingDisclosureRef.current = false;
       setActiveRailId(item.id);
       if (lastItem) {
         setFollowing(true);
@@ -375,7 +514,6 @@ export function MessageScroller({
       }
 
       setFollowing(false);
-      programmaticScrollRef.current = true;
       const viewportRect = viewport.getBoundingClientRect();
       const targetRect = target.getBoundingClientRect();
       const top =
@@ -383,25 +521,16 @@ export function MessageScroller({
         targetRect.top -
         viewportRect.top -
         (viewport.clientHeight - targetRect.height) / 2;
-      const behavior = reduce || !smooth ? "auto" : "smooth";
-
-      if (typeof viewport.scrollTo === "function") {
-        viewport.scrollTo({ top, behavior });
-      } else {
-        viewport.scrollTop = top;
-      }
-      if (scrollTimerRef.current) window.clearTimeout(scrollTimerRef.current);
-      scrollTimerRef.current = window.setTimeout(() => {
-        programmaticScrollRef.current = false;
-      }, behavior === "smooth" ? 320 : 0);
+      scrollViewportTo(top, reduce || !smooth ? "instant" : "smooth");
     },
-    [railItems, reduce, scrollToEnd, setFollowing, smooth],
+    [railItems, reduce, scrollToEnd, scrollViewportTo, setFollowing, smooth],
   );
 
   const viewport = (
     <section
       ref={setViewportRef}
       aria-label={label}
+      tabIndex={0}
       {...restViewportProps}
       onScroll={(event) => {
         handleScroll();
@@ -416,18 +545,17 @@ export function MessageScroller({
         onViewportTouchStart?.(event);
       }}
       onKeyDown={(event) => {
-        if (["ArrowUp", "PageUp", "Home"].includes(event.key)) {
+        if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) {
           leaveLiveEdge();
         }
         onViewportKeyDown?.(event);
       }}
       className={cn(
-        "h-full overflow-y-auto overscroll-contain outline-none [overflow-anchor:none] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+        "h-full overflow-y-auto overscroll-none outline-none [overflow-anchor:none] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
         navigation === "rail"
           ? "[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           : "[scrollbar-gutter:stable]",
         viewportClassName,
-        navigation === "rail" && railOverflowing && "pr-10",
       )}
     >
       <div
@@ -439,7 +567,10 @@ export function MessageScroller({
         className={contentClassName}
         {...contentProps}
       >
-        {children}
+        <TranscriptInteractionContext value={pauseForDisclosure}>
+          {children}
+        </TranscriptInteractionContext>
+        <div ref={spacerRef} data-slot="turn-spacer" aria-hidden="true" className="pointer-events-none shrink-0" />
       </div>
     </section>
   );
@@ -447,7 +578,7 @@ export function MessageScroller({
   return (
     <div
       data-slot="message-scroller"
-      className={cn("min-h-0", className)}
+      className={cn("relative min-h-0", className)}
       {...props}
     >
       {navigation === "rail" ? (
@@ -463,7 +594,7 @@ export function MessageScroller({
           previewContainerClassName="right-8 left-3"
           previewClassName="mr-1 w-64 max-w-full [&_[data-slot=preview-rail-card]]:h-20 [&_[data-slot=preview-rail-card]]:overflow-hidden [&_[data-slot=preview-rail-card]]:p-3 [&_[data-slot=preview-rail-title]]:line-clamp-1 [&_[data-slot=preview-rail-title]]:text-xs [&_[data-slot=preview-rail-title]]:leading-4 [&_[data-slot=preview-rail-description]]:line-clamp-2 [&_[data-slot=preview-rail-description]]:text-xs [&_[data-slot=preview-rail-description]]:leading-4"
           railClassName={cn(
-            "absolute inset-y-3 right-1 w-7 content-center py-1 [&_[data-slot=preview-rail-item]]:w-7 [&_[data-slot=preview-rail-item]]:justify-end [&_[data-slot=preview-rail-tick]]:h-px [&_[data-slot=preview-rail-tick]]:w-4 [&_[data-slot=preview-rail-tick]]:origin-right",
+            "absolute inset-y-3 right-1 w-7 content-center py-1 max-sm:hidden [&_[data-slot=preview-rail-item]]:w-7 [&_[data-slot=preview-rail-item]]:justify-end [&_[data-slot=preview-rail-tick]]:h-px [&_[data-slot=preview-rail-tick]]:w-4 [&_[data-slot=preview-rail-tick]]:origin-right",
             railOverflowing
               ? "pointer-events-auto opacity-100"
               : "pointer-events-none opacity-0",
@@ -475,6 +606,7 @@ export function MessageScroller({
       ) : (
         viewport
       )}
+      <ScrollToBottomButton visible={awayFromEnd} busy={busy} onClick={jumpToEnd} />
     </div>
   );
 }

@@ -19,7 +19,7 @@ async function filesUnder(directory) {
 }
 
 test('pages consume only the public chat feature entrypoint', async () => {
-  const homePage = await readFile(`${webSource}/pages/home/page.tsx`, 'utf8')
+  const homePage = await readFile(`${webSource}/pages/chat/page.tsx`, 'utf8')
 
   assert.match(homePage, /from ['"]@\/features\/chat['"]/)
   assert.doesNotMatch(homePage, /from ['"]@\/features\/chat\//)
@@ -29,6 +29,7 @@ test('chat models and fixtures remain serializable and presentation-independent'
   const dataFiles = [
     `${chatFeature}/model.ts`,
     ...(await filesUnder(`${chatFeature}/fixtures`)),
+    ...(await filesUnder(`${chatFeature}/state`)),
   ]
 
   for (const file of dataFiles) {
@@ -39,8 +40,32 @@ test('chat models and fixtures remain serializable and presentation-independent'
   }
 })
 
-test('vendor-style chat structure and names cannot return', async () => {
-  await assert.rejects(access(`${webSource}/components/agents`))
+test('the route and keyed controller own conversation selection and async writes', async () => {
+  const controller = await readFile(
+    `${chatFeature}/state/conversation-controller.ts`,
+    'utf8',
+  )
+  const hook = await readFile(
+    `${chatFeature}/hooks/use-conversation-controller.ts`,
+    'utf8',
+  )
+  const transport = await readFile(
+    `${chatFeature}/services/conversation-api.ts`,
+    'utf8',
+  )
+
+  assert.doesNotMatch(controller, /\bactiveConversationId\b/)
+  assert.match(controller, /conversationsById/)
+  assert.match(controller, /operationId/)
+  assert.match(hook, /conversationRouteIdentity\(conversationId\)/)
+  assert.doesNotMatch(hook, /routeConversationRef|streamConversationRef/)
+  assert.doesNotMatch(transport, /from ['"]react['"]|\buseConversation\b/)
+})
+
+test('registry-owned agent primitives stay isolated from page composition', async () => {
+  await access(`${webSource}/components/agents`)
+  const chatPage = await readFile(`${webSource}/pages/chat/page.tsx`, 'utf8')
+  assert.doesNotMatch(chatPage, /@\/components\/agents/)
 
   const chatFiles = await filesUnder(chatFeature)
   for (const file of chatFiles) {

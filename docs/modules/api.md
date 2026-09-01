@@ -9,7 +9,10 @@
 - `src/app.ts`: Elysia application factory, cross-cutting HTTP behavior, and typed route composition.
 - `src/config.ts`: validated environment configuration and production guardrails.
 - `src/modules/auth`: OTP, Google OpenID Connect, and session services.
-- `src/db`: Drizzle schema, repository, connection, migration, and drift checks.
+- `src/modules/conversations.ts`: private AI client and public conversation serialization.
+- `src/modules/agent-control-plane.ts`: leased execution, checkpoint projection, event replay, Redis fanout, and WebSocket transport.
+- `src/modules/models.ts`: provider-aware public model capability catalog.
+- `src/db`: Drizzle schema, repository, connection, migration, drift checks, and local application seed.
 - `src/email.ts`: React Email composition and Resend delivery.
 - `drizzle`: versioned, non-destructive SQL migrations.
 - `tests`: unit and PostgreSQL/Redis integration coverage.
@@ -24,10 +27,56 @@
 
 The response is validated by an Elysia runtime schema and covered by API tests. Authentication routes live under `/auth`; their stable behavior is documented in [Authentication](authentication.md). The service does not add an `/api` path prefix because the API is hosted on its own domain. Interactive OpenAPI documentation is available at `/openapi`, with its JSON document at `/openapi/json`.
 
+Authenticated conversation routes are:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/conversations` | List the current user's conversations newest first |
+| `GET` | `/conversations/:conversationId` | Load messages, task plan, and the current active-run projection |
+| `PATCH` | `/conversations/:conversationId` | Rename an owned conversation with `{ title: string }` |
+| `POST` | `/conversations/turns` | Create a conversation and stream its first turn |
+| `POST` | `/conversations/:conversationId/turns` | Stream a turn in an existing conversation |
+| `DELETE` | `/conversations/:conversationId` | Delete an inactive owned conversation |
+| `PATCH` | `/conversations/:conversationId/pin` | Set `{ pinned: boolean }` for an owned conversation |
+| `PATCH` | `/conversations/pinned-order` | Reorder the complete owned pinned set using `{ conversation_ids: string[] }` |
+
+Conversation summaries include nullable `pinned_order` and `pin_updated_at`. Pinning appends to the pinned order and preserves `project_id` and `updated_at`; unpinning clears the order. Pin/reorder requests serialize on the owning user row, and pin timestamps advance monotonically. Reordering rejects duplicate, missing, foreign, or unpinned IDs with 409 without partial writes. Pinned conversations reject all explicit project assignments, including moves to Recents, until unpinned.
+
+Conversation renames normalize whitespace, keep chat activity timestamps and project/pin membership unchanged, and advance a separate `title_updated_at` clock.
+
+Projects expose nullable `sort_order` and `order_updated_at`. `PATCH /projects/order` accepts `{ project_ids: string[] }` containing the complete current owned set and returns the reordered projects. Invalid or stale sets return 409 without partial writes. Create, delete, and reorder serialize on the user row. Unordered/new projects precede ordered projects, with creation time and ID descending as tie-breakers; renaming does not change the chosen order.
+
+Agent control routes are:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/models` | Return provider-aware model, reasoning, and speed capabilities |
+| `GET` | `/agent-runs/:runId` | Load one owned run projection |
+| `GET` | `/agent-runs/:runId/events?after=` | Replay a bounded page of durable events |
+| `POST` | `/agent-runs/:runId/resume` | Atomically answer the current question and queue continuation |
+| `POST` | `/agent-runs/:runId/cancel` | Request cancellation without deleting run history |
+| WebSocket | `/agent-runs/:runId/subscribe?after=` | Replay then stream durable events and transient browser frames |
+
+Starting a turn creates a durable run and returns named `text/event-stream` events with a v2 envelope. PostgreSQL assigns the public decimal event sequence. The executor validates the AI service sequence, fences every write with a renewable execution token, stores partial state, and completes only after a valid terminal event. One active run is allowed per conversation across application instances.
+
+The API preserves validated request and correlation IDs in response headers and forwards them to the immediate AI execution, resume, or cancellation attempt. Recovered background work has no originating HTTP request and therefore starts a new logging context inside the worker boundary. Logs exclude prompts, message content, credentials, cookies, and provider reasoning.
+
+Runs may continue after the initiating HTTP connection closes. Clients hydrate `active_run`, reconnect with the last sequence, replay through a fixed high-water mark, and then receive Redis-backed live fanout. PostgreSQL remains authoritative if Redis drops a message. Browser images are validated and fanned out separately without a database insert.
+
+Conversation details expose one current task `plan`, projected from the latest nonempty run snapshot. New runs inherit that plan and pass it to the AI service as context. Plan updates replace the current snapshot; they do not create message blocks or independent plans per turn.
+
+Projects expose a stable `workspace_path` through the existing authenticated `GET /projects` and `POST /projects` routes. Creation stores `/workspace/projects/<initial-slug-prefix>-<project-id>` without calling the runtime. Paths use at most 48 Unicode code points from the initial slug and the full project UUID, so renaming preserves references and recreating a deleted project cannot adopt its files. Existing projects receive paths through the non-destructive migration.
+
+Each new run snapshots its owned conversation's project path into `working_directory`, or `/workspace` when unassigned. The executor uses the stored value on every invocation and resume, even if the conversation moves or project metadata changes. The following run uses the conversation's new assignment. Pre-migration runs keep `/workspace` to preserve existing tool effects. Folder selection, file browsing, and project lifecycle UI are outside this change.
+
+The first AI event contains its LangGraph checkpoint projection. When that checkpoint advanced beyond the API, Elysia replaces stale assistant text, clears a consumed resume value, records the reconciled checkpoint ID, and then applies new deltas. Expired execution leases are reclaimed periodically; stale executors cannot append events or change the assistant.
+
+Existing-conversation turn requests may include `retry_of`, the UUID of the latest failed assistant message. Under the owning conversation lock, the API verifies that the prompt matches its preceding user message and that no turn is streaming. It resets and reuses that assistant row, keeping the user message once. Older, completed, mismatched, or already-running attempts return 409; another user's conversation returns 404. New-conversation requests cannot include `retry_of`.
+
 ## Dependency Management
 
-`package.json` defines runtime and development dependencies. The repository root `package-lock.json` records the complete npm workspace graph. Turbo runs package-owned TypeScript, Oxlint, Vitest, and production build tasks; integration tests and Drizzle migration checks are explicitly non-cached external-state tasks. Local and test connections use `pg.Pool`; production selects Neon Serverless `Pool` and configures the Node `ws` constructor. Production accepts only Neon hosts (`*.neon.tech`) unless `NEON_WS_PROXY` is configured as a `host[:port][/path]` WebSocket proxy address without a protocol.
+`package.json` defines runtime and development dependencies. The repository root `package-lock.json` records the complete npm workspace graph. Turbo runs package-owned TypeScript, Oxlint, Vitest, and production build tasks; integration tests and Drizzle migration checks are explicitly non-cached external-state tasks. Local and test connections use `pg.Pool`; production accepts only `*.neon.tech` hosts and connects directly through Neon Serverless with the Node `ws` constructor.
 
 ## Database Compatibility
 
-Drizzle now owns the schema and migration workflow. The initial migration uses idempotent DDL so it can initialize an empty database or adopt tables already created by the former Alembic revision without deleting data. Migration checks verify the expected relational contract before delivery.
+Drizzle owns the schema and migration workflow. After the conversation pin/title and project-order migrations, `0005_lyrical_captain_britain` adds one global workspace per user, durable runs, and append-only events. `0006_yellow_scorpion` adds immutable project workspace paths and frozen run working directories. `0007_crazy_maginty` permits retry attempts to create separate run histories while reusing the failed assistant message. These migrations are non-destructive and preserve existing conversation ownership. Migration checks verify the complete relational contract before delivery.

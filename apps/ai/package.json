@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "dev": "uv run --project . fastapi dev src/my_bot_ai/main.py --port 8001",
+    "dev": "uv run --project . python -m my_bot_ai.dev",
     "lint": "uv run --project . ruff check .",
     "test": "uv run --project . pytest tests"
   }
