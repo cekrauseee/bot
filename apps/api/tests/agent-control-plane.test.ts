@@ -66,6 +66,9 @@ describe('durable agent event contract', () => {
 
   it('rejects unknown or mismatched provider events', () => {
     expect(() => parseAgentEvents(frame(1, 'provider.native', {}))).toThrow('invalid_provider_event')
+    expect(() => parseAgentEvents(frame(1, 'conversation.title.updated', {
+      conversation: { id: 'provider-controlled' },
+    }))).toThrow('invalid_provider_event')
     expect(() => parseAgentEvents(
       `event: text.delta\ndata: ${JSON.stringify({
         version: 2, sequence: 1, run_id: runId, turn_id: turnId,

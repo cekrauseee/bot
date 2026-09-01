@@ -2,6 +2,7 @@ import { motion, useReducedMotion } from 'motion/react'
 import { useEffect, useRef, useState, type RefObject } from 'react'
 
 import { TextShimmer } from '@/components/motion/text-shimmer'
+import { TextCascade } from '@/components/motion/text-cascade'
 import { SIDEBAR_ACTION_REVEAL_DURATION } from '../../motion/sidebar-motion'
 
 export function SidebarTitle({ title, active, shimmer = false, actionsRef, actionsVisible = false }: {
@@ -41,7 +42,10 @@ export function SidebarTitle({ title, active, shimmer = false, actionsRef, actio
 
   const running = active && distance > 0 && !reduce
   const revealDelay = running && actionsVisible ? SIDEBAR_ACTION_REVEAL_DURATION : 0
-  const content = shimmer && !reduce ? <TextShimmer className="inline">{title}</TextShimmer> : title
+  const cascade = <TextCascade text={title} className="block max-w-full truncate" />
+  const content = shimmer && !reduce
+    ? <TextShimmer className="block max-w-full">{cascade}</TextShimmer>
+    : cascade
 
   return (
     <span ref={viewportRef} title={reduce ? title : undefined} className="relative block min-w-0 flex-1 overflow-hidden text-start">

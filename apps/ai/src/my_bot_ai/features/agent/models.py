@@ -40,6 +40,8 @@ def build_chat_model(
     model: ModelName,
     reasoning_effort: ReasoningEffort | None,
     speed: Speed,
+    *,
+    streaming: bool = True,
 ) -> tuple[BaseChatModel, ResolvedModelSettings]:
     """Build the dedicated provider integration with validated product settings."""
 
@@ -54,7 +56,7 @@ def build_chat_model(
             store=False,
             reasoning={"effort": resolved.reasoning_effort, "summary": "auto"},
             service_tier="fast" if resolved.speed == "fast" else "default",
-            streaming=True,
+            streaming=streaming,
         )
         return llm, resolved
 
@@ -65,7 +67,7 @@ def build_chat_model(
             model=resolved.model,
             api_key=settings.xai_api_key,
             reasoning_effort=resolved.reasoning_effort,
-            streaming=True,
+            streaming=streaming,
         )
         return llm, resolved
 
@@ -82,7 +84,7 @@ def build_chat_model(
                 "exclude": True,
             }
         },
-        streaming=True,
+        streaming=streaming,
     )
     return llm, resolved
 

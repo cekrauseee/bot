@@ -19,7 +19,7 @@ The repository contains independently managed product services under `apps/` and
 
 The web application uses React Router Data Mode. The router is created outside the React tree and lazy-loads the public login page and one persistent chat layout for `/`, `/conversations/:conversationId`, and `/projects/:projectId/:conversationId`. Pages compose authentication and the public chat feature. Hooks own interaction and session state; feature services own HTTP and SSE parsing.
 
-The chat feature is application-owned under `apps/web/src/features/chat`. Its public entrypoint re-exports the feature container and route-path helper. The URL is the only active conversation identity; project slugs are canonical path metadata. `useConversationController` owns catalog loading, keyed detail and turn operations, active-run subscriptions, cancellation, resume input, and mutations. Its pure reducer stores the catalog independently from conversation records, guards every detail and turn write, and atomically moves a new optimistic turn to the server conversation ID. The React-free transport service owns credentialed HTTP, SSE v2 and WebSocket validation, bigint cursors, and persisted-message projections.
+The chat feature is application-owned under `apps/web/src/features/chat`. Its public entrypoint re-exports the feature container and route-path helper. The URL is the only active conversation identity; project slugs are canonical path metadata. `useConversationController` owns catalog loading, keyed detail and turn operations, a route-independent registry of active-run subscriptions, cancellation, resume input, and mutations. Its pure reducer stores the catalog independently from conversation records, guards every detail and turn write, and atomically moves a new optimistic turn to the server conversation ID as soon as `turn.started` exposes its durable identity. The React-free transport service owns credentialed HTTP, SSE v2 and WebSocket validation, bigint cursors, and persisted-message projections.
 
 The application API uses an Elysia application factory with the official Node.js adapter, typed runtime schemas, and OpenAPI documentation. It is the only browser-facing backend. It authenticates users and owns conversations, projects, workspaces, runs, messages, plans, and append-only events in PostgreSQL. Its leased executor continues work after the initiating HTTP response disconnects, publishes transient updates through Redis, and fences every durable write.
 
@@ -47,11 +47,13 @@ The conversation flow is:
 1. The browser sends a new message to Elysia with its session cookie and selected model settings.
 2. Elysia verifies ownership and stores the user message plus a streaming assistant placeholder.
 3. Elysia creates and leases a durable run, persists `turn.started`, and returns a replay-backed SSE v2 stream.
-4. The executor calls FastAPI with the text transcript, run identity, frozen working directory, model settings, and correlation headers.
-5. FastAPI restores the LangGraph checkpoint, invokes provider and runtime tools, and emits normalized v2 events.
-6. Elysia fences and persists durable events and assistant projections before publishing them. Browser frames remain transient.
-7. The web reducer applies ordered events by string cursor. Questions pause the run; resume and cancellation use owned run routes.
-8. Navigation detaches local transports without cancelling cloud work. Reload uses `active_run`, replay, and WebSocket fanout to resume the projection.
+4. The executor concurrently requests an application-owned title from FastAPI using the first user message and calls the main agent with the text transcript, run identity, frozen working directory, model settings, and correlation headers.
+5. The title request uses GPT-5.6 Luna structured output. A conditional PostgreSQL update preserves manual renames and emits `conversation.title.updated` without changing conversation recency.
+6. FastAPI restores the LangGraph checkpoint, invokes provider and runtime tools, and emits normalized v2 events for the main response.
+7. Elysia fences and persists durable events and assistant projections before publishing them. Browser frames remain transient.
+8. The web reducer applies ordered events by string cursor. Questions pause the run; resume and cancellation use owned run routes.
+9. Navigation detaches only the initiating route transport; the run's WebSocket subscription remains active across conversations.
+10. Reload lists all owned active runs, reconstructs their conversation records, and uses PostgreSQL replay plus WebSocket fanout to resume every projection.
 
 ## Observability
 

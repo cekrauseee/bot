@@ -683,6 +683,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   })
   const activeRunProjection = (run: AgentRun) => ({
     id: run.id,
+    conversation_id: run.conversationId,
     turn_id: run.turnId,
     status: run.status,
     last_event_sequence: run.lastEventSequence?.toString() ?? null,
@@ -826,7 +827,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
         runs.taskPlanFor(user.id, conversation.id),
       ])
       return { conversation, activeRun, plan }
-    })
+    }, { isolationLevel: 'repeatable read' })
     if (!result) {
       set.status = 404
       return { detail: { code: 'not_found', message: 'Not Found' } }
@@ -1042,6 +1043,16 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     const user = await sessionUser(request)
     return beginTurn(request, user.id, body, params.conversationId)
   }, { body: turnBody, params: conversationParams })
+
+  app.get('/agent-runs', async ({ request }) => {
+    const user = await sessionUser(request)
+    const entries = await services.database.transaction((db) =>
+      new AgentRunRepository(db).activeForUser(user.id))
+    return {
+      runs: entries.map(({ run }) => activeRunProjection(run)),
+      conversations: entries.map(({ conversation }) => publicConversation(conversation)),
+    }
+  })
 
   app.get('/agent-runs/:runId', async ({ request, params, set }) => {
     const user = await sessionUser(request)

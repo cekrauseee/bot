@@ -13,11 +13,14 @@ from my_bot_ai.config import Settings
 from my_bot_ai.features.agent.contracts import (
     MODEL_CAPABILITIES,
     AgentRequest,
+    ConversationTitleRequest,
+    ConversationTitleResponse,
     NormalizedEvent,
 )
 from my_bot_ai.features.agent.errors import AgentServiceError, ProviderMissingError
 from my_bot_ai.features.agent.models import ensure_provider_available
 from my_bot_ai.features.agent.service import stream_agent_request
+from my_bot_ai.features.agent.title import TITLE_MODEL, generate_conversation_title
 from my_bot_ai.logging import classify_error, classify_public_error, lifecycle_event
 
 router = APIRouter(tags=["agent"])
@@ -242,3 +245,36 @@ async def agent_stream(body: AgentRequest, request: Request) -> StreamingRespons
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.post(
+    "/agent/title",
+    dependencies=[Depends(require_token)],
+    response_model=ConversationTitleResponse,
+)
+async def agent_title(
+    body: ConversationTitleRequest,
+    request: Request,
+) -> ConversationTitleResponse:
+    """Generate application metadata independently from the streamed answer."""
+
+    request.state.turn_id = body.turn_id
+    request.state.conversation_id = body.conversation_id
+    request.state.model = TITLE_MODEL
+    request.state.reasoning_effort = "low"
+    request.state.provider = "openai"
+    settings: Settings = request.app.state.settings
+    runner = getattr(request.app.state, "title_runner", None)
+    if runner is None:
+        try:
+            ensure_provider_available(settings, TITLE_MODEL)
+        except ProviderMissingError as error:
+            public = error.public_error
+            request.state.error_cause = classify_error(error, "openai")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"code": public.code, "message": public.message},
+            ) from None
+        runner = generate_conversation_title
+    result = await runner(body, settings)
+    return ConversationTitleResponse.model_validate(result)

@@ -18,7 +18,7 @@ import { seedApplication } from '../src/db/seeder.js'
 import { seedConversations } from '../src/db/seed-data.js'
 import { SessionManager } from '../src/modules/auth/sessions.js'
 import { AgentRunExecutor } from '../src/modules/agent-control-plane.js'
-import type { AiClient } from '../src/modules/conversations.js'
+import type { AiClient, TitleClient } from '../src/modules/conversations.js'
 
 const settings = loadSettings({ ...process.env, ENVIRONMENT: 'test' })
 const pool = new Pool({
@@ -176,6 +176,7 @@ describe('PostgreSQL conversation flow', () => {
 
     try {
       expect((await app.handle(new Request('http://localhost/conversations'))).status).toBe(401)
+      expect((await app.handle(new Request('http://localhost/agent-runs'))).status).toBe(401)
 
       const started = await app.handle(new Request('http://localhost/conversations/turns', {
         method: 'POST',
@@ -301,6 +302,188 @@ describe('PostgreSQL conversation flow', () => {
       expect(missing.status).toBe(404)
     } finally {
       await pool.query('delete from users where id = any($1::uuid[])', [[owner.id, other.id]])
+    }
+  })
+
+  it('generates the first-message title separately and persists its durable event once', async () => {
+    const owner = await authenticatedUser('generated-title-owner')
+    const titleCalls: Record<string, unknown>[] = []
+    const titles: TitleClient = async (input) => {
+      titleCalls.push(input)
+      return Response.json({ title: 'Durable background runs' })
+    }
+    const executor = new AgentRunExecutor(database, ai, undefined, undefined, titles)
+    const app = createApp(settings, {
+      database,
+      sessions: new SessionManager(settings),
+      agentRuns: executor,
+      otp: {} as never,
+      google: {} as never,
+    })
+    const request = (path: string, init: RequestInit = {}) => app.handle(new Request(
+      `http://localhost${path}`,
+      { ...init, headers: { cookie: owner.cookie, ...init.headers } },
+    ))
+    const input = {
+      message: 'Keep background agent runs visible after reload',
+      model: 'gpt-5.6-luna',
+      reasoning_effort: 'low',
+      speed: 'standard',
+    }
+
+    try {
+      const first = await parseEvents(await request('/conversations/turns', {
+        method: 'POST',
+        headers: { origin: settings.webOrigin, 'content-type': 'application/json' },
+        body: JSON.stringify(input),
+      }))
+      const started = first.find((event) => event.type === 'turn.started')!
+      const conversationId = (started.data.conversation as { id: string }).id
+      const titleEvent = first.find((event) => event.type === 'conversation.title.updated')
+
+      expect(titleEvent?.data).toMatchObject({
+        conversation: {
+          id: conversationId,
+          title: 'Durable background runs',
+          title_updated_at: expect.any(String),
+        },
+      })
+      expect(first.at(-1)?.type).toBe('turn.completed')
+      expect(titleCalls).toHaveLength(1)
+      expect(titleCalls[0]).toMatchObject({
+        version: 1,
+        conversation_id: conversationId,
+        message: input.message,
+      })
+
+      const second = await parseEvents(await request(`/conversations/${conversationId}/turns`, {
+        method: 'POST',
+        headers: { origin: settings.webOrigin, 'content-type': 'application/json' },
+        body: JSON.stringify({ ...input, message: 'Continue the implementation' }),
+      }))
+      expect(second.some((event) => event.type === 'conversation.title.updated')).toBe(false)
+      expect(titleCalls).toHaveLength(1)
+      expect(await (await request(`/conversations/${conversationId}`)).json()).toMatchObject({
+        title: 'Durable background runs',
+        title_updated_at: expect.any(String),
+      })
+    } finally {
+      await executor.close()
+      await pool.query('delete from users where id = $1', [owner.id])
+    }
+  })
+
+  it('keeps a manual rename when title generation finishes later', async () => {
+    const owner = await authenticatedUser('manual-title-owner')
+    let releaseTitle!: () => void
+    let markTitleStarted!: () => void
+    const titleGate = new Promise<void>((resolve) => { releaseTitle = resolve })
+    const titleStarted = new Promise<void>((resolve) => { markTitleStarted = resolve })
+    const titles: TitleClient = async () => {
+      markTitleStarted()
+      await titleGate
+      return Response.json({ title: 'Generated too late' })
+    }
+    const executor = new AgentRunExecutor(database, ai, undefined, undefined, titles)
+    const app = createApp(settings, {
+      database,
+      sessions: new SessionManager(settings),
+      agentRuns: executor,
+      otp: {} as never,
+      google: {} as never,
+    })
+    const request = (path: string, init: RequestInit = {}) => app.handle(new Request(
+      `http://localhost${path}`,
+      { ...init, headers: { cookie: owner.cookie, ...init.headers } },
+    ))
+
+    try {
+      const stream = await request('/conversations/turns', {
+        method: 'POST',
+        headers: { origin: settings.webOrigin, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          message: 'Describe a release checklist',
+          model: 'gpt-5.6-luna',
+          reasoning_effort: 'low',
+          speed: 'standard',
+        }),
+      })
+      await titleStarted
+      const [conversation] = await database.transaction((db) =>
+        new ConversationRepository(db).list(owner.id))
+      const renamed = await request(`/conversations/${conversation.id}`, {
+        method: 'PATCH',
+        headers: { origin: settings.webOrigin, 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'My release checklist' }),
+      })
+      expect(renamed.status).toBe(200)
+
+      releaseTitle()
+      const events = await parseEvents(stream)
+      expect(events.some((event) => event.type === 'conversation.title.updated')).toBe(false)
+      expect(await (await request(`/conversations/${conversation.id}`)).json()).toMatchObject({
+        title: 'My release checklist',
+        title_updated_at: expect.any(String),
+      })
+    } finally {
+      releaseTitle?.()
+      await executor.close()
+      await pool.query('delete from users where id = $1', [owner.id])
+    }
+  })
+
+  it('keeps title failures nonterminal and retries from the first message on a later run', async () => {
+    const owner = await authenticatedUser('title-retry-owner')
+    const titleMessages: string[] = []
+    const titles: TitleClient = async (input) => {
+      titleMessages.push(String(input.message))
+      return titleMessages.length === 1
+        ? new Response(null, { status: 503 })
+        : Response.json({ title: 'Recover title generation' })
+    }
+    const executor = new AgentRunExecutor(database, ai, undefined, undefined, titles)
+    const app = createApp(settings, {
+      database,
+      sessions: new SessionManager(settings),
+      agentRuns: executor,
+      otp: {} as never,
+      google: {} as never,
+    })
+    const request = (path: string, init: RequestInit = {}) => app.handle(new Request(
+      `http://localhost${path}`,
+      { ...init, headers: { cookie: owner.cookie, ...init.headers } },
+    ))
+    const turn = (message: string) => ({
+      message,
+      model: 'gpt-5.6-luna',
+      reasoning_effort: 'low',
+      speed: 'standard',
+    })
+
+    try {
+      const firstMessage = 'Recover title generation after a provider failure'
+      const first = await parseEvents(await request('/conversations/turns', {
+        method: 'POST',
+        headers: { origin: settings.webOrigin, 'content-type': 'application/json' },
+        body: JSON.stringify(turn(firstMessage)),
+      }))
+      const conversationId = (first[0].data.conversation as { id: string }).id
+      expect(first.at(-1)?.type).toBe('turn.completed')
+      expect(first.some((event) => event.type === 'conversation.title.updated')).toBe(false)
+
+      const second = await parseEvents(await request(`/conversations/${conversationId}/turns`, {
+        method: 'POST',
+        headers: { origin: settings.webOrigin, 'content-type': 'application/json' },
+        body: JSON.stringify(turn('This later message must not become the title source')),
+      }))
+      expect(second.some((event) => event.type === 'conversation.title.updated')).toBe(true)
+      expect(titleMessages).toEqual([firstMessage, firstMessage])
+      expect(await (await request(`/conversations/${conversationId}`)).json()).toMatchObject({
+        title: 'Recover title generation',
+      })
+    } finally {
+      await executor.close()
+      await pool.query('delete from users where id = $1', [owner.id])
     }
   })
 
@@ -785,6 +968,17 @@ describe('PostgreSQL conversation flow', () => {
         },
       })
 
+      const activeRuns = await request('/agent-runs')
+      expect(await activeRuns.json()).toMatchObject({
+        runs: [{
+          id: runId,
+          conversation_id: waitingState.conversation_id,
+          status: 'waiting',
+          last_event_sequence: waitingState.last_event_sequence,
+        }],
+        conversations: [{ id: waitingState.conversation_id }],
+      })
+
       const replay = await request(`/agent-runs/${runId}/events?after=${initial[0].sequence}`)
       const replayBody = await replay.json() as {
         events: Array<{ type: string }>
@@ -839,6 +1033,7 @@ describe('PostgreSQL conversation flow', () => {
         await new Promise((resolve) => setTimeout(resolve, 10))
       }
       expect(await completed!.json()).toMatchObject({ status: 'completed' })
+      expect(await (await request('/agent-runs')).json()).toEqual({ runs: [], conversations: [] })
       const reloaded = await request(`/conversations/${waitingState.conversation_id}`)
       expect(await reloaded.json()).toMatchObject({
         plan: [{ id: 'inspect', title: 'Inspect the task', status: 'in_progress' }],

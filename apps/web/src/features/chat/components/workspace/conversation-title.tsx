@@ -1,12 +1,11 @@
 import { Folder } from 'lucide-react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 
-import { TextReveal } from '@/components/motion/text-reveal'
+import { TextCascade } from '@/components/motion/text-cascade'
 import { ConversationTitleSkeleton } from '@/features/chat/components/loading/conversation-skeleton'
 import {
   CONVERSATION_MOTION,
   conversationRevealTransition,
-  conversationTitleVisualKey,
 } from '@/features/chat/motion/conversation-motion'
 
 function TitleCopy({
@@ -89,14 +88,7 @@ function TitleVisual({
         </>
       ) : null}
       <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap">
-        <TextReveal
-          text={title}
-          split="word"
-          getUnitTransition={(index, count) => conversationRevealTransition(index, count, reduce)}
-          blur={CONVERSATION_MOTION.title.blur}
-          yOffset={CONVERSATION_MOTION.title.yOffset}
-          className="overflow-hidden whitespace-nowrap [&>span]:inline [&>span]:max-w-full [&>span]:overflow-hidden [&>span]:whitespace-nowrap"
-        />
+        <TextCascade text={title} className="block max-w-full truncate" />
       </span>
     </>
   )
@@ -117,12 +109,7 @@ export function ConversationTitle({
   const accessibleTitle = loadingTitle
     ? 'Loading conversation title'
     : [projectName, title].filter(Boolean).join(', ')
-  const visualKey = conversationTitleVisualKey(
-    conversationKey,
-    title,
-    projectName,
-    loadingTitle,
-  )
+  const visualKey = `${conversationKey}:${projectName ?? ''}:${loadingTitle ? 'loading' : 'ready'}`
   const exitTransition = {
     duration: CONVERSATION_MOTION.title.exitDuration,
     ease: CONVERSATION_MOTION.ease,

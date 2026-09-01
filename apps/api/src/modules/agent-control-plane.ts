@@ -4,7 +4,7 @@ import type { Database } from '../db/database.js'
 import type { AgentEvent, AgentRun } from '../db/repository.js'
 import { AgentRunLeaseLostError, AgentRunRepository } from '../db/repository.js'
 import { createLogger, safeError } from '../logger.js'
-import type { AiClient } from './conversations.js'
+import { publicConversation, type AiClient, type TitleClient } from './conversations.js'
 
 const logger = createLogger({ environment: process.env.ENVIRONMENT === 'production' ? 'production' : 'development' })
 export const aiDiagnostic = (value: unknown) => {
@@ -66,6 +66,7 @@ export const agentEventTypes = [
   'step.updated',
   'step.completed',
   'plan.updated',
+  'conversation.title.updated',
   'user.input_required',
   'tool.started',
   'tool.updated',
@@ -77,7 +78,7 @@ export const agentEventTypes = [
 ] as const
 
 export type AgentEventType = (typeof agentEventTypes)[number]
-type ProviderEventType = AgentEventType | 'browser.frame'
+type ProviderEventType = Exclude<AgentEventType, 'conversation.title.updated'> | 'browser.frame'
 
 type ProviderEvent = {
   version: 2
@@ -98,7 +99,10 @@ export type PublicAgentEvent = {
 }
 
 const eventTypes = new Set<string>(agentEventTypes)
-const providerEventTypes = new Set<string>([...agentEventTypes, 'browser.frame'])
+const providerEventTypes = new Set<string>([
+  ...agentEventTypes.filter((type) => type !== 'conversation.title.updated'),
+  'browser.frame',
+])
 const terminalTypes = new Set<AgentEventType>(['turn.completed', 'turn.failed', 'user.input_required'])
 
 function validBrowserFrame(value: unknown): value is Record<string, unknown> {
@@ -416,6 +420,7 @@ export class AgentRunExecutor {
     private readonly ai: AiClient,
     hub = new AgentEventHub(),
     private readonly fanout?: AgentEventFanout,
+    private readonly titles?: TitleClient,
   ) {
     this.hub = hub
     this.unsubscribeFanout = fanout?.subscribe((envelope) => {
@@ -561,6 +566,38 @@ export class AgentRunExecutor {
     })
   }
 
+  private async generateTitle(
+    run: AgentRun,
+    message: string,
+    signal: AbortSignal,
+    headers?: Record<string, string>,
+  ) {
+    if (!this.titles) return
+    const response = await this.titles({
+      version: 1,
+      run_id: run.id,
+      turn_id: run.turnId,
+      conversation_id: run.conversationId,
+      user_id: run.userId,
+      message,
+    }, signal, headers)
+    if (!response.ok) throw new Error('conversation_title_provider_unavailable')
+    const body = plainRecord(await response.json())
+    const title = typeof body?.title === 'string'
+      ? body.title.trim().replace(/\s+/g, ' ').slice(0, 120)
+      : ''
+    if (!title) throw new Error('conversation_title_invalid')
+    const event = await this.database.transaction(async (db) => {
+      const repository = new AgentRunRepository(db)
+      const conversation = await repository.setGeneratedTitle(run, title)
+      if (!conversation) return undefined
+      return repository.appendEvent(run, 'conversation.title.updated', {
+        conversation: publicConversation(conversation),
+      })
+    })
+    if (event) await this.dispatch(publicAgentEvent(event))
+  }
+
   private async execute(runId: string) {
     if (this.closing) return
     const headers = this.requestHeaders.get(runId)
@@ -600,6 +637,7 @@ export class AgentRunExecutor {
     }, 30_000)
     leaseTimer.unref()
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+    let titleTask: Promise<void> = Promise.resolve()
     try {
       if (run.cancelRequestedAt) {
         await this.finishCancelled(run)
@@ -610,9 +648,19 @@ export class AgentRunExecutor {
         return {
           transcript: await repository.transcript(run),
           assistant: await repository.assistant(run),
+          titleMessage: await repository.pendingTitleMessage(run),
         }
       })
       if (!state.assistant) throw new Error('assistant_missing')
+      if (state.titleMessage && this.titles) {
+        titleTask = this.generateTitle(run, state.titleMessage, controller.signal, headers)
+          .catch((error) => logger.warn({
+            event: 'conversation_title_generation_failed',
+            run_id: run.id,
+            conversation_id: run.conversationId,
+            ...safeError(error),
+          }, 'conversation_title_generation_failed'))
+      }
       let content = state.assistant.content
       let reasoning = state.assistant.reasoning ?? ''
       const activities = Array.isArray(state.assistant.activities)
@@ -690,6 +738,7 @@ export class AgentRunExecutor {
 
         if (event.type === 'user.input_required') {
           terminal = event.type
+          await titleTask
           await this.persist(run, event.type, data, {
             status: 'waiting',
             pendingQuestion: questionProjection(data),
@@ -700,6 +749,7 @@ export class AgentRunExecutor {
         }
         if (event.type === 'turn.completed') {
           terminal = event.type
+          await titleTask
           await this.persist(run, event.type, data, {
             status: 'completed',
             pendingQuestion: null,
@@ -711,6 +761,7 @@ export class AgentRunExecutor {
         }
         if (event.type === 'turn.failed') {
           terminal = event.type
+          await titleTask
           const detail = plainRecord(data.error)
           logger.error({ event: 'agent_run_failed', run_id: run.id, turn_id: run.turnId, ...aiDiagnostic(detail) }, 'agent_run_failed')
           await this.persist(run, event.type, {
@@ -759,6 +810,7 @@ export class AgentRunExecutor {
       if (pending.trim() || !terminal) throw new Error('truncated_provider_stream')
     } catch (error) {
       if (leaseLost || error instanceof AgentRunLeaseLostError || controller.signal.aborted) return
+      await titleTask
       const diagnostic = aiDiagnostic(error)
       logger.error({ event: 'agent_run_failed', run_id: run.id, turn_id: run.turnId, ...safeError(error), ...diagnostic }, 'agent_run_failed')
       try {
@@ -780,6 +832,7 @@ export class AgentRunExecutor {
       }
       void error
     } finally {
+      await titleTask
       clearInterval(leaseTimer)
       this.controllers.delete(run.id)
       if (controller.signal.aborted) await reader?.cancel().catch(() => undefined)

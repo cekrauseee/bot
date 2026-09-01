@@ -544,6 +544,19 @@ export class AgentRunRepository {
     return run
   }
 
+  async activeForUser(userId: string) {
+    return this.db.select({ run: agentRuns, conversation: conversations })
+      .from(agentRuns)
+      .innerJoin(conversations, and(
+        eq(conversations.id, agentRuns.conversationId),
+        eq(conversations.userId, userId),
+      ))
+      .where(and(
+        eq(agentRuns.userId, userId),
+        inArray(agentRuns.status, ['queued', 'running', 'waiting', 'cancelling']),
+      )).orderBy(agentRuns.createdAt, agentRuns.id)
+  }
+
   async claim(id: string, leaseMilliseconds = 60_000) {
     const now = new Date()
     const [run] = await this.db.update(agentRuns).set({
@@ -745,6 +758,38 @@ export class AgentRunRepository {
     const [message] = await this.db.select().from(messages)
       .where(eq(messages.id, run.assistantMessageId))
     return message
+  }
+
+  async pendingTitleMessage(run: AgentRun) {
+    const [conversation] = await this.db.select({ titleUpdatedAt: conversations.titleUpdatedAt })
+      .from(conversations)
+      .where(and(
+        eq(conversations.id, run.conversationId),
+        eq(conversations.userId, run.userId),
+      ))
+    if (!conversation || conversation.titleUpdatedAt !== null) return undefined
+    const [message] = await this.db.select({ content: messages.content }).from(messages)
+      .where(and(
+        eq(messages.conversationId, run.conversationId),
+        eq(messages.role, 'user'),
+      ))
+      .orderBy(messages.createdAt, messages.id)
+      .limit(1)
+    return message?.content
+  }
+
+  async setGeneratedTitle(run: AgentRun, title: string) {
+    await this.lockExecution(run)
+    const titleUpdatedAt = new Date()
+    const [conversation] = await this.db.update(conversations).set({
+      title,
+      titleUpdatedAt,
+    }).where(and(
+      eq(conversations.id, run.conversationId),
+      eq(conversations.userId, run.userId),
+      isNull(conversations.titleUpdatedAt),
+    )).returning()
+    return conversation
   }
 
   async transcript(run: AgentRun) {

@@ -19,6 +19,8 @@ import {
   mapQuestionRequest,
   parseActiveRunProjection,
   parseEventSequence,
+  type ActiveRunProjection,
+  type ActiveRunStatus,
   type ConversationDetail,
   type SearchStep,
   type StreamEvent,
@@ -53,6 +55,7 @@ export type ConversationRecord = {
   turn: OperationState
   activeAssistantId?: string
   activeRunId?: string
+  activeRunStatus?: ActiveRunStatus
   activeTurnId?: string
   lastSequence?: string
   plan: ChatTodo[]
@@ -86,6 +89,7 @@ export type ConversationControllerAction =
       operationId: string
       conversations: ConversationSummary[]
       projects: ProjectSummary[]
+      activeRuns?: ActiveRunProjection[]
       models?: ChatModelOption[]
     }
   | { type: 'catalog.load.failed'; operationId: string; error: string }
@@ -290,7 +294,14 @@ const mergeConversations = (
   loaded: ConversationSummary[],
   deletedIds: string[],
 ) => {
-  const conversations = new Map(loaded.map((conversation) => [conversation.id, conversation]))
+  const conversations = new Map<string, ConversationSummary>()
+  for (const conversation of loaded) {
+    const existing = conversations.get(conversation.id)
+    conversations.set(
+      conversation.id,
+      existing ? mergeConversationMetadata(existing, conversation) : conversation,
+    )
+  }
   for (const conversation of current) {
     const candidate = conversations.get(conversation.id)
     if (!candidate || Date.parse(conversation.updated_at) >= Date.parse(candidate.updated_at)) {
@@ -310,6 +321,61 @@ const mergeProjects = (current: ProjectSummary[], loaded: ProjectSummary[]) => {
     projects.set(project.id, mergeProject(projects.get(project.id), project))
   }
   return orderedProjects([...projects.values()])
+}
+
+const reconcileDiscoveredRuns = (
+  records: Record<string, ConversationRecord>,
+  conversations: ConversationSummary[],
+  activeRuns: ActiveRunProjection[],
+) => {
+  const activeByConversation = new Map(activeRuns.map((run) => [run.conversation_id, run]))
+  const knownConversationIds = new Set(conversations.map((conversation) => conversation.id))
+  const next = { ...records }
+
+  for (const [id, record] of Object.entries(next)) {
+    if (!record.activeRunId || record.turn.operationId || !knownConversationIds.has(id)) continue
+    if (activeByConversation.has(id)) continue
+    next[id] = {
+      ...record,
+      activeRunId: undefined,
+      activeRunStatus: undefined,
+      activeTurnId: undefined,
+      lastSequence: undefined,
+      turn: record.turn.status === 'loading' ? readyOperation() : record.turn,
+      detail: record.detail.status === 'ready' ? idleOperation() : record.detail,
+      browser: record.browser
+        ? { ...record.browser, status: 'closed', message: 'Browser preview ended with the run.' }
+        : undefined,
+      browserFrame: undefined,
+    }
+  }
+
+  for (const run of activeRuns) {
+    const record = next[run.conversation_id] ?? createConversationRecord(run.conversation_id)
+    // A local stream owns this record until its operation is released. A delayed
+    // catalog response must not replace its run identity or cursor.
+    if (record.turn.operationId) continue
+    const discoveredDifferentRun = Boolean(record.activeRunId && record.activeRunId !== run.id)
+    const detail = discoveredDifferentRun && record.detail.status === 'ready'
+      ? idleOperation()
+      : record.detail
+    const sameRunSequence = record.activeRunId === run.id ? record.lastSequence : undefined
+    const conversation = conversations.find((item) => item.id === run.conversation_id)
+    next[run.conversation_id] = {
+      ...record,
+      title: conversation?.title ?? record.title,
+      activeRunId: run.id,
+      activeRunStatus: run.status,
+      activeTurnId: run.turn_id,
+      lastSequence: sameRunSequence ?? run.last_event_sequence ?? '0',
+      plan: run.plan.length ? mapPlanItems(run.plan) : record.plan,
+      browser: mapBrowserProjection(run.browser_projection, run.id) ?? record.browser,
+      detail,
+      turn: run.status === 'waiting' ? readyOperation() : { status: 'loading', error: '' },
+    }
+  }
+
+  return next
 }
 
 const terminalBlocks = (blocks: ChatMessageBlock[]) => blocks.map((block) =>
@@ -428,6 +494,22 @@ const replaceRecord = (
       conversationsById: { ...state.conversationsById, [key.id]: record },
     }
 
+const applyEventConversationMetadata = (
+  state: ConversationControllerState,
+  event: StreamEvent,
+) => event.type === 'conversation.title.updated'
+  ? {
+      ...state,
+      catalog: {
+        ...state.catalog,
+        conversations: replaceConversation(
+          state.catalog.conversations,
+          event.data.conversation,
+        ),
+      },
+    }
+  : state
+
 const turnOwned = (record: ConversationRecord, operationId: string) =>
   record.turn.operationId === operationId
 
@@ -445,6 +527,7 @@ const reconcileStarted = (
 ): ConversationRecord => {
   const active = {
     activeRunId: event.run_id,
+    activeRunStatus: 'running' as const,
     activeTurnId: event.turn_id,
     lastSequence: event.sequence,
     browser: browserProjection(event) ?? record.browser,
@@ -498,9 +581,13 @@ const applyNonStartedEvent = (
   record = {
     ...record,
     activeRunId: event.run_id,
+    activeRunStatus: record.activeRunStatus ?? 'running',
     activeTurnId: event.turn_id,
     lastSequence: event.sequence,
     browser: browserProjection(event) ?? record.browser,
+  }
+  if (event.type === 'conversation.title.updated') {
+    return { ...record, title: event.data.conversation.title }
   }
   if (record.messages.at(-1)?.retryError && event.type === 'turn.completed') {
     record = { ...record, messages: updateAssistant(record.messages, record.activeAssistantId,
@@ -645,6 +732,7 @@ const applyNonStartedEvent = (
         ],
       })),
       turn: readyOperation(),
+      activeRunStatus: 'waiting',
     }
   }
 
@@ -681,6 +769,7 @@ const applyNonStartedEvent = (
     },
     activeAssistantId: undefined,
     activeRunId: undefined,
+    activeRunStatus: undefined,
     activeTurnId: undefined,
     browser: record.browser
       ? { ...record.browser, status: 'closed', message: 'Browser preview ended with the run.' }
@@ -709,6 +798,9 @@ const finalizeTurn = (
   })),
   turn: { status: cancelled ? 'ready' : 'error', error: cancelled ? '' : error },
   activeAssistantId: undefined,
+  activeRunId: undefined,
+  activeRunStatus: undefined,
+  activeTurnId: undefined,
 })
 
 function reduceConversationController(
@@ -729,15 +821,21 @@ function reduceConversationController(
   }
   if (action.type === 'catalog.load.succeeded') {
     if (state.catalog.operationId !== action.operationId) return state
+    const conversations = mergeConversations(
+      state.catalog.conversations,
+      action.conversations,
+      state.catalog.deletedConversationIds,
+    )
     return {
       ...state,
+      conversationsById: reconcileDiscoveredRuns(
+        state.conversationsById,
+        conversations,
+        action.activeRuns ?? [],
+      ),
       catalog: {
         ...state.catalog,
-        conversations: mergeConversations(
-          state.catalog.conversations,
-          action.conversations,
-          state.catalog.deletedConversationIds,
-        ),
+        conversations,
         projects: mergeProjects(state.catalog.projects, action.projects),
         models: action.models ?? state.catalog.models,
         status: 'ready',
@@ -827,6 +925,7 @@ function reduceConversationController(
         : readyOperation(),
       activeAssistantId,
       activeRunId: run?.id,
+      activeRunStatus: run?.status,
       activeTurnId: run?.turn_id,
       lastSequence: run?.last_event_sequence ?? (run ? '0' : undefined),
       browser: run ? mapBrowserProjection(run.browser_projection, run.id) : undefined,
@@ -884,6 +983,7 @@ function reduceConversationController(
       turn: { status: 'loading', error: '', operationId: action.operationId },
       activeAssistantId: messages.at(-1)?.id,
       activeRunId: undefined,
+      activeRunStatus: undefined,
       activeTurnId: undefined,
       lastSequence: undefined,
       browserFrame: undefined,
@@ -934,7 +1034,10 @@ function reduceConversationController(
       }
     }
     const nextRecord = applyNonStartedEvent(record, action.event, action.at)
-    const next = replaceRecord(state, action.key, nextRecord)
+    const next = applyEventConversationMetadata(
+      replaceRecord(state, action.key, nextRecord),
+      action.event,
+    )
     if (action.event.type !== 'turn.completed' && action.event.type !== 'turn.failed') {
       return next
     }
@@ -961,7 +1064,10 @@ function reduceConversationController(
     const updated = action.event.type === 'turn.started'
       ? reconcileStarted(record, action.event)
       : applyNonStartedEvent(record, action.event, action.at)
-    const next = replaceRecord(state, action.key, updated)
+    const next = applyEventConversationMetadata(
+      replaceRecord(state, action.key, updated),
+      action.event,
+    )
     if (action.event.type !== 'turn.completed' && action.event.type !== 'turn.failed') return next
     const id = action.key.kind === 'existing' ? action.key.id : record.id
     const current = id
@@ -991,6 +1097,7 @@ function reduceConversationController(
     return replaceRecord(state, action.key, {
       ...record,
       turn: { ...record.turn, status: 'loading', error: '' },
+      activeRunStatus: 'cancelling',
     })
   }
   if (action.type === 'run.connection.failed') {
@@ -1023,6 +1130,7 @@ function reduceConversationController(
       turn: action.resume
         ? { ...record.turn, status: 'loading', error: '' }
         : record.turn,
+      activeRunStatus: action.resume ? 'queued' : record.activeRunStatus,
     })
   }
   if (action.type === 'turn.handoff') {

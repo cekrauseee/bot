@@ -19,6 +19,8 @@ export type AiClient = (
   headers?: Record<string, string>,
 ) => Promise<Response>
 
+export type TitleClient = AiClient
+
 const iso = (value: Date | string) =>
   value instanceof Date ? value.toISOString() : new Date(value).toISOString()
 
@@ -56,6 +58,25 @@ export const createAiClient = (settings: Settings): AiClient => async (input, si
   const timeout = setTimeout(() => connectionController.abort(), 30_000)
   try {
     return await fetch(`${settings.aiBaseUrl}/agent/stream`, {
+      method: 'POST',
+      signal: AbortSignal.any([signal, connectionController.signal]),
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${settings.aiServiceToken}`,
+        ...headers,
+      },
+      body: JSON.stringify(input),
+    })
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+export const createTitleClient = (settings: Settings): TitleClient => async (input, signal, headers) => {
+  const connectionController = new AbortController()
+  const timeout = setTimeout(() => connectionController.abort(), 15_000)
+  try {
+    return await fetch(`${settings.aiBaseUrl}/agent/title`, {
       method: 'POST',
       signal: AbortSignal.any([signal, connectionController.signal]),
       headers: {

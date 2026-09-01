@@ -1,4 +1,5 @@
 import type { Settings } from '../config.js'
+import type { PgTransactionConfig } from 'drizzle-orm/pg-core'
 import type { Db, DatabaseClient } from './drivers/types.js'
 
 export type { Db } from './drivers/types.js'
@@ -26,8 +27,11 @@ export class Database {
     return new Database(client, db)
   }
 
-  async transaction<T>(callback: (db: Db) => Promise<T>): Promise<T> {
-    return this.db.transaction(async (transaction) => callback(transaction as Db))
+  async transaction<T>(
+    callback: (db: Db) => Promise<T>,
+    config?: PgTransactionConfig,
+  ): Promise<T> {
+    return this.db.transaction(async (transaction) => callback(transaction as Db), config)
   }
 
   get handle(): Db { return this.db }

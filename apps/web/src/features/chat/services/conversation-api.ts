@@ -45,6 +45,7 @@ const agentEventTypes = [
   'step.updated',
   'step.completed',
   'plan.updated',
+  'conversation.title.updated',
   'user.input_required',
   'tool.started',
   'tool.updated',
@@ -92,6 +93,7 @@ export type StreamEvent = EventEnvelope & (
   | { type: 'reasoning.delta' | 'text.delta'; data: { delta: string } }
   | { type: 'step.started' | 'step.updated' | 'step.completed'; data: { step: SearchStep } }
   | { type: 'plan.updated'; data: { plan: unknown[] } }
+  | { type: 'conversation.title.updated'; data: { conversation: ConversationSummary } }
   | { type: 'user.input_required'; data: Record<string, unknown> }
   | { type: 'tool.started' | 'tool.updated' | 'tool.completed'; data: { tool: ToolStep } }
   | { type: 'child.started' | 'child.completed'; data: { child: ToolStep } }
@@ -102,10 +104,13 @@ export type StreamEvent = EventEnvelope & (
     }
 )
 
+export type ActiveRunStatus = 'queued' | 'running' | 'waiting' | 'cancelling'
+
 export type ActiveRunProjection = {
   id: string
+  conversation_id: string
   turn_id: string
-  status: string
+  status: ActiveRunStatus
   last_event_sequence: string | null
   plan: unknown[]
   pending_question: unknown
@@ -424,8 +429,10 @@ export const parseActiveRunProjection = (value: unknown): ActiveRunProjection | 
   const run = plainRecord(value)
   if (
     typeof run?.id !== 'string' ||
+    typeof run.conversation_id !== 'string' ||
     typeof run.turn_id !== 'string' ||
-    typeof run.status !== 'string' ||
+    (run.status !== 'queued' && run.status !== 'running' &&
+      run.status !== 'waiting' && run.status !== 'cancelling') ||
     (run.last_event_sequence !== null && run.last_event_sequence !== undefined &&
       typeof run.last_event_sequence !== 'string')
   ) throw new Error('The active run projection was invalid.')
@@ -433,6 +440,7 @@ export const parseActiveRunProjection = (value: unknown): ActiveRunProjection | 
   if (sequence !== null) parseEventSequence(sequence)
   return {
     id: run.id,
+    conversation_id: run.conversation_id,
     turn_id: run.turn_id,
     status: run.status,
     last_event_sequence: sequence,
@@ -474,9 +482,14 @@ async function request<T>(
 }
 
 export async function loadConversationCatalog(signal?: AbortSignal) {
-  const [conversationResult, projectResult, models] = await Promise.all([
+  const [conversationResult, projectResult, activeRunResult, models] = await Promise.all([
     request<{ conversations: ConversationSummary[] }>('/conversations', { signal }),
     request<{ projects: ProjectSummary[] }>('/projects', { signal }),
+    request<{ runs: unknown[]; conversations: ConversationSummary[] }>(
+      '/agent-runs',
+      { signal },
+      'Unable to load active runs.',
+    ),
     request<unknown>('/models', { signal }, 'Unable to load models.')
       .then(mapModelCatalog)
       .catch((error) => {
@@ -485,8 +498,16 @@ export async function loadConversationCatalog(signal?: AbortSignal) {
       }),
   ])
   return {
-    conversations: conversationResult.conversations,
+    conversations: [
+      ...conversationResult.conversations,
+      ...activeRunResult.conversations,
+    ],
     projects: projectResult.projects,
+    activeRuns: activeRunResult.runs.map((run) => {
+      const parsed = parseActiveRunProjection(run)
+      if (!parsed) throw new Error('The active run catalog was invalid.')
+      return parsed
+    }),
     models,
   }
 }
@@ -730,17 +751,3 @@ export const agentRunSocketUrl = (
   url.search = new URLSearchParams({ after }).toString()
   return url.toString()
 }
-
-export const hasResponseProgress = (event: StreamEvent) =>
-  event.type === 'turn.completed' ||
-  event.type === 'user.input_required' ||
-  ((event.type === 'text.delta' || event.type === 'reasoning.delta') && Boolean(event.data.delta.trim())) ||
-  event.type === 'step.started' ||
-  event.type === 'step.updated' ||
-  event.type === 'step.completed' ||
-  event.type === 'plan.updated' ||
-  event.type === 'tool.started' ||
-  event.type === 'tool.updated' ||
-  event.type === 'tool.completed' ||
-  event.type === 'child.started' ||
-  event.type === 'child.completed'

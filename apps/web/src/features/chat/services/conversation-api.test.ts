@@ -185,6 +185,23 @@ describe('conversation transport', () => {
     }))
     expect(durable).toMatchObject({ sequence: '9007199254740993', type: 'text.delta' })
 
+    const title = parseSocketMessage(JSON.stringify({
+      version: 2,
+      sequence: '9007199254740994',
+      run_id: runId,
+      turn_id: turnId,
+      type: 'conversation.title.updated',
+      data: {
+        conversation: {
+          id: 'conversation', title: 'Durable background runs', project_id: null,
+          title_updated_at: '2026-08-30T12:00:01.000Z', pinned_order: null,
+          pin_updated_at: null, created_at: '2026-08-30T12:00:00.000Z',
+          updated_at: '2026-08-30T12:00:00.000Z',
+        },
+      },
+    }))
+    expect(title).toMatchObject({ type: 'conversation.title.updated' })
+
     const transient = parseSocketMessage(JSON.stringify({
       version: 2,
       run_id: runId,

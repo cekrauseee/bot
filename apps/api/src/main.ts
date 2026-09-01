@@ -8,7 +8,7 @@ import { OtpService } from './modules/auth/otp.js'
 import { SessionManager } from './modules/auth/sessions.js'
 import { createLogger, safeError } from './logger.js'
 import { AgentRunExecutor, RedisAgentEventFanout } from './modules/agent-control-plane.js'
-import { createAiClient } from './modules/conversations.js'
+import { createAiClient, createTitleClient } from './modules/conversations.js'
 import { createShutdown } from './shutdown.js'
 
 const settings = loadSettings()
@@ -20,7 +20,13 @@ const eventSubscriber = new Redis(settings.redisUrl, { lazyConnect: true })
 await Promise.all([redis.connect(), eventPublisher.connect(), eventSubscriber.connect()])
 const eventFanout = new RedisAgentEventFanout(eventPublisher, eventSubscriber)
 await eventFanout.connect()
-const agentRuns = new AgentRunExecutor(database, createAiClient(settings), undefined, eventFanout)
+const agentRuns = new AgentRunExecutor(
+  database,
+  createAiClient(settings),
+  undefined,
+  eventFanout,
+  createTitleClient(settings),
+)
 
 const app = createApp(
   settings,

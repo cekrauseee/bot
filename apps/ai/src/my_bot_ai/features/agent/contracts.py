@@ -192,6 +192,25 @@ class AgentRequest(BaseModel):
         return self
 
 
+class ConversationTitleRequest(BaseModel):
+    """Strict internal request for first-message title generation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: Literal[1]
+    run_id: UUID
+    turn_id: UUID
+    conversation_id: UUID
+    user_id: UUID
+    message: str = Field(min_length=1, max_length=100_000)
+
+
+class ConversationTitleResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=120)
+
+
 class NormalizedEvent(BaseModel):
     """Internal normalized event; only JSON-compatible data crosses HTTP."""
 

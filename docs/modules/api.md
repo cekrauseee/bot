@@ -51,6 +51,7 @@ Agent control routes are:
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/models` | Return provider-aware model, reasoning, and speed capabilities |
+| `GET` | `/agent-runs` | List the current user's active runs for reload and global tracking |
 | `GET` | `/agent-runs/:runId` | Load one owned run projection |
 | `GET` | `/agent-runs/:runId/events?after=` | Replay a bounded page of durable events |
 | `POST` | `/agent-runs/:runId/resume` | Atomically answer the current question and queue continuation |
@@ -59,9 +60,13 @@ Agent control routes are:
 
 Starting a turn creates a durable run and returns named `text/event-stream` events with a v2 envelope. PostgreSQL assigns the public decimal event sequence. The executor validates the AI service sequence, fences every write with a renewable execution token, stores partial state, and completes only after a valid terminal event. One active run is allowed per conversation across application instances.
 
+While the first run executes, the API requests a title from the separate AI title endpoint. It persists the normalized result and `conversation.title.updated` in one fenced transaction only while `title_updated_at` is null. A manual rename therefore wins every race. Recovery may retry a failed title request, while the conditional update keeps the operation idempotent. Generated titles update `title_updated_at` but not `updated_at`, so they do not reorder Recents.
+
+`GET /agent-runs` returns every queued, running, waiting, or cancelling run owned by the authenticated user plus the current metadata snapshot for each active conversation. The web application merges those snapshots with the conversation catalog by `title_updated_at`, which closes title-update races between the parallel catalog requests. It then rebuilds sidebar pending state and route-independent WebSocket subscriptions without inferring active work from Redis or client memory.
+
 The API preserves validated request and correlation IDs in response headers and forwards them to the immediate AI execution, resume, or cancellation attempt. Recovered background work has no originating HTTP request and therefore starts a new logging context inside the worker boundary. Logs exclude prompts, message content, credentials, cookies, and provider reasoning.
 
-Runs may continue after the initiating HTTP connection closes. Clients hydrate `active_run`, reconnect with the last sequence, replay through a fixed high-water mark, and then receive Redis-backed live fanout. PostgreSQL remains authoritative if Redis drops a message. Browser images are validated and fanned out separately without a database insert.
+Runs may continue after the initiating HTTP connection closes. Conversation detail uses a repeatable-read snapshot so persisted messages and the `active_run` cursor cannot describe different event boundaries. Clients reconnect with that sequence, replay through a fixed high-water mark, and then receive Redis-backed live fanout. PostgreSQL remains authoritative if Redis drops a message. Browser images are validated and fanned out separately without a database insert.
 
 Conversation details expose one current task `plan`, projected from the latest nonempty run snapshot. New runs inherit that plan and pass it to the AI service as context. Plan updates replace the current snapshot; they do not create message blocks or independent plans per turn.
 

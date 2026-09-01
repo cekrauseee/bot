@@ -16,7 +16,13 @@ from pydantic import ValidationError
 
 from my_bot_ai.config import Settings
 from my_bot_ai.features.agent.checkpoints import create_in_memory_checkpointer
-from my_bot_ai.features.agent.contracts import AgentRequest, PlanStep, resolve_model_settings
+from my_bot_ai.features.agent.contracts import (
+    AgentRequest,
+    ConversationTitleRequest,
+    ConversationTitleResponse,
+    PlanStep,
+    resolve_model_settings,
+)
 from my_bot_ai.features.agent.errors import CheckpointMissingError, InvalidResumeError
 from my_bot_ai.features.agent.models import build_chat_model, provider_builtin_tools
 from my_bot_ai.features.agent.service import (
@@ -26,6 +32,7 @@ from my_bot_ai.features.agent.service import (
     prepare_agent_request,
     stream_model,
 )
+from my_bot_ai.features.agent.title import TITLE_MODEL, generate_conversation_title
 from my_bot_ai.features.agent.tools import build_core_tools
 from my_bot_ai.main import create_app
 
@@ -370,6 +377,78 @@ def test_v2_stream_auth_and_event_framing() -> None:
     assert all(event["version"] == 2 for event in events)
     assert all(event["run_id"] == str(RUN) for event in events)
     assert events[0]["data"]["thread_id"] == str(RUN)
+
+
+def test_title_endpoint_is_authenticated_and_separate_from_the_agent_stream() -> None:
+    seen: list[ConversationTitleRequest] = []
+
+    async def title_runner(body, _settings):
+        seen.append(body)
+        return {"title": "Durable background runs"}
+
+    application = create_app(
+        Settings(environment="test", ai_service_token="test-token"),
+        runner=fake_runner,
+        title_runner=title_runner,
+    )
+    title_payload = {
+        "version": 1,
+        "run_id": str(RUN),
+        "turn_id": str(TURN),
+        "conversation_id": PAYLOAD["conversation_id"],
+        "user_id": PAYLOAD["user_id"],
+        "message": "Keep agent runs visible after reload",
+    }
+    unauthenticated = TestClient(application).post("/agent/title", json=title_payload)
+    response = TestClient(application).post(
+        "/agent/title",
+        json=title_payload,
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert unauthenticated.status_code == 401
+    assert response.status_code == 200
+    assert response.json() == {"title": "Durable background runs"}
+    assert len(seen) == 1
+    assert seen[0].message == title_payload["message"]
+
+
+def test_title_generation_uses_luna_structured_output_without_streaming() -> None:
+    captured: dict[str, object] = {}
+
+    class StructuredModel:
+        async def ainvoke(self, messages):
+            captured["messages"] = messages
+            return ConversationTitleResponse(title="Persist conversation titles")
+
+    class TitleModel:
+        def with_structured_output(self, schema, *, method, strict):
+            captured.update(schema=schema, method=method, strict=strict)
+            return StructuredModel()
+
+    body = ConversationTitleRequest(
+        version=1,
+        run_id=RUN,
+        turn_id=TURN,
+        conversation_id=PAYLOAD["conversation_id"],
+        user_id=PAYLOAD["user_id"],
+        message="Persist the generated conversation title",
+    )
+    settings = Settings(openai_api_key="key")
+    with patch(
+        "my_bot_ai.features.agent.title.build_chat_model",
+        return_value=(TitleModel(), SimpleNamespace()),
+    ) as build:
+        result = asyncio.run(generate_conversation_title(body, settings))
+
+    build.assert_called_once_with(
+        settings, TITLE_MODEL, "low", "standard", streaming=False
+    )
+    assert captured["schema"] is ConversationTitleResponse
+    assert captured["method"] == "json_schema"
+    assert captured["strict"] is True
+    assert captured["messages"][-1] == ("human", body.message)
+    assert result.title == "Persist conversation titles"
 
 
 def test_provider_quota_failure_keeps_public_retry_contract_and_safe_diagnostic() -> None:

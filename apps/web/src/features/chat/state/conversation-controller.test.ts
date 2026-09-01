@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createNewConversationGate } from '../hooks/new-conversation-gate'
+import {
+  createNewConversationGate,
+  shouldNavigateInitialHandoff,
+} from '../hooks/new-conversation-gate'
 
 import type { ApiConversationMessage, ConversationSummary } from '../model'
 import type { ConversationDetail, StreamEvent } from '../services/conversation-api'
@@ -133,6 +136,66 @@ describe('conversation controller', () => {
       processDuration: 5,
     })
     expect(state.conversationsById.A.messages.at(-1)?.processStartedAt).toBeUndefined()
+  })
+
+  it('applies a generated title without changing conversation recency', () => {
+    let state = initialConversationControllerState()
+    state = reduce(state, { type: 'catalog.load.started', operationId: 'catalog', refreshing: false })
+    state = reduce(state, {
+      type: 'catalog.load.succeeded', operationId: 'catalog', conversations: [summary('A')], projects: [],
+    })
+    state = reduce(state, { type: 'turn.started', key: existing('A'), operationId: 'turn',
+      optimisticMessages: createOptimisticMessages('Prompt', 'turn', at) })
+    state = reduce(state, { type: 'turn.event', key: existing('A'), operationId: 'turn', event: started('A'), at })
+    const before = state.catalog.conversations[0].updated_at
+    state = reduce(state, {
+      type: 'run.event',
+      key: existing('A'),
+      at,
+      event: {
+        version: 2,
+        sequence: '1',
+        run_id: 'run-A',
+        turn_id: 'turn-A',
+        type: 'conversation.title.updated',
+        data: {
+          conversation: {
+            ...summary('A'),
+            title: 'Durable background runs',
+            title_updated_at: '2026-08-30T12:00:01.000Z',
+          },
+        },
+      },
+    })
+
+    expect(state.conversationsById.A.title).toBe('Durable background runs')
+    expect(state.catalog.conversations[0]).toMatchObject({
+      title: 'Durable background runs',
+      title_updated_at: '2026-08-30T12:00:01.000Z',
+      updated_at: before,
+    })
+  })
+
+  it('merges parallel catalog snapshots by the title clock regardless of response order', () => {
+    const current = {
+      ...summary('A'),
+      title: 'Generated title',
+      title_updated_at: '2026-08-30T12:00:01.000Z',
+    }
+    const stale = { ...summary('A'), title: 'Original prompt' }
+    let state = initialConversationControllerState()
+    state = reduce(state, { type: 'catalog.load.started', operationId: 'catalog', refreshing: false })
+    state = reduce(state, {
+      type: 'catalog.load.succeeded',
+      operationId: 'catalog',
+      conversations: [current, stale],
+      projects: [],
+    })
+
+    expect(state.catalog.conversations[0]).toMatchObject({
+      title: 'Generated title',
+      title_updated_at: current.title_updated_at,
+    })
   })
 
   it('appends reasoning and searches in stream chronology', () => {
@@ -601,6 +664,7 @@ describe('conversation controller', () => {
         messages: [apiMessage('assistant', 'assistant', 'Waiting.', 'waiting')],
         active_run: {
           id: 'run-A',
+          conversation_id: 'A',
           turn_id: 'turn-A',
           status: 'waiting',
           last_event_sequence: '10',
@@ -673,6 +737,107 @@ describe('conversation controller', () => {
     }))
   })
 
+  it('discovers active runs from the catalog before their conversations are opened', () => {
+    let state = initialConversationControllerState()
+    state = reduce(state, { type: 'catalog.load.started', operationId: 'catalog', refreshing: false })
+    state = reduce(state, {
+      type: 'catalog.load.succeeded',
+      operationId: 'catalog',
+      conversations: [summary('A'), summary('B')],
+      projects: [],
+      activeRuns: [{
+        id: 'run-A',
+        conversation_id: 'A',
+        turn_id: 'turn-A',
+        status: 'running',
+        last_event_sequence: '10',
+        plan: [{ id: 'inspect', title: 'Inspect', status: 'in_progress' }],
+        pending_question: null,
+        browser_projection: null,
+      }],
+    })
+
+    expect(state.conversationsById.A).toMatchObject({
+      id: 'A',
+      title: 'Conversation A',
+      activeRunId: 'run-A',
+      activeRunStatus: 'running',
+      lastSequence: '10',
+      detail: { status: 'idle' },
+      turn: { status: 'loading' },
+    })
+    expect(state.conversationsById.B).toBeUndefined()
+
+    state = reduce(state, {
+      type: 'run.event',
+      key: existing('A'),
+      at,
+      event: { ...completed('A'), sequence: '11' },
+    })
+    expect(state.conversationsById.A.activeRunId).toBeUndefined()
+  })
+
+  it('preserves the locally applied cursor when the catalog projection is behind or ahead', () => {
+    let state = initialConversationControllerState()
+    state = reduce(state, { type: 'turn.started', key: existing('A'), operationId: 'turn',
+      optimisticMessages: createOptimisticMessages('Prompt', 'turn', at) })
+    state = reduce(state, { type: 'turn.event', key: existing('A'), operationId: 'turn', event: started('A'), at })
+    state = reduce(state, { type: 'turn.detached', key: existing('A'), operationId: 'turn' })
+    state = reduce(state, { type: 'run.event', key: existing('A'), event: { ...delta('A', 'Applied'), sequence: '10' }, at })
+    state = reduce(state, { type: 'catalog.load.started', operationId: 'catalog', refreshing: false })
+    state = reduce(state, {
+      type: 'catalog.load.succeeded', operationId: 'catalog', conversations: [summary('A')], projects: [],
+      activeRuns: [{ id: 'run-A', conversation_id: 'A', turn_id: 'turn-A', status: 'running',
+        last_event_sequence: '12', plan: [], pending_question: null, browser_projection: null }],
+    })
+    expect(state.conversationsById.A.lastSequence).toBe('10')
+  })
+
+  it('invalidates ready detail when discovery switches to a different active run', () => {
+    let state = initialConversationControllerState()
+    state = reduce(state, { type: 'detail.load.started', id: 'A', operationId: 'detail' })
+    state = reduce(state, { type: 'detail.load.succeeded', id: 'A', operationId: 'detail', detail: {
+      ...detail('A'), active_run: { id: 'run-old', conversation_id: 'A', turn_id: 'turn-old', status: 'running',
+        last_event_sequence: '3', plan: [], pending_question: null, browser_projection: null },
+    } })
+    state = reduce(state, { type: 'catalog.load.started', operationId: 'catalog', refreshing: false })
+    state = reduce(state, {
+      type: 'catalog.load.succeeded', operationId: 'catalog', conversations: [summary('A')], projects: [],
+      activeRuns: [{ id: 'run-new', conversation_id: 'A', turn_id: 'turn-new', status: 'running',
+        last_event_sequence: '4', plan: [], pending_question: null, browser_projection: null }],
+    })
+    expect(state.conversationsById.A).toMatchObject({ activeRunId: 'run-new', lastSequence: '4', detail: { status: 'idle' } })
+  })
+
+  it('does not let delayed catalog discovery replace a locally owned run', () => {
+    let state = initialConversationControllerState()
+    state = reduce(state, { type: 'turn.started', key: existing('A'), operationId: 'turn',
+      optimisticMessages: createOptimisticMessages('Prompt', 'turn', at) })
+    state = reduce(state, { type: 'turn.event', key: existing('A'), operationId: 'turn', event: started('A'), at })
+    state = reduce(state, { type: 'catalog.load.started', operationId: 'catalog', refreshing: false })
+    state = reduce(state, {
+      type: 'catalog.load.succeeded', operationId: 'catalog', conversations: [summary('A')], projects: [],
+      activeRuns: [{ id: 'run-delayed', conversation_id: 'A', turn_id: 'turn-delayed', status: 'running',
+        last_event_sequence: '20', plan: [], pending_question: null, browser_projection: null }],
+    })
+    expect(state.conversationsById.A.activeRunId).toBe('run-A')
+    expect(state.conversationsById.A.turn.operationId).toBe('turn')
+  })
+
+  it('ignores catalog discovery before a local turn has received its run identity', () => {
+    let state = initialConversationControllerState()
+    state = reduce(state, { type: 'turn.started', key: existing('A'), operationId: 'turn',
+      optimisticMessages: createOptimisticMessages('Prompt', 'turn', at) })
+    state = reduce(state, { type: 'catalog.load.started', operationId: 'catalog', refreshing: false })
+    state = reduce(state, {
+      type: 'catalog.load.succeeded', operationId: 'catalog', conversations: [summary('A')], projects: [],
+      activeRuns: [{ id: 'run-delayed', conversation_id: 'A', turn_id: 'turn-delayed', status: 'running',
+        last_event_sequence: '20', plan: [], pending_question: null, browser_projection: null }],
+    })
+    expect(state.conversationsById.A.activeRunId).toBeUndefined()
+    expect(state.conversationsById.A.turn.operationId).toBe('turn')
+  })
+
   it('detaches navigation from a cloud run and accepts later subscribed events', () => {
     let state = initialConversationControllerState()
     state = reduce(state, {
@@ -701,51 +866,27 @@ describe('conversation controller', () => {
 })
 
 describe('first response acceptance', () => {
-  it('waits beyond conversation creation and refuses an immediate failure', async () => {
-    const accept = vi.fn()
-    const gate = createNewConversationGate(accept, () => false)
-    gate(started('A'))
-    await Promise.resolve()
-    expect(accept).not.toHaveBeenCalled()
-    gate(failed('A'))
-    await Promise.resolve()
-    expect(accept).not.toHaveBeenCalled()
+  it('only navigates an initial handoff while the mounted new route is rendered', () => {
+    expect(shouldNavigateInitialHandoff(undefined, true)).toBe(true)
+    expect(shouldNavigateInitialHandoff('conversation-A', true)).toBe(false)
+    expect(shouldNavigateInitialHandoff(undefined, false)).toBe(false)
   })
 
-  it('keeps progress followed by failure in the same batch in the composer', async () => {
+  it('accepts the durable conversation immediately and exactly once', () => {
     const accept = vi.fn()
-    const gate = createNewConversationGate(accept, () => false)
+    const gate = createNewConversationGate(accept)
     gate(started('A'))
-    gate(delta('A', 'Partial'))
-    gate(failed('A'))
-    await Promise.resolve()
-    expect(accept).not.toHaveBeenCalled()
-  })
-
-  it('accepts real progress exactly once', async () => {
-    const accept = vi.fn()
-    const gate = createNewConversationGate(accept, () => false)
     gate(started('A'))
     gate(delta('A', 'Answer'))
-    await Promise.resolve()
-    gate(completed('A'))
-    await Promise.resolve()
+    gate(failed('A'))
     expect(accept).toHaveBeenCalledExactlyOnceWith('A')
   })
 
-  it('accepts successful completion without deltas but never accepts a canceled request', async () => {
+  it('does not accept progress without the durable conversation identity', () => {
     const accept = vi.fn()
-    let cancelled = false
-    const gate = createNewConversationGate(accept, () => cancelled)
-    gate(started('A'))
-    gate(completed('A'))
-    cancelled = true
-    await Promise.resolve()
+    const gate = createNewConversationGate(accept)
+    gate(delta('A', 'Partial'))
+    gate(failed('A'))
     expect(accept).not.toHaveBeenCalled()
-    const next = createNewConversationGate(accept, () => false)
-    next(started('B'))
-    next(completed('B'))
-    await Promise.resolve()
-    expect(accept).toHaveBeenCalledExactlyOnceWith('B')
   })
 })

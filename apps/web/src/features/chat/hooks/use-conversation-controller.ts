@@ -5,7 +5,7 @@ import type {
   ChatQuestionRequest,
   ProjectSummary,
 } from '../model'
-import { createNewConversationGate } from './new-conversation-gate'
+import { createNewConversationGate, shouldNavigateInitialHandoff } from './new-conversation-gate'
 import {
   createConversationProject,
   cancelAgentRun,
@@ -63,6 +63,15 @@ type NewConversationHandoff = {
   operationId: string
 }
 
+type RunSubscription = {
+  identity: ConversationRouteIdentity
+  cursor: bigint
+  socket: WebSocket | null
+  reconnectAttempt: number
+  reconnectTimer?: number
+  stopped: boolean
+}
+
 const errorMessage = (error: unknown, fallback: string) =>
   error instanceof Error ? error.message : fallback
 
@@ -84,10 +93,7 @@ export function useConversationController(
   const catalogControllerRef = useRef<KeyedController | null>(null)
   const detailControllersRef = useRef(new Map<string, KeyedController>())
   const turnControllersRef = useRef(new Map<string, TurnOperation>())
-  const socketRef = useRef<WebSocket | null>(null)
-  const socketRunRef = useRef<string | undefined>(undefined)
-  const socketGenerationRef = useRef(0)
-  const reconnectTimerRef = useRef<number | undefined>(undefined)
+  const runSubscriptionsRef = useRef(new Map<string, RunSubscription>())
   const previousIdentityRef = useRef(activeIdentity)
   const handoffRef = useRef<NewConversationHandoff | null>(null)
   const mountedRef = useRef(true)
@@ -105,80 +111,91 @@ export function useConversationController(
     onConversationStartedRef.current = onConversationStarted
   }, [onConversationStarted])
 
-  const closeRunSocket = useCallback(() => {
-    socketGenerationRef.current += 1
-    if (reconnectTimerRef.current !== undefined) {
-      window.clearTimeout(reconnectTimerRef.current)
-      reconnectTimerRef.current = undefined
+  const closeRunSocket = useCallback((runId: string, reason = 'Run no longer active') => {
+    const subscription = runSubscriptionsRef.current.get(runId)
+    if (!subscription) return
+    subscription.stopped = true
+    if (subscription.reconnectTimer !== undefined) {
+      window.clearTimeout(subscription.reconnectTimer)
+      subscription.reconnectTimer = undefined
     }
-    socketRunRef.current = undefined
-    const socket = socketRef.current
-    socketRef.current = null
-    if (socket && socket.readyState < 2) socket.close(1000, 'Detached')
+    runSubscriptionsRef.current.delete(runId)
+    const socket = subscription.socket
+    subscription.socket = null
+    if (socket && socket.readyState < 2) socket.close(1000, reason)
   }, [])
+
+  const closeAllRunSockets = useCallback(() => {
+    for (const runId of [...runSubscriptionsRef.current.keys()]) closeRunSocket(runId, 'Unmounted')
+  }, [closeRunSocket])
 
   const connectRun = useCallback((
     identity: ConversationRouteIdentity,
     runId: string,
     after = '0',
   ) => {
-    const current = socketRef.current
-    if (socketRunRef.current === runId && current && current.readyState < 2) return
-    closeRunSocket()
-    let cursor = parseEventSequence(after)
-    socketRunRef.current = runId
-    const generation = socketGenerationRef.current
-    let reconnectAttempt = 0
+    const afterSequence = parseEventSequence(after)
+    const current = runSubscriptionsRef.current.get(runId)
+    if (current) {
+      current.identity = identity
+      if (afterSequence > current.cursor) current.cursor = afterSequence
+      if ((current.socket && current.socket.readyState < 2) || current.reconnectTimer !== undefined) return
+    }
+    const subscription = current ?? {
+      identity,
+      cursor: afterSequence,
+      socket: null,
+      reconnectAttempt: 0,
+      stopped: false,
+    }
+    subscription.stopped = false
+    runSubscriptionsRef.current.set(runId, subscription)
 
     const open = () => {
-      if (socketGenerationRef.current !== generation || socketRunRef.current !== runId) return
+      if (subscription.stopped || runSubscriptionsRef.current.get(runId) !== subscription) return
+      subscription.reconnectTimer = undefined
       const socket = new WebSocket(agentRunSocketUrl(
         runId,
-        cursor.toString(),
+        subscription.cursor.toString(),
         window.location.origin,
       ))
-      socketRef.current = socket
+      subscription.socket = socket
       socket.onmessage = (message) => {
-        if (socketGenerationRef.current !== generation || socketRunRef.current !== runId) return
+        if (subscription.stopped || runSubscriptionsRef.current.get(runId) !== subscription) return
         try {
           const parsed = parseSocketMessage(message.data)
           if (parsed.run_id !== runId) throw new Error('The response stream was invalid. Try again.')
-          reconnectAttempt = 0
+          subscription.reconnectAttempt = 0
           if (parsed.type === 'browser.frame') {
             const frame = mapBrowserFrame(parsed.data)
-            if (frame) dispatch({ type: 'run.browser-frame', key: identity, runId, frame })
+            if (frame) dispatch({ type: 'run.browser-frame', key: subscription.identity, runId, frame })
             return
           }
           const sequence = parseEventSequence(parsed.sequence)
-          if (sequence <= cursor) return
-          cursor = sequence
-          dispatch({ type: 'run.event', key: identity, event: parsed, at: Date.now() })
+          if (sequence <= subscription.cursor) return
+          subscription.cursor = sequence
+          dispatch({ type: 'run.event', key: subscription.identity, event: parsed, at: Date.now() })
           if (parsed.type === 'turn.completed' ||
-            parsed.type === 'turn.failed' ||
-            parsed.type === 'user.input_required') {
-            socketRunRef.current = undefined
-            socketRef.current = null
-            socket.close(1000, 'Run paused or completed')
+            parsed.type === 'turn.failed') {
+            closeRunSocket(runId, 'Run completed')
           }
         } catch {
           dispatch({
             type: 'run.connection.failed',
-            key: identity,
+            key: subscription.identity,
             runId,
             error: 'The live run connection returned an invalid event.',
           })
-          socketRunRef.current = undefined
-          socketRef.current = null
-          socket.close(1002, 'Invalid event')
+          closeRunSocket(runId, 'Invalid event')
         }
       }
       socket.onerror = () => socket.close()
       socket.onclose = () => {
-        if (socketRef.current === socket) socketRef.current = null
-        if (socketGenerationRef.current !== generation || socketRunRef.current !== runId) return
-        const delay = Math.min(1_000 * (2 ** reconnectAttempt), 10_000)
-        reconnectAttempt += 1
-        reconnectTimerRef.current = window.setTimeout(open, delay)
+        if (subscription.socket === socket) subscription.socket = null
+        if (subscription.stopped || runSubscriptionsRef.current.get(runId) !== subscription) return
+        const delay = Math.min(1_000 * (2 ** subscription.reconnectAttempt), 10_000)
+        subscription.reconnectAttempt += 1
+        subscription.reconnectTimer = window.setTimeout(open, delay)
       }
     }
 
@@ -229,10 +246,18 @@ export function useConversationController(
       dispatch({ type: 'detail.load.succeeded', id, operationId, detail })
       const run = parseActiveRunProjection(detail.active_run)
       if (run) {
+        const after = run.last_event_sequence ?? '0'
+        const tracked = runSubscriptionsRef.current.get(run.id)
+        if (tracked && tracked.cursor > parseEventSequence(after)) {
+          // The background subscription advanced while the detail snapshot was loading.
+          // Replaying from the snapshot cursor rebuilds any process events that could not
+          // be projected before the assistant message was hydrated.
+          closeRunSocket(run.id, 'Refreshing conversation snapshot')
+        }
         connectRun(
           { kind: 'existing', id },
           run.id,
-          run.last_event_sequence ?? '0',
+          after,
         )
       }
     } catch (error) {
@@ -252,7 +277,7 @@ export function useConversationController(
         detailControllersRef.current.delete(id)
       }
     }
-  }, [connectRun])
+  }, [closeRunSocket, connectRun])
 
   const abortTurnOperation = useCallback((operationId: string, detached = false) => {
     const operation = releaseTurnOperation(turnControllersRef.current, operationId)
@@ -336,14 +361,18 @@ export function useConversationController(
 
     let activeRun: { id: string; after: string } | undefined
     const acceptNewConversation = createNewConversationGate((id) => {
-      onAccepted?.()
+      const initiatingRouteIsCurrent = shouldNavigateInitialHandoff(
+        renderedConversationId.current,
+        mountedRef.current,
+      )
+      if (initiatingRouteIsCurrent) onAccepted?.()
       dispatch({ type: 'turn.handoff', operationId, id })
       operationIdentity = { kind: 'existing', id }
       rekeyTurnOperation(turnControllersRef.current, operationId, operationIdentity)
       handoffRef.current = { from: 'new', to: id, operationId }
-      onConversationStartedRef.current?.(id)
+      if (initiatingRouteIsCurrent) onConversationStartedRef.current?.(id)
       if (activeRun) connectRun(operationIdentity, activeRun.id, activeRun.after)
-    }, () => controller.signal.aborted || !mountedRef.current || renderedConversationId.current !== undefined)
+    })
     if (identity.kind === 'existing') onAccepted?.()
 
     try {
@@ -368,13 +397,13 @@ export function useConversationController(
           at: Date.now(),
           deferHandoff: operationIdentity.kind === 'new',
         })
-        if (operationIdentity.kind === 'new') acceptNewConversation(event)
         if (event.type === 'turn.started' && 'conversation' in event.data) {
           activeRun = { id: event.run_id, after: event.sequence }
           if (operationIdentity.kind === 'existing') {
             connectRun(operationIdentity, event.run_id, event.sequence)
           }
         }
+        if (operationIdentity.kind === 'new') acceptNewConversation(event)
       })
     } catch (error) {
       dispatch({
@@ -523,10 +552,21 @@ export function useConversationController(
         const operation = findTurnOperation(turnControllersRef.current, previous)
         if (operation) abortTurnOperation(operation.operationId, true)
       }
-      closeRunSocket()
     }
     previousIdentityRef.current = activeIdentity
-  }, [abortTurnOperation, activeKey, activeIdentity, closeRunSocket])
+  }, [abortTurnOperation, activeKey, activeIdentity])
+
+  useEffect(() => {
+    const desired = new Set<string>()
+    for (const [id, record] of Object.entries(state.conversationsById)) {
+      if (!record.activeRunId || record.turn.error) continue
+      desired.add(record.activeRunId)
+      connectRun({ kind: 'existing', id }, record.activeRunId, record.lastSequence ?? '0')
+    }
+    for (const runId of runSubscriptionsRef.current.keys()) {
+      if (!desired.has(runId)) closeRunSocket(runId)
+    }
+  }, [closeRunSocket, connectRun, state.conversationsById])
 
   useEffect(() => {
     if (activeIdentity.kind !== 'existing') return
@@ -553,10 +593,10 @@ export function useConversationController(
         for (const operation of turnControllers.values()) {
           operation.controller.abort()
         }
-        closeRunSocket()
+        closeAllRunSockets()
       })
     }
-  }, [closeRunSocket])
+  }, [closeAllRunSockets])
 
   return {
     state,

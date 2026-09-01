@@ -25,6 +25,7 @@ def create_app(
     settings: Settings | None = None,
     runner: Any = None,
     *,
+    title_runner: Any = None,
     checkpointer: Any = None,
     runtime_tools: Sequence[Any] | None = None,
 ) -> FastAPI:
@@ -67,6 +68,7 @@ def create_app(
     )
     application.state.settings = resolved_settings
     application.state.runner = runner
+    application.state.title_runner = title_runner
     application.state.runtime_tools = None if runtime_tools is None else tuple(runtime_tools)
 
     @application.middleware("http")
