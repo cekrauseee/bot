@@ -6,6 +6,7 @@ from uuid import uuid4
 import anyio
 import httpx
 import pytest
+import structlog
 
 from my_bot_ai.config import Settings
 from my_bot_ai.features.agent.contracts import AgentRequest
@@ -39,12 +40,18 @@ def test_runtime_tools_use_typed_schemas_and_normalized_dotted_requests() -> Non
             {
                 "url": str(request.url),
                 "authorization": request.headers.get("authorization"),
+                "request_id": request.headers.get("x-request-id"),
+                "correlation_id": request.headers.get("x-correlation-id"),
                 "body": json.loads(request.content),
             }
         )
         return httpx.Response(200, json={"result": {"ok": True}})
 
     async def run() -> tuple[list[str], dict[str, dict[str, object]]]:
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(
+            request_id="request-1", correlation_id="correlation-1"
+        )
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
             context = RuntimeContext(
                 run_id="run-1",
@@ -86,7 +93,10 @@ def test_runtime_tools_use_typed_schemas_and_normalized_dotted_requests() -> Non
                 assert json.loads(result.content) == {"ok": True}
             return list(by_name), {name: tool.args for name, tool in by_name.items()}
 
-    names, schemas = anyio.run(run)
+    try:
+        names, schemas = anyio.run(run)
+    finally:
+        structlog.contextvars.clear_contextvars()
     assert names == [
         "filesystem_list",
         "filesystem_read",
@@ -103,6 +113,8 @@ def test_runtime_tools_use_typed_schemas_and_normalized_dotted_requests() -> Non
     assert "leaseId" not in schemas["browser_type"]
     assert all(item["url"] == "https://runtime.invalid/tools" for item in captured)
     assert all(item["authorization"] == "Bearer token" for item in captured)
+    assert all(item["request_id"] == "request-1" for item in captured)
+    assert all(item["correlation_id"] == "correlation-1" for item in captured)
     assert [item["body"]["tool"] for item in captured] == [
         "filesystem.list",
         "filesystem.read",

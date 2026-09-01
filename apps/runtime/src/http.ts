@@ -6,6 +6,7 @@ import type { RuntimeToolRequest } from './contracts.js'
 import { RuntimeError, toPublicError } from './errors.js'
 import { parseRuntimeRequest } from './validation.js'
 import { RuntimeService } from './service.js'
+import { diagnostic, requestIdentity, runtimeLogger } from './logger.js'
 
 const MAX_BODY_BYTES = 2_500_000
 
@@ -17,6 +18,12 @@ export interface RuntimeHttpOptions {
 
 export function createRuntimeServer(options: RuntimeHttpOptions): Server {
   return createServer(async (request, response) => {
+    const startedAt = performance.now()
+    const identity = requestIdentity(request.headers)
+    let failure: ReturnType<typeof diagnostic> | undefined
+    let operation: Record<string, string> = {}
+    response.setHeader('x-request-id', identity.request_id)
+    response.setHeader('x-correlation-id', identity.correlation_id)
     const controller = new AbortController()
     const abort = () => {
       if (!response.writableEnded) controller.abort()
@@ -24,19 +31,59 @@ export function createRuntimeServer(options: RuntimeHttpOptions): Server {
     request.once('aborted', abort)
     response.once('close', abort)
     try {
-      await route(request, response, options, controller.signal)
+      await route(request, response, options, controller.signal, (fields) => {
+        operation = fields
+      })
     } catch (error) {
       if (controller.signal.aborted) return
       const publicError = toPublicError(error)
+      failure = diagnostic(publicError, publicError.status)
+      runtimeLogger({
+        event: 'request_error',
+        ...identity,
+        ...operation,
+        http_method: request.method,
+        http_route: request.url?.split('?')[0],
+        ...failure,
+      }, 'request_error', 'error')
       sendJson(response, publicError.status, { error: publicErrorPayload(publicError) })
     } finally {
+      const statusCode = response.statusCode || 499
+      const statusCodeDiagnostic = statusCode >= 400
+        ? diagnostic(
+            undefined,
+            statusCode,
+            statusCode === 401 ? 'unauthorized'
+              : statusCode === 404 ? 'not_found'
+                : statusCode === 503 ? 'runtime_unavailable' : undefined,
+          )
+        : undefined
+      runtimeLogger({
+        event: 'request_completed',
+        ...identity,
+        ...operation,
+        http_method: request.method,
+        http_route: request.url?.split('?')[0],
+        http_status_code: statusCode,
+        duration_ms: Math.round((performance.now() - startedAt) * 100) / 100,
+        outcome: controller.signal.aborted
+          ? 'cancelled'
+          : statusCode >= 400 ? 'error' : 'success',
+        ...(failure ?? statusCodeDiagnostic),
+      }, 'request_completed')
       request.off('aborted', abort)
       response.off('close', abort)
     }
   })
 }
 
-async function route(request: IncomingMessage, response: ServerResponse, options: RuntimeHttpOptions, signal: AbortSignal): Promise<void> {
+async function route(
+  request: IncomingMessage,
+  response: ServerResponse,
+  options: RuntimeHttpOptions,
+  signal: AbortSignal,
+  recordOperation: (fields: Record<string, string>) => void,
+): Promise<void> {
   if (request.method === 'GET' && request.url === '/health') {
     sendJson(response, 200, { status: 'ok', service: 'runtime' })
     return
@@ -51,15 +98,27 @@ async function route(request: IncomingMessage, response: ServerResponse, options
     return
   }
   if (request.method !== 'POST' || request.url !== '/tools') {
-    sendJson(response, 404, { error: { code: 'not_found', message: 'Not found.', retryable: false } })
+    sendJson(response, 404, {
+      error: { code: 'not_found', message: 'Not found.', retryable: false },
+    })
     return
   }
   if (!options.serviceToken || !validBearer(request.headers.authorization, options.serviceToken)) {
-    sendJson(response, options.serviceToken ? 401 : 503, { error: options.serviceToken ? { code: 'unauthorized', message: 'Unauthorized.', retryable: false } : { code: 'runtime_unavailable', message: 'The runtime is temporarily unavailable.', retryable: true } })
+    sendJson(response, options.serviceToken ? 401 : 503, {
+      error: options.serviceToken
+        ? { code: 'unauthorized', message: 'Unauthorized.', retryable: false }
+        : {
+            code: 'runtime_unavailable',
+            message: 'The runtime is temporarily unavailable.',
+            retryable: true,
+          },
+    })
     return
   }
   const contentType = request.headers['content-type']
-  if (!contentType || !/^application\/json(?:\s*;|\s*$)/i.test(contentType)) throw new RuntimeError('invalid_request', 'Content-Type must be application/json.', 400)
+  if (!contentType || !/^application\/json(?:\s*;|\s*$)/i.test(contentType)) {
+    throw new RuntimeError('invalid_request', 'Content-Type must be application/json.', 400)
+  }
   const body = await readBody(request)
   let parsed: unknown
   try {
@@ -68,6 +127,13 @@ async function route(request: IncomingMessage, response: ServerResponse, options
     throw new RuntimeError('invalid_request', 'Request body must be valid JSON.', 400)
   }
   const runtimeRequest = parseRuntimeRequest(parsed)
+  recordOperation({
+    operation_id: runtimeRequest.operation_id,
+    run_id: runtimeRequest.run_id,
+    conversation_id: runtimeRequest.conversation_id,
+    workspace_id: runtimeRequest.workspace_id,
+    tool: runtimeRequest.tool,
+  })
   const result = await options.service.execute(runtimeRequest, signal)
   sendJson(response, 200, result)
 }
@@ -94,7 +160,9 @@ function readBody(request: IncomingMessage): Promise<string> {
       chunks.push(buffer)
     })
     request.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
-    request.on('error', () => reject(new RuntimeError('invalid_request', 'Request body could not be read.', 400)))
+    request.on('error', () => reject(
+      new RuntimeError('invalid_request', 'Request body could not be read.', 400),
+    ))
   })
 }
 

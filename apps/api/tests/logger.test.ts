@@ -17,7 +17,17 @@ describe('structured logging safety', () => {
       nested: { prompt: 'private', code: 'provider_error', ok: true, rows: [{ email: 'private', safe: 1 }] },
       code: '123456', operational_code: 'provider_error',
     })).toEqual({ user_id: 'u1', nested: { code: 'provider_error', ok: true, rows: [{ safe: 1 }] }, operational_code: 'provider_error' })
-    expect(safeError(new Error('private payload'))).toMatchObject({ error_name: 'Error' })
+    expect(safeError(new Error('private payload'))).toMatchObject({ error_name: 'Error', error_category: 'unknown', error_summary: 'An unexpected error occurred.', retryable: true })
+    expect(JSON.stringify(safeError(new Error('private payload')))).not.toContain('private payload')
+    expect(safeError(Object.assign(new Error('provider body'), { code: 'operation_failed' }))).toMatchObject({ error_category: 'provider', error_code: 'operation_failed', retryable: true })
+    const previous = process.env.LOG_STACKS
+    process.env.LOG_STACKS = 'true'
+    try {
+      expect(safeError(new Error('private stack message')).error_stack).not.toContain('private stack message')
+    } finally {
+      if (previous === undefined) delete process.env.LOG_STACKS
+      else process.env.LOG_STACKS = previous
+    }
   })
 
   it('emits production records with the shared schema and recursive redaction', async () => {
@@ -33,6 +43,7 @@ describe('structured logging safety', () => {
     const record = JSON.parse(serialized) as Record<string, unknown>
     expect(record).toMatchObject({
       level: 'info', service: 'my_bot_api', environment: 'production',
+      schema_version: 1,
       event: 'operational_event', message: 'operational message',
       nested: { safe: true }, rows: [{ safe: 'value' }],
     })

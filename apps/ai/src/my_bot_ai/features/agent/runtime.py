@@ -16,6 +16,7 @@ from my_bot_ai.features.agent.errors import (
     RuntimeIdempotencyConflictError,
     RuntimeRecoveryRequiredError,
 )
+from my_bot_ai.logging import outbound_request_headers
 
 RuntimePath = Annotated[str, Field(min_length=1, max_length=4_096)]
 Selector = Annotated[str, Field(min_length=1, max_length=4_096)]
@@ -55,7 +56,9 @@ class RuntimeClient:
     ) -> Any:
         """Execute one named tool without leaking runtime response errors."""
 
-        headers = {"authorization": f"Bearer {self._token}"} if self._token else {}
+        headers = outbound_request_headers()
+        if self._token:
+            headers["authorization"] = f"Bearer {self._token}"
         body = {
             "version": 2,
             **asdict(context),

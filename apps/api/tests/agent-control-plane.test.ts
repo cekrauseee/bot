@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   AgentEventHub,
   AgentRunExecutor,
+  aiDiagnostic,
   parseAgentEvents,
   type AgentEventFanout,
   type AgentEventFanoutEnvelope,
@@ -30,6 +31,21 @@ class InMemoryAgentEventFanout implements AgentEventFanout {
 }
 
 describe('durable agent event contract', () => {
+  it('retains safe AI quota diagnostics without trusting arbitrary details', () => {
+    expect(aiDiagnostic({
+      code: 'provider_error',
+      error_code: 'insufficient_quota',
+      error_summary: 'untrusted provider body',
+    })).toEqual({
+      error_category: 'provider_quota',
+      error_code: 'insufficient_quota',
+      error_summary: 'The AI provider quota is exhausted.',
+      retryable: false,
+    })
+    expect(JSON.stringify(aiDiagnostic({ error_code: 'private-provider-body' })))
+      .not.toContain('private-provider-body')
+  })
+
   it('parses chunk-safe AI v2 events including the nonterminal input pause', () => {
     const parsed = parseAgentEvents(
       frame(1, 'plan.updated', { plan: [{ id: 'one', status: 'in_progress' }] }) +

@@ -19,6 +19,23 @@ _DENIED_KEYS = {
     "request_body", "response_body", "prompt", "message", "content", "reasoning", "code",
 }
 
+_ERROR_SUMMARIES = {
+    "provider_auth": "The AI provider rejected the credentials.",
+    "provider_quota": "The AI provider quota is exhausted.",
+    "provider_rate_limit": "The AI provider rate limit was reached.",
+    "provider_permission": "The AI provider denied access to this model.",
+    "provider_bad_request": "The AI provider rejected the request.",
+    "provider_timeout": "The AI provider timed out.",
+    "provider_unavailable": "The AI provider is temporarily unavailable.",
+    "provider_failure": "The AI provider request failed.",
+    "provider_missing": "The selected AI provider is not configured.",
+    "runtime": "A runtime tool failed.",
+    "checkpoint": "The durable agent checkpoint failed.",
+    "invalid_request": "The agent request was invalid.",
+    "cancelled": "The request was cancelled.",
+    "internal": "The AI service encountered an internal error.",
+}
+
 
 def sanitize_log_fields(value: Any, depth: int = 0, seen: set[int] | None = None) -> Any:
     """Recursively remove credential and user-payload-shaped log fields."""
@@ -78,7 +95,9 @@ def configure_logging(environment: str) -> None:
         wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=False,
     )
-    structlog.contextvars.bind_contextvars(service="my_bot_ai", environment=environment)
+    structlog.contextvars.bind_contextvars(
+        service="my_bot_ai", environment=environment, schema_version=1
+    )
     service_logger = logging.getLogger("my_bot_ai")
     service_logger.setLevel(logging.INFO)
     if not service_logger.handlers:
@@ -96,6 +115,117 @@ def safe_identifier(value: str | None) -> str:
     return str(uuid.uuid4())
 
 
+def classify_error(error: BaseException, provider: str | None = None) -> dict[str, Any]:
+    """Return a fixed, non-sensitive operational description of an exception."""
+    name = error.__class__.__name__.lower()
+    module = error.__class__.__module__.lower()
+    public = getattr(error, "public_error", None)
+    public_code = getattr(public, "code", None)
+    upstream_code = getattr(error, "code", None)
+    if not isinstance(upstream_code, str):
+        upstream_code = None
+    if upstream_code is None:
+        body = getattr(error, "body", None)
+        if isinstance(body, dict):
+            detail = body.get("error")
+            if isinstance(detail, dict) and detail.get("code") == "insufficient_quota":
+                upstream_code = "insufficient_quota"
+    status_code = getattr(error, "status_code", None)
+    if not isinstance(status_code, int):
+        status_code = None
+
+    category = "internal"
+    code = "internal_error"
+    retryable = False
+    if public_code:
+        code = str(public_code)
+        if code == "provider_missing":
+            category = code
+        elif code in {"runtime_error", "manual_recovery_required", "idempotency_conflict"}:
+            category = "runtime"
+        elif code in {"checkpoint_missing"}:
+            category = "checkpoint"
+        elif code in {"invalid_resume"}:
+            category = "invalid_request"
+        else:
+            category = "internal"
+        retryable = bool(getattr(public, "retryable", False))
+    elif upstream_code == "insufficient_quota":
+        category, code, retryable = "provider_quota", upstream_code, False
+    elif (
+        "authentication" in name
+        or name in {"invalidapikeyerror", "autherror"}
+        or status_code == 401
+    ):
+        category, code = "provider_auth", "provider_auth"
+    elif "permission" in name or "forbidden" in name or status_code == 403:
+        category, code = "provider_permission", "provider_permission"
+    elif "timeout" in name or "timeout" in module:
+        category, code, retryable = "provider_timeout", "provider_timeout", True
+    elif "badrequest" in name or status_code == 400:
+        category, code = "provider_bad_request", "provider_bad_request"
+    elif "ratelimit" in name or status_code == 429:
+        category, code, retryable = "provider_rate_limit", "provider_rate_limit", True
+    elif "unavailable" in name or "connection" in name or status_code in {502, 503, 504}:
+        category, code, retryable = "provider_unavailable", "provider_unavailable", True
+
+    result: dict[str, Any] = {
+        "error_type": error.__class__.__name__[:128],
+        "error_category": category,
+        "error_code": code,
+        "error_summary": _ERROR_SUMMARIES[category],
+        "retryable": retryable,
+    }
+    if provider in {"openai", "xai", "openrouter"}:
+        result["provider"] = provider
+    if status_code is not None and 100 <= status_code <= 599:
+        result["error_status_code"] = status_code
+    return result
+
+
+def classify_public_error(
+    code: str, provider: str | None = None, retryable: bool = False
+) -> dict[str, Any]:
+    """Classify an already-safe public error code for lifecycle records."""
+    categories = {
+        "provider_missing": "provider_missing",
+        "provider_error": "provider_failure",
+        "runtime_error": "runtime",
+        "manual_recovery_required": "runtime",
+        "idempotency_conflict": "runtime",
+        "checkpoint_missing": "checkpoint",
+        "invalid_resume": "invalid_request",
+        "cancelled": "cancelled",
+    }
+    safe_code = code if code in categories else (
+        "provider_error" if retryable else "internal_error"
+    )
+    category = categories.get(safe_code, "provider_failure" if retryable else "internal")
+    fields: dict[str, Any] = {
+        "error_category": category,
+        "error_code": safe_code,
+        "error_summary": _ERROR_SUMMARIES[category],
+        "retryable": retryable,
+    }
+    if provider in {"openai", "xai", "openrouter"}:
+        fields["provider"] = provider
+    return fields
+
+
+def outbound_request_headers() -> dict[str, str]:
+    """Propagate only validated tracing identifiers to private downstream services."""
+    context = structlog.contextvars.get_contextvars()
+    headers: dict[str, str] = {}
+    for field, header in (
+        ("request_id", "x-request-id"),
+        ("correlation_id", "x-correlation-id"),
+    ):
+        value = context.get(field)
+        if isinstance(value, str) and _SAFE_ID.fullmatch(value):
+            headers[header] = value
+    return headers
+
+
 def request_context(request: Request) -> tuple[str, str]:
     structlog.contextvars.clear_contextvars()
     request_id = safe_identifier(request.headers.get("x-request-id"))
@@ -103,6 +233,7 @@ def request_context(request: Request) -> tuple[str, str]:
     structlog.contextvars.bind_contextvars(
         service="my_bot_ai",
         environment=request.app.state.settings.environment,
+        schema_version=1,
         request_id=request_id,
         correlation_id=correlation_id,
     )
@@ -187,6 +318,10 @@ def _completed(
             fields[name] = str(value)
     if error is not None:
         fields["error_type"] = error.__class__.__name__
+        fields.update(classify_error(error, getattr(request.state, "provider", None)))
+    cause = getattr(request.state, "error_cause", None)
+    if isinstance(cause, dict):
+        fields.update(cause)
     logger.info(**fields)
 
 

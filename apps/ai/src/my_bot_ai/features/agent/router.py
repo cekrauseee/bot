@@ -10,13 +10,30 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from my_bot_ai.config import Settings
-from my_bot_ai.features.agent.contracts import AgentRequest, NormalizedEvent
+from my_bot_ai.features.agent.contracts import (
+    MODEL_CAPABILITIES,
+    AgentRequest,
+    NormalizedEvent,
+)
 from my_bot_ai.features.agent.errors import AgentServiceError, ProviderMissingError
 from my_bot_ai.features.agent.models import ensure_provider_available
 from my_bot_ai.features.agent.service import stream_agent_request
-from my_bot_ai.logging import lifecycle_event
+from my_bot_ai.logging import classify_error, classify_public_error, lifecycle_event
 
 router = APIRouter(tags=["agent"])
+_DIAGNOSTIC_FIELDS = (
+    "error_category",
+    "error_code",
+    "error_summary",
+    "provider",
+    "error_status_code",
+)
+
+
+def _stream_diagnostic(cause: dict[str, Any]) -> dict[str, Any]:
+    """Carry safe diagnostics to the private API without changing public retry semantics."""
+
+    return {key: cause[key] for key in _DIAGNOSTIC_FIELDS if key in cause}
 
 
 def require_token(request: Request) -> None:
@@ -49,6 +66,13 @@ async def _events(
     sequence = 0
     cancellation_logged = False
     terminal = False
+    provider = MODEL_CAPABILITIES[body.model].provider
+    request.state.provider = provider
+
+    def record_error(error: BaseException) -> dict[str, Any]:
+        cause = classify_error(error, provider)
+        request.state.error_cause = cause
+        return cause
 
     def emit(event: NormalizedEvent) -> bytes:
         nonlocal sequence
@@ -58,6 +82,7 @@ async def _events(
     def mark_cancelled() -> None:
         nonlocal cancellation_logged
         request.state.request_outcome = "cancelled"
+        request.state.error_cause = classify_public_error("cancelled", provider, False)
         if cancellation_logged:
             return
         cancellation_logged = True
@@ -117,11 +142,17 @@ async def _events(
                 elif event.type == "turn.failed":
                     request.state.request_outcome = "error"
                     error = event.data.get("error", {})
+                    safe_error = classify_public_error(
+                        str(error.get("code", "provider_error")),
+                        provider,
+                        bool(error.get("retryable", True)),
+                    )
+                    request.state.error_cause = safe_error
                     lifecycle_event(
                         "turn_failed",
                         turn_id=str(body.turn_id),
                         conversation_id=str(body.conversation_id),
-                        error_code=str(error.get("code", "provider_error")),
+                        **safe_error,
                     )
                 return
 
@@ -142,12 +173,13 @@ async def _events(
         raise
     except AgentServiceError as error:
         public = error.public_error
+        safe_error = record_error(error)
         request.state.request_outcome = "error"
         lifecycle_event(
             "turn_failed",
             turn_id=str(body.turn_id),
             conversation_id=str(body.conversation_id),
-            error_code=public.code,
+            **safe_error,
         )
         yield emit(
             NormalizedEvent(
@@ -157,17 +189,19 @@ async def _events(
                         "code": public.code,
                         "message": public.message,
                         "retryable": public.retryable,
+                        **_stream_diagnostic(safe_error),
                     }
                 },
             )
         )
-    except Exception:
+    except Exception as error:
         request.state.request_outcome = "error"
+        safe_error = record_error(error)
         lifecycle_event(
             "turn_failed",
             turn_id=str(body.turn_id),
             conversation_id=str(body.conversation_id),
-            error_code="provider_error",
+            **safe_error,
         )
         yield emit(
             NormalizedEvent(
@@ -177,6 +211,7 @@ async def _events(
                         "code": "provider_error",
                         "message": "The AI provider failed.",
                         "retryable": True,
+                        **_stream_diagnostic(safe_error),
                     }
                 },
             )
@@ -196,6 +231,8 @@ async def agent_stream(body: AgentRequest, request: Request) -> StreamingRespons
             ensure_provider_available(settings, body.model)
         except ProviderMissingError as error:
             public = error.public_error
+            request.state.provider = MODEL_CAPABILITIES[body.model].provider
+            request.state.error_cause = classify_error(error, request.state.provider)
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail={"code": public.code, "message": public.message},

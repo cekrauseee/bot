@@ -439,9 +439,10 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     .use(openapi({ documentation: { info: { title: 'myBot API', version: '0.1.0' } } }))
     .onError(({ error, request, set }) => {
       const context = requestContexts.get(request)
-      if (context) logger.warn({ ...requestLogFields(context), ...safeError(error), event: 'request_error' }, 'request_error')
       if (context) {
         context.httpRoute = new URL(request.url).pathname
+        context.error = safeError(error, error instanceof AuthError ? error.statusCode : error instanceof ValidationError || error instanceof ParseError ? 422 : undefined)
+        logger.warn({ ...requestLogFields(context), event: 'request_error' }, 'request_error')
         Object.assign(set.headers, requestHeaders(context))
       }
       if (error instanceof AuthError) {

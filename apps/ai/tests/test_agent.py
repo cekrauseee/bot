@@ -372,6 +372,37 @@ def test_v2_stream_auth_and_event_framing() -> None:
     assert events[0]["data"]["thread_id"] == str(RUN)
 
 
+def test_provider_quota_failure_keeps_public_retry_contract_and_safe_diagnostic() -> None:
+    class QuotaError(Exception):
+        code = "insufficient_quota"
+        status_code = 429
+
+    async def failing_runner(_body, _settings):
+        if False:
+            yield None
+        raise QuotaError("private provider response")
+
+    response = client(failing_runner).post(
+        "/agent/stream", json=PAYLOAD, headers={"Authorization": "Bearer test-token"}
+    )
+    blocks = [block for block in response.text.split("\n\n") if block]
+    event = json.loads(blocks[-1].split("data: ", 1)[1])
+    error = event["data"]["error"]
+
+    assert error == {
+        "code": "provider_error",
+        "message": "The AI provider failed.",
+        "retryable": True,
+        "error_category": "provider_quota",
+        "error_code": "insufficient_quota",
+        "error_summary": "The AI provider quota is exhausted.",
+        "provider": "openai",
+        "error_status_code": 429,
+    }
+    assert "QuotaError" not in response.text
+    assert "private provider response" not in response.text
+
+
 def test_user_input_required_pauses_without_turn_completed() -> None:
     async def waiting_runner(_body, _settings):
         yield {

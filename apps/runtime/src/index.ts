@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url'
 import { createRuntimeServer } from './http.js'
 import { loadConfig } from './config.js'
 import { RuntimeService } from './service.js'
+import { runtimeLogger } from './logger.js'
 
 export function createApplication(env: NodeJS.ProcessEnv = process.env) {
   const config = loadConfig(env)
@@ -18,6 +19,6 @@ const isEntryPoint = process.argv[1] && import.meta.url === pathToFileURL(proces
 if (isEntryPoint) {
   const application = createApplication()
   application.server.listen(application.config.port, '0.0.0.0', () => {
-    console.log(`runtime listening on ${application.config.port}`)
+    runtimeLogger({ event: 'runtime_started', port: application.config.port }, 'runtime_started')
   })
 }

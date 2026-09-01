@@ -7,6 +7,7 @@ import type { RuntimeToolRequest } from '../src/contracts.js'
 import { createRuntimeServer } from '../src/http.js'
 import { createFakeRuntimeProvider } from '../src/providers/fake.js'
 import { RuntimeService } from '../src/service.js'
+import { diagnostic, requestIdentity, runtimeLogger } from '../src/logger.js'
 
 const body = {
   version: 2,
@@ -25,6 +26,22 @@ describe('runtime HTTP boundary', () => {
   afterEach(async () => {
     await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))))
     vi.restoreAllMocks()
+  })
+
+  it('classifies errors with fixed summaries and bounded request identities', () => {
+    expect(diagnostic(new Error('provider body'), 502)).toMatchObject({ error_category: 'provider', error_summary: 'The provider operation failed.', retryable: true })
+    expect(requestIdentity({ 'x-request-id': 'r'.repeat(200) }).request_id).not.toBe('r'.repeat(200))
+  })
+
+  it('redacts nested operational payloads at the logger boundary', () => {
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    runtimeLogger({ event: 'test', nested: { prompt: 'private', path: '/secret', safe: true } }, 'test')
+    expect(String(write.mock.calls[0]?.[0])).not.toContain('private')
+    expect(String(write.mock.calls[0]?.[0])).not.toContain('/secret')
+    expect(String(write.mock.calls[0]?.[0])).toContain('schema_version')
+    runtimeLogger({ event: 'test' }, 'private message with spaces', 'error')
+    expect(String(write.mock.calls[1]?.[0])).not.toContain('private message with spaces')
+    expect(String(write.mock.calls[1]?.[0])).toContain('"level":"error"')
   })
 
   it('resolves a project context over HTTP while retaining shared-workspace access', async () => {
@@ -163,6 +180,8 @@ describe('runtime HTTP boundary', () => {
 
     const unauthorized = await fetch(`http://127.0.0.1:${port}/tools`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
     expect(unauthorized.status).toBe(401)
+    expect(unauthorized.headers.get('x-request-id')).toMatch(/^[A-Za-z0-9-]+$/)
+    expect(unauthorized.headers.get('x-correlation-id')).toMatch(/^[A-Za-z0-9-]+$/)
     expect(await unauthorized.json()).toEqual({ error: { code: 'unauthorized', message: 'Unauthorized.', retryable: false } })
 
     const authorized = await fetch(`http://127.0.0.1:${port}/tools`, { method: 'POST', headers: { authorization: 'Bearer service-secret', 'content-type': 'application/json' }, body: JSON.stringify(body) })

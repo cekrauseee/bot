@@ -22,9 +22,16 @@ export type RequestContext = {
   conversationId?: string
   turnId?: string
   completed?: boolean
+  error?: ReturnType<typeof classifyError> & { error_code?: string }
 }
 
 export type RequestOutcome = 'success' | 'error' | 'cancelled'
+export type ErrorCategory = 'validation' | 'authentication' | 'not_found' | 'conflict' | 'dependency' | 'provider' | 'persistence' | 'cancelled' | 'unknown'
+const errorSummaries: Record<ErrorCategory, string> = {
+  validation: 'The request was invalid.', authentication: 'Authentication was rejected.', not_found: 'The requested resource was not found.',
+  conflict: 'The operation conflicted with current state.', dependency: 'A required dependency was unavailable.', provider: 'The provider operation failed.',
+  persistence: 'The operation could not be persisted.', cancelled: 'The operation was cancelled.', unknown: 'An unexpected error occurred.',
+}
 
 export const validRequestId = (value: string | null | undefined): value is string =>
   !!value && idPattern.test(value)
@@ -68,15 +75,30 @@ export const sanitizeLogFields = (value: unknown, depth = 0, seen = new WeakSet<
   return result
 }
 
-export const safeError = (error: unknown) => {
+export const classifyError = (error: unknown, status?: number): { error_category: ErrorCategory; error_summary: string; retryable: boolean } => {
+  const code = error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : ''
+  const name = error instanceof Error ? error.name : ''
+  const category: ErrorCategory = status === 422 || code === 'invalid_request' || name === 'ValidationError' || name === 'ParseError' ? 'validation'
+    : status === 401 || status === 403 || code.includes('auth') || code === 'unauthorized' ? 'authentication'
+      : status === 404 || code === 'not_found' || code === 'NOT_FOUND' ? 'not_found'
+        : status === 409 || code.includes('conflict') || code.includes('recovery') ? 'conflict'
+          : code.includes('provider') || code === 'operation_failed' ? 'provider'
+            : code.includes('database') || code.includes('persist') ? 'persistence'
+              : status === 503 || code.includes('unavailable') ? 'dependency'
+                : status === 499 || name === 'AbortError' ? 'cancelled' : 'unknown'
+  return { error_category: category, error_summary: errorSummaries[category], retryable: category === 'dependency' || category === 'provider' || category === 'unknown' }
+}
+
+export const safeError = (error: unknown, status?: number) => {
+  const classified = classifyError(error, status)
   if (error instanceof Error) {
-    const result: { error_name: string; error_code?: string; error_stack?: string } = { error_name: error.name }
+    const result: { error_name: string; error_code: string; error_stack?: string; error_category: ErrorCategory; error_summary: string; retryable: boolean } = { error_name: error.name, error_code: 'unknown_error', ...classified }
     const code = (error as { code?: unknown }).code
     if (typeof code === 'string' && /^[A-Za-z0-9_.:-]{1,80}$/.test(code)) result.error_code = code
-    if (process.env.LOG_STACKS === 'true' && error.stack) result.error_stack = error.stack.split('\n').slice(0, 8).join('\n')
+    if (process.env.LOG_STACKS === 'true' && error.stack) result.error_stack = error.stack.split('\n').slice(1, 8).join('\n')
     return result
   }
-  return { error_name: 'UnknownError' }
+  return { error_name: 'UnknownError', error_code: 'unknown_error', ...classified }
 }
 
 export const setRequestOutcome = (request: Request, outcome: RequestOutcome) => {
@@ -90,7 +112,7 @@ export const createLogger = (
   destination?: DestinationStream,
 ): Logger => pino({
   level: settings.environment === 'production' ? 'info' : 'debug',
-  base: { service: 'my_bot_api', environment: settings.environment },
+  base: { service: 'my_bot_api', environment: settings.environment, schema_version: 1 },
   messageKey: 'message',
   timestamp: () => `,"timestamp":"${new Date().toISOString()}"`,
   formatters: {
@@ -119,6 +141,7 @@ export const requestLogFields = (context: RequestContext) => ({
   ...(context.userId ? { user_id: context.userId } : {}),
   ...(context.conversationId ? { conversation_id: context.conversationId } : {}),
   ...(context.turnId ? { turn_id: context.turnId } : {}),
+  ...(context.error ? context.error : undefined),
 })
 
 export const requestHeaders = (context: Pick<RequestContext, 'requestId' | 'correlationId'>) => ({

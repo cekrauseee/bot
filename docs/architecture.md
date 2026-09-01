@@ -53,6 +53,12 @@ The conversation flow is:
 7. The web reducer applies ordered events by string cursor. Questions pause the run; resume and cancellation use owned run routes.
 8. Navigation detaches local transports without cancelling cloud work. Reload uses `active_run`, replay, and WebSocket fanout to resume the projection.
 
+## Observability
+
+The API, AI service, and runtime emit schema-versioned structured events. Validated request and correlation IDs propagate from the browser-facing API through AI calls and runtime tools. Each request ends with one `request_completed` wide event containing route, status, duration, outcome, and safe operation identities where available.
+
+Failures add an allowlisted category, code, fixed human-readable summary, and retryability. Provider quota exhaustion remains distinct from ordinary rate limiting, authentication, permission, invalid requests, timeouts, and availability failures. Logging boundaries recursively remove credentials, cookies, prompts, message content, provider bodies, SQL, commands, paths, and tool output. Raw exception messages never become diagnostic summaries.
+
 ## Invariants
 
 - Page modules remain lazy-loaded through the router.

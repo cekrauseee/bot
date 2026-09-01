@@ -3,7 +3,60 @@ import type { Redis } from 'ioredis'
 import type { Database } from '../db/database.js'
 import type { AgentEvent, AgentRun } from '../db/repository.js'
 import { AgentRunLeaseLostError, AgentRunRepository } from '../db/repository.js'
+import { createLogger, safeError } from '../logger.js'
 import type { AiClient } from './conversations.js'
+
+const logger = createLogger({ environment: process.env.ENVIRONMENT === 'production' ? 'production' : 'development' })
+export const aiDiagnostic = (value: unknown) => {
+  const record = plainRecord(value)
+  const code = typeof record?.error_code === 'string' ? record.error_code : record?.code
+  if (code === 'insufficient_quota') {
+    return { error_category: 'provider_quota', error_code: code,
+      error_summary: 'The AI provider quota is exhausted.', retryable: false }
+  }
+  if (code === 'provider_rate_limit' || code === 'rate_limited') {
+    return { error_category: 'provider_rate_limit', error_code: code,
+      error_summary: 'The AI provider rate limit was reached.', retryable: true }
+  }
+  if (code === 'provider_auth') {
+    return { error_category: 'provider_auth', error_code: code,
+      error_summary: 'The AI provider rejected the credentials.', retryable: false }
+  }
+  if (code === 'provider_permission') {
+    return { error_category: 'provider_permission', error_code: code,
+      error_summary: 'The AI provider denied access to this model.', retryable: false }
+  }
+  if (code === 'provider_bad_request') {
+    return { error_category: 'provider_bad_request', error_code: code,
+      error_summary: 'The AI provider rejected the request.', retryable: false }
+  }
+  if (code === 'provider_timeout') {
+    return { error_category: 'provider_timeout', error_code: code,
+      error_summary: 'The AI provider timed out.', retryable: true }
+  }
+  if (code === 'provider_unavailable') {
+    return { error_category: 'provider_unavailable', error_code: code,
+      error_summary: 'The AI provider is temporarily unavailable.', retryable: true }
+  }
+  if (code === 'provider_missing') {
+    return { error_category: 'provider_missing', error_code: code,
+      error_summary: 'The selected AI provider is not configured.', retryable: false }
+  }
+  if (code === 'internal_error') {
+    return { error_category: 'internal', error_code: code,
+      error_summary: 'The AI service encountered an internal error.', retryable: false }
+  }
+  if (code === 'invalid_provider_event') {
+    return { error_category: 'provider_protocol', error_code: code,
+      error_summary: 'The AI provider stream was invalid.', retryable: true }
+  }
+  return {
+    error_category: 'provider',
+    error_code: 'provider_error',
+    error_summary: 'The provider operation failed.',
+    retryable: true,
+  }
+}
 
 export const agentEventTypes = [
   'turn.started',
@@ -383,7 +436,7 @@ export class AgentRunExecutor {
     let execution: Promise<void>
     execution = Promise.resolve()
       .then(() => this.closing ? undefined : this.execute(runId))
-      .catch(() => console.error('agent run execution failed'))
+      .catch((error) => logger.error({ event: 'agent_run_execution_failed', run_id: runId, ...safeError(error) }, 'agent_run_execution_failed'))
       .finally(() => {
         this.executionPromises.delete(execution)
         this.executing.delete(runId)
@@ -422,7 +475,7 @@ export class AgentRunExecutor {
     if (this.recoveryTimer || this.closing) return
     const sweep = () => {
       if (this.closing) return
-      void this.recover(limit).catch(() => console.error('agent run recovery failed'))
+      void this.recover(limit).catch((error) => logger.error({ event: 'agent_run_recovery_failed', ...safeError(error) }, 'agent_run_recovery_failed'))
     }
     queueMicrotask(sweep)
     this.recoveryTimer = setInterval(sweep, intervalMilliseconds)
@@ -458,8 +511,8 @@ export class AgentRunExecutor {
     if (!this.fanout) return
     try {
       await this.fanout.publish({ kind: 'event', source: this.source, event })
-    } catch {
-      console.error('agent event fanout failed')
+    } catch (error) {
+      logger.error({ event: 'agent_event_fanout_failed', ...safeError(error) }, 'agent_event_fanout_failed')
     }
   }
 
@@ -468,8 +521,8 @@ export class AgentRunExecutor {
     if (!this.fanout) return
     try {
       await this.fanout.publish({ kind: 'frame', source: this.source, runId, frame })
-    } catch {
-      console.error('agent browser frame fanout failed')
+    } catch (error) {
+      logger.error({ event: 'agent_browser_frame_fanout_failed', run_id: runId, ...safeError(error) }, 'agent_browser_frame_fanout_failed')
     }
   }
 
@@ -659,6 +712,7 @@ export class AgentRunExecutor {
         if (event.type === 'turn.failed') {
           terminal = event.type
           const detail = plainRecord(data.error)
+          logger.error({ event: 'agent_run_failed', run_id: run.id, turn_id: run.turnId, ...aiDiagnostic(detail) }, 'agent_run_failed')
           await this.persist(run, event.type, {
             error: {
               code: typeof detail?.code === 'string' ? detail.code : 'provider_error',
@@ -705,6 +759,8 @@ export class AgentRunExecutor {
       if (pending.trim() || !terminal) throw new Error('truncated_provider_stream')
     } catch (error) {
       if (leaseLost || error instanceof AgentRunLeaseLostError || controller.signal.aborted) return
+      const diagnostic = aiDiagnostic(error)
+      logger.error({ event: 'agent_run_failed', run_id: run.id, turn_id: run.turnId, ...safeError(error), ...diagnostic }, 'agent_run_failed')
       try {
         await this.persist(run, 'turn.failed', {
           error: { code: 'provider_error', message: 'Unable to complete this turn.', retryable: true },
@@ -719,7 +775,7 @@ export class AgentRunExecutor {
         })
       } catch (terminalError) {
         if (!(terminalError instanceof AgentRunLeaseLostError)) {
-          console.error('agent run terminal persistence failed')
+          logger.error({ event: 'agent_run_terminal_persistence_failed', run_id: run.id, turn_id: run.turnId, ...safeError(terminalError) }, 'agent_run_terminal_persistence_failed')
         }
       }
       void error
