@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AnyHttpUrl
+from pydantic import AnyHttpUrl, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -40,6 +40,16 @@ class Settings(BaseSettings):
     ai_service_token: str
     runtime_base_url: AnyHttpUrl
     runtime_service_token: str | None = None
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_database_url(cls, value: object) -> object:
+        """Normalize the legacy SQLAlchemy-style psycopg URL for libpq consumers."""
+
+        legacy_scheme = "postgresql+psycopg:"
+        if isinstance(value, str) and value.lower().startswith(legacy_scheme):
+            return f"postgresql:{value[len(legacy_scheme):]}"
+        return value
 
 
 @lru_cache

@@ -36,6 +36,15 @@ def test_env_file_is_loaded_and_process_environment_wins(tmp_path, monkeypatch) 
     assert Settings(_env_file=env_file).environment == "test"
 
 
+def test_legacy_psycopg_database_url_is_normalized() -> None:
+    settings = Settings(
+        environment="development",
+        database_url="postgresql+psycopg://mybot:mybot@localhost:5434/mybot",
+    )
+
+    assert settings.database_url == "postgresql://mybot:mybot@localhost:5434/mybot"
+
+
 def test_production_rejects_placeholder_secrets_and_missing_database() -> None:
     with pytest.raises(ValueError, match="AI_SERVICE_TOKEN"):
         create_app(
