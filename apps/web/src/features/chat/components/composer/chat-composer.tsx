@@ -1,10 +1,13 @@
 import { OpenAIIcon } from "@/components/icons/openai-icon";
+import { XIcon } from "@/components/icons/x-icon";
 import { PromptInput } from "./prompt-input";
 import { ReasoningEffort } from "@/features/chat/components/reasoning-effort";
 import { SpeedToggle } from "@/features/chat/components/speed-toggle";
 import type {
   ChatModelOption,
+  ChatReasoningEffort,
   ChatReasoningOption,
+  ChatTodo,
 } from "@/features/chat/model";
 import { cn } from "@/lib/utils";
 import { COMPOSER_SURFACE } from './composer-surface';
@@ -14,15 +17,18 @@ import { useComposerPosition } from '../../hooks/use-composer-position';
 import type { ConversationEntry } from '../../motion/conversation-entry';
 import { memo, useId, useMemo, useState } from 'react';
 import { ComposerSubmitAction, type ComposerActionLabels } from './composer-submit-action';
+import { TaskPlanBadge } from '../tasks/task-plan-badge';
+import { modelSupportsSpeedChoice } from '../../model-catalog';
 
 export type ChatComposerProps = {
   entry: ConversationEntry;
   conversationKey: string;
   viewportId: string;
+  plan: ChatTodo[];
   models: ChatModelOption[];
   reasoningOptions: ChatReasoningOption[];
   model: string;
-  reasoningEffort: string;
+  reasoningEffort: ChatReasoningEffort;
   fastMode: boolean;
   loading: boolean;
   submitDisabled?: boolean;
@@ -32,7 +38,7 @@ export type ChatComposerProps = {
   onSubmit?: (value: string, model?: string, onAccepted?: () => void) => void | Promise<void>;
   onStop?: () => void;
   onModelChange?: (model: string) => void;
-  onReasoningChange: (value: string) => void;
+  onReasoningChange: (value: ChatReasoningEffort) => void;
   onSpeedChange: (value: boolean) => void;
   centered?: boolean;
 };
@@ -41,6 +47,7 @@ export const ChatComposer = memo(function ChatComposer({
   entry,
   conversationKey,
   viewportId,
+  plan,
   models,
   reasoningOptions,
   model,
@@ -61,8 +68,12 @@ export const ChatComposer = memo(function ChatComposer({
   const [draft, setDraft] = useState('');
   const errorId = useId();
   const promptModels = useMemo(() => models.map((option) => ({
-    ...option, icon: <OpenAIIcon aria-hidden="true" />,
+    ...option,
+    icon: option.provider === 'xai'
+      ? <XIcon aria-hidden="true" />
+      : <OpenAIIcon aria-hidden="true" />,
   })), [models]);
+  const selectedModel = models.find((option) => option.value === model);
   const visibleError = centered && !loading && draft.trim() === submittedPrompt ? submitError : '';
   const { dockRef, surfaceRef, captureSubmitPosition } = useComposerPosition(centered, viewportId, entry, conversationKey);
   return (
@@ -85,6 +96,7 @@ export const ChatComposer = memo(function ChatComposer({
           </motion.p>
         ) : null}
         </AnimatePresence>
+        <TaskPlanBadge items={plan} />
         <PromptInput
           value={draft}
           onValueChange={setDraft}
@@ -126,9 +138,9 @@ export const ChatComposer = memo(function ChatComposer({
               options={reasoningOptions}
               value={reasoningEffort}
               onValueChange={onReasoningChange}
-              trailingAction={
-                <SpeedToggle value={fastMode} onValueChange={onSpeedChange} />
-              }
+              trailingAction={modelSupportsSpeedChoice(selectedModel)
+                ? <SpeedToggle value={fastMode} onValueChange={onSpeedChange} />
+                : undefined}
             />
           }
         />

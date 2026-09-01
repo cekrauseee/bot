@@ -2,7 +2,12 @@ import { Message, MessageContent, MessageGroup } from "./message";
 import { MessageScroller } from "./message-scroller";
 import { MessageBubble, MessageBubbleContent } from "./message-bubble";
 import { MessageBlockRenderer } from "./message-block-renderer";
-import type { ChatApprovalDecision, ChatMessage } from "@/features/chat/model";
+import type {
+  ChatApprovalDecision,
+  ChatMessage,
+  ChatQuestionAnswers,
+  ChatQuestionRequest,
+} from "@/features/chat/model";
 import { ResponseStatus } from './response-status';
 import { isResponseProcessBlock } from "./response-process-model";
 import { cn } from "@/lib/utils";
@@ -19,10 +24,15 @@ type MessageRowProps = {
   retryPending?: boolean;
   retryDisabled?: boolean;
   onApprovalDecision?: (blockId: string, decision: ChatApprovalDecision) => void;
+  onQuestionSubmit?: (
+    request: ChatQuestionRequest,
+    answers: ChatQuestionAnswers,
+  ) => void;
 };
 
 const ChatMessageRow = memo(function ChatMessageRow({
-  message, animateBubble, onRetry, onReload, onApprovalDecision, retryPending, retryDisabled,
+  message, animateBubble, onRetry, onReload, onApprovalDecision, onQuestionSubmit,
+  retryPending, retryDisabled,
 }: MessageRowProps) {
   const sources = message.blocks.flatMap((block) => block.type === 'activity'
     ? block.items.flatMap((item) => item.type === 'search' ? item.results ?? [] : [])
@@ -72,6 +82,7 @@ const ChatMessageRow = memo(function ChatMessageRow({
               key={block.id}
               block={block}
               onApprovalDecision={onApprovalDecision}
+              onQuestionSubmit={onQuestionSubmit}
               responseStatus={message.status}
               sources={sources}
               createdAt={blockIndex === lastTextBlockIndex ? message.createdAt : undefined}
@@ -90,6 +101,7 @@ const ChatMessageRow = memo(function ChatMessageRow({
 export function ChatMessageList({
   messages,
   onApprovalDecision,
+  onQuestionSubmit,
   revealHistory = false,
   viewportRef,
   onRetryTurn,
@@ -113,6 +125,10 @@ export function ChatMessageList({
   onApprovalDecision?: (
     blockId: string,
     decision: ChatApprovalDecision,
+  ) => void;
+  onQuestionSubmit?: (
+    request: ChatQuestionRequest,
+    answers: ChatQuestionAnswers,
   ) => void;
 }) {
   const revealVisibleHistory = useHistoryEntrance(revealHistory, entry, conversationKey);
@@ -150,6 +166,7 @@ export function ChatMessageList({
               retryDisabled={latest ? !canRetryTurn : undefined}
               onReload={latest ? onReloadConversation : undefined}
               onApprovalDecision={onApprovalDecision}
+              onQuestionSubmit={onQuestionSubmit}
             />
           );
         })}

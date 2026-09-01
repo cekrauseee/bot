@@ -16,6 +16,10 @@ export function ChatPage() {
   const [signOutStatus, setSignOutStatus] = useState<Exclude<ButtonState, 'success'>>('idle')
 
   useEffect(() => {
+    document.title = 'myBot'
+  }, [])
+
+  useEffect(() => {
     if (!isLoading && isUnauthorized) navigate('/sign', { replace: true })
   }, [isLoading, isUnauthorized, navigate])
 

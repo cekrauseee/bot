@@ -21,7 +21,7 @@ import { EASE_OUT, SPRING_PANEL } from "@/lib/ease";
 import { cn } from "@/lib/utils";
 
 type Side = "top" | "bottom";
-type Align = "start" | "end";
+type Align = "start" | "center" | "end";
 
 type MorphContextValue = {
   open: boolean;
@@ -197,15 +197,15 @@ export function MorphPopoverTrigger({
 }
 
 const originFor = (side: Side, align: Align) =>
-  `${side === "bottom" ? "top" : "bottom"} ${align === "end" ? "right" : "left"}`;
+  `${side === "bottom" ? "top" : "bottom"} ${align === "center" ? "center" : align === "end" ? "right" : "left"}`;
 
 // A clip that hides everything but the corner nearest the trigger, so the
 // panel appears to grow out of it. inset(top right bottom left).
 function clipHidden(side: Side, align: Align, radius: number) {
   const top = side === "bottom" ? "0%" : "92%";
   const bottom = side === "bottom" ? "92%" : "0%";
-  const right = align === "end" ? "0%" : "92%";
-  const left = align === "end" ? "92%" : "0%";
+  const right = align === "center" ? "46%" : align === "end" ? "0%" : "92%";
+  const left = align === "center" ? "46%" : align === "end" ? "92%" : "0%";
   return `inset(${top} ${right} ${bottom} ${left} round ${radius}px)`;
 }
 const clipShown = (radius: number) => `inset(0% 0% 0% 0% round ${radius}px)`;
@@ -244,7 +244,9 @@ export function MorphPopoverContent({
   );
 
   const left = layout
-    ? align === "end"
+    ? align === "center"
+      ? layout.trigger.left + (layout.trigger.width - layout.content.width) / 2
+      : align === "end"
       ? layout.trigger.left + layout.trigger.width - layout.content.width
       : layout.trigger.left
     : 0;

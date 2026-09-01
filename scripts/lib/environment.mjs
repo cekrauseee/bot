@@ -9,7 +9,13 @@ const LOCAL_SECRET_KEYS = [
   'OTP_PEPPER',
   'RATE_LIMIT_PEPPER',
   'AI_SERVICE_TOKEN',
+  'RUNTIME_SERVICE_TOKEN',
 ]
+const LOCAL_DEFAULTS = new Map([
+  ['RUNTIME_BASE_URL', 'http://localhost:8002'],
+  ['RUNTIME_PORT', '8002'],
+  ['RUNTIME_ENVIRONMENT', 'development'],
+])
 const GOOGLE_CONFIG_KEYS = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET']
 const RESEND_CONFIG_KEYS = ['RESEND_API_KEY']
 const DEFAULT_SENDER = 'myBot <mybot@cekrause.eu>'
@@ -160,6 +166,7 @@ export async function prepareEnvironment(
   let contents = alignEnvironment(templateContents, originalContents)
   let values = parseEnvironment(contents)
   const generatedSecretKeys = []
+  const configuredDefaultKeys = []
   const usedSecrets = new Set(
     LOCAL_SECRET_KEYS.map((key) => values.get(key)).filter(
       (value) => value && !isPlaceholder(value),
@@ -172,6 +179,14 @@ export async function prepareEnvironment(
       contents = setEnvironmentValue(contents, key, secret)
       generatedSecretKeys.push(key)
       values.set(key, secret)
+    }
+  }
+
+  for (const [key, value] of LOCAL_DEFAULTS) {
+    if (!values.has(key) || isPlaceholder(values.get(key) ?? '')) {
+      contents = setEnvironmentValue(contents, key, value)
+      configuredDefaultKeys.push(key)
+      values.set(key, value)
     }
   }
 
@@ -188,6 +203,7 @@ export async function prepareEnvironment(
   return {
     createdEnv,
     generatedSecretKeys,
+    configuredDefaultKeys,
     authentication: externalAuthenticationStatus(values),
   }
 }
@@ -198,6 +214,9 @@ export function printEnvironmentSummary(result) {
     console.log(
       `✓ Generated ${result.generatedSecretKeys.length} independent local service secrets`,
     )
+  }
+  if (result.configuredDefaultKeys.length > 0) {
+    console.log(`✓ Configured ${result.configuredDefaultKeys.length} local runtime defaults`)
   }
 
   if (result.authentication.configured) {

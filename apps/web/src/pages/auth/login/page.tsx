@@ -1,7 +1,13 @@
+import { useEffect } from 'react'
+
 import { LoginForm } from '@/features/auth/components/login-form'
 import { PageEntrance, PageEntranceItem } from '@/components/page-entrance'
 
 export function LoginPage() {
+  useEffect(() => {
+    document.title = 'Sign in · myBot'
+  }, [])
+
   return (
     <PageEntrance>
     <main className="relative flex min-h-svh flex-col">

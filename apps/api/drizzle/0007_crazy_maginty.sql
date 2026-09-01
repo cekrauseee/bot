@@ -1,0 +1,1 @@
+ALTER TABLE "agent_runs" DROP CONSTRAINT "uq_agent_runs_assistant_message_id";

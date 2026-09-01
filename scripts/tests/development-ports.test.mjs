@@ -22,11 +22,17 @@ test('port preflight uses the canonical environment file and shell overrides', a
     'WEB_BASE_URL=http://localhost:5173',
     'API_BASE_URL=http://localhost:8123',
     'AI_BASE_URL=http://localhost:8001',
+    'RUNTIME_BASE_URL=http://localhost:8002',
+    'RUNTIME_PORT=8002',
     '',
   ].join('\n'))
-  assert.deepEqual((await developmentServices(root, {})).map(({ port }) => port), [5173, 8123, 8001])
+  assert.deepEqual((await developmentServices(root, {})).map(({ port }) => port), [5173, 8123, 8001, 8002])
   assert.equal((await developmentServices(root, { API_BASE_URL: 'http://localhost:8234' }))[1].port, 8234)
   assert.equal((await developmentServices(root, { API_BASE_URL: 'http://localhost' }))[1].port, 80)
+  await assert.rejects(
+    developmentServices(root, { RUNTIME_PORT: '9002' }),
+    /must match RUNTIME_BASE_URL/,
+  )
 })
 
 for (const host of ['127.0.0.1', '::1']) {

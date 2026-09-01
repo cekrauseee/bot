@@ -51,8 +51,9 @@ const detail = (id: string, content = id): ConversationDetail => ({
   messages: [apiMessage(`${id}-user`, 'user', content)],
 })
 const started = (id: string): StreamEvent => ({
-  version: 1,
-  sequence: 0,
+  version: 2,
+  sequence: '0',
+  run_id: `run-${id}`,
   turn_id: `turn-${id}`,
   type: 'turn.started',
   data: {
@@ -62,22 +63,25 @@ const started = (id: string): StreamEvent => ({
   },
 })
 const delta = (id: string, value: string): StreamEvent => ({
-  version: 1,
-  sequence: 1,
+  version: 2,
+  sequence: '1',
+  run_id: `run-${id}`,
   turn_id: `turn-${id}`,
   type: 'text.delta',
   data: { delta: value },
 })
 const completed = (id: string): StreamEvent => ({
-  version: 1,
-  sequence: 2,
+  version: 2,
+  sequence: '2',
+  run_id: `run-${id}`,
   turn_id: `turn-${id}`,
   type: 'turn.completed',
   data: {},
 })
 const failed = (id: string): StreamEvent => ({
-  version: 1,
-  sequence: 2,
+  version: 2,
+  sequence: '2',
+  run_id: `run-${id}`,
   turn_id: `turn-${id}`,
   type: 'turn.failed',
   data: { error: { code: 'provider_error', message: 'Failed.', retryable: true } },
@@ -137,7 +141,7 @@ describe('conversation controller', () => {
       optimisticMessages: createOptimisticMessages('Prompt', 'turn', at) })
     state = reduce(state, { type: 'turn.event', key: existing('A'), operationId: 'turn', event: started('A'), at })
     const event = (sequence: number, type: 'reasoning.delta' | 'step.started' | 'step.completed', data: Record<string, unknown>): StreamEvent => ({
-      version: 1, sequence, turn_id: 'turn-A', type, data,
+      version: 2, sequence: String(sequence), run_id: 'run-A', turn_id: 'turn-A', type, data,
     } as StreamEvent)
     state = reduce(state, { type: 'turn.event', key: existing('A'), operationId: 'turn',
       event: event(1, 'reasoning.delta', { delta: 'Before search. ' }), at })
@@ -158,12 +162,12 @@ describe('conversation controller', () => {
       id: 'A-assistant-activity', type: 'activity', status: 'working', items: [
         {
           id: 'A-assistant-reasoning-1', type: 'text',
-          content: 'Before search. Still before search.', lastSequence: 2,
+          content: 'Before search. Still before search.', lastSequence: '2',
         },
         { id: 'search', type: 'search', query: 'current source', results: [] },
         {
           id: 'A-assistant-reasoning-5', type: 'text',
-          content: 'After search.', lastSequence: 5,
+          content: 'After search.', lastSequence: '5',
         },
       ],
     }])
@@ -583,6 +587,116 @@ describe('conversation controller', () => {
       },
     })
     expect(state.catalog.conversations.map((item) => item.id)).toEqual(['A', 'B', 'C'])
+  })
+
+  it('rehydrates and advances an active agent run without moving the plan into messages', () => {
+    let state = initialConversationControllerState()
+    state = reduce(state, { type: 'detail.load.started', id: 'A', operationId: 'load' })
+    state = reduce(state, {
+      type: 'detail.load.succeeded',
+      id: 'A',
+      operationId: 'load',
+      detail: {
+        ...detail('A'),
+        messages: [apiMessage('assistant', 'assistant', 'Waiting.', 'waiting')],
+        active_run: {
+          id: 'run-A',
+          turn_id: 'turn-A',
+          status: 'waiting',
+          last_event_sequence: '10',
+          plan: [{ id: 'inspect', title: 'Inspect the task', status: 'in_progress' }],
+          pending_question: {
+            question_id: 'continue',
+            prompt: 'Continue?',
+            options: [{ id: 'yes', label: 'Yes' }],
+          },
+          browser_projection: { id: 'browser', state: 'live', control: 'agent' },
+        },
+      },
+    })
+
+    let record = state.conversationsById.A
+    expect(record).toMatchObject({
+      activeRunId: 'run-A',
+      activeTurnId: 'turn-A',
+      lastSequence: '10',
+      browser: { id: 'browser', status: 'agent-control' },
+      plan: [{ id: 'inspect', status: 'in-progress' }],
+    })
+    expect(record.messages[0].blocks).toContainEqual(expect.objectContaining({
+      type: 'question',
+      request: expect.objectContaining({ id: 'continue', status: 'pending' }),
+    }))
+    expect(record.messages[0].blocks.some((block) => block.type === 'todo-list')).toBe(false)
+
+    const event = (sequence: string, type: StreamEvent['type'], data: Record<string, unknown>) => ({
+      version: 2 as const,
+      sequence,
+      run_id: 'run-A',
+      turn_id: 'turn-A',
+      type,
+      data,
+    }) as StreamEvent
+    state = reduce(state, {
+      type: 'run.event', key: existing('A'), at,
+      event: event('11', 'plan.updated', {
+        plan: [{ id: 'finish', title: 'Finish the task', status: 'pending' }],
+      }),
+    })
+    state = reduce(state, {
+      type: 'run.event', key: existing('A'), at,
+      event: event('12', 'tool.started', {
+        tool: { id: 'tool', name: 'read_file', label: 'Read file' },
+      }),
+    })
+    record = state.conversationsById.A
+    expect(record.plan).toEqual([{ id: 'finish', title: 'Finish the task', status: 'pending' }])
+    expect(record.messages[0].blocks).toContainEqual(expect.objectContaining({
+      type: 'activity',
+      items: expect.arrayContaining([
+        expect.objectContaining({ type: 'tool', action: 'read_file' }),
+      ]),
+    }))
+
+    state = reduce(state, {
+      type: 'run.event', key: existing('A'), at,
+      event: event('13', 'turn.failed', {
+        error: { code: 'cancelled', message: 'Turn cancelled.', retryable: false },
+      }),
+    })
+    record = state.conversationsById.A
+    expect(record.activeRunId).toBeUndefined()
+    expect(record.browser).toMatchObject({ status: 'closed' })
+    expect(record.messages[0].blocks).toContainEqual(expect.objectContaining({
+      type: 'question',
+      request: expect.objectContaining({ status: 'cancelled', result: 'Run cancelled.' }),
+    }))
+  })
+
+  it('detaches navigation from a cloud run and accepts later subscribed events', () => {
+    let state = initialConversationControllerState()
+    state = reduce(state, {
+      type: 'turn.started', key: existing('A'), operationId: 'turn',
+      optimisticMessages: createOptimisticMessages('Prompt', 'turn', at),
+    })
+    state = reduce(state, {
+      type: 'turn.event', key: existing('A'), operationId: 'turn', event: started('A'), at,
+    })
+    state = reduce(state, {
+      type: 'turn.detached', key: existing('A'), operationId: 'turn',
+    })
+    expect(state.conversationsById.A).toMatchObject({
+      activeRunId: 'run-A',
+      activeAssistantId: 'A-assistant',
+      turn: { status: 'loading', operationId: undefined },
+    })
+
+    state = reduce(state, {
+      type: 'run.event', key: existing('A'), event: delta('A', 'Continued'), at,
+    })
+    expect(state.conversationsById.A.messages.at(-1)?.blocks).toContainEqual(
+      expect.objectContaining({ type: 'text', content: 'Continued' }),
+    )
   })
 })
 

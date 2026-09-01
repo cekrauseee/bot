@@ -11,18 +11,21 @@ The repository contains independently managed product services under `apps/` and
 | `apps/web` | Browser application, routing, theming, and product interface |
 | `apps/api` | Node.js HTTP API, authentication, and server-side product capabilities |
 | `apps/ai` | Python service boundary for model providers and AI workloads |
+| `apps/runtime` | Private filesystem, process, browser, and sandbox boundary |
 | `packages/email` | React Email components, local previews, and the consumable email package |
-| PostgreSQL | Users, OAuth identities, sessions, conversations, and messages |
-| Redis | Short-lived OTP challenges, OAuth state, and rate limits |
+| PostgreSQL | Users, sessions, conversations, messages, agent runs, checkpoints, and durable events |
+| Redis | Short-lived auth state plus cross-instance agent event and browser-frame fanout |
 | Root workspace | Shared commands, repository rules, and canonical documentation |
 
 The web application uses React Router Data Mode. The router is created outside the React tree and lazy-loads the public login page and one persistent chat layout for `/`, `/conversations/:conversationId`, and `/projects/:projectId/:conversationId`. Pages compose authentication and the public chat feature. Hooks own interaction and session state; feature services own HTTP and SSE parsing.
 
-The chat feature is application-owned under `apps/web/src/features/chat`. Its public entrypoint re-exports the feature container and route-path helper. The URL is the only active conversation identity; project slugs are canonical path metadata. `useConversationController` owns catalog loading, keyed detail and turn operations, cancellation, and mutations. Its pure reducer stores the catalog independently from conversation records, guards every detail and turn write with an operation ID, and atomically moves a new optimistic turn to the server conversation ID. The transport service contains only HTTP, SSE validation, and message mapping. Presentational components compose the existing beUI shell, sidebar, message scroller, activity, streaming response, citations, code block, and composer.
+The chat feature is application-owned under `apps/web/src/features/chat`. Its public entrypoint re-exports the feature container and route-path helper. The URL is the only active conversation identity; project slugs are canonical path metadata. `useConversationController` owns catalog loading, keyed detail and turn operations, active-run subscriptions, cancellation, resume input, and mutations. Its pure reducer stores the catalog independently from conversation records, guards every detail and turn write, and atomically moves a new optimistic turn to the server conversation ID. The React-free transport service owns credentialed HTTP, SSE v2 and WebSocket validation, bigint cursors, and persisted-message projections.
 
-The application API uses an Elysia application factory with the official Node.js adapter, typed runtime schemas, and OpenAPI documentation. It is the only browser-facing backend. It authenticates users, owns conversations and messages in PostgreSQL, and proxies the AI stream while persisting partial and final output. Drizzle defines the relational schema and versioned migrations.
+The application API uses an Elysia application factory with the official Node.js adapter, typed runtime schemas, and OpenAPI documentation. It is the only browser-facing backend. It authenticates users and owns conversations, projects, workspaces, runs, messages, plans, and append-only events in PostgreSQL. Its leased executor continues work after the initiating HTTP response disconnects, publishes transient updates through Redis, and fences every durable write.
 
-The AI service uses a FastAPI application factory in `my_bot_ai.main`. It accepts only bearer-authenticated service requests from the application API. LangChain owns the agent graph, OpenAI Responses provides reasoning and built-in web search, and the service emits provider-neutral SSE events. It does not own browser authentication or persistence.
+The AI service uses a FastAPI application factory in `my_bot_ai.main`. It accepts only bearer-authenticated service requests from the application API. LangGraph checkpoints own resumable orchestration; OpenAI and xAI adapters expose provider-aware models. The service normalizes agent, tool, child, plan, question, browser, and terminal events. It calls the runtime with a separate bearer token and does not own browser authentication or product persistence.
+
+The runtime maps one durable user workspace to an isolated Vercel Sandbox. It executes unprivileged filesystem, process, and run-scoped browser tools with deterministic operation IDs. Project paths choose a run's starting directory without restricting access to the rest of `/workspace`.
 
 ## Data Flow
 
@@ -43,10 +46,12 @@ The conversation flow is:
 
 1. The browser sends a new message to Elysia with its session cookie and selected model settings.
 2. Elysia verifies ownership and stores the user message plus a streaming assistant placeholder.
-3. Elysia calls FastAPI with the local text transcript and an internal bearer token.
-4. FastAPI runs the LangChain agent with `store=false` and streams normalized reasoning, text, and real web-search events.
-5. Elysia validates and retransmits the SSE sequence while accumulating safe summaries, sources, and response text.
-6. Completion, failure, or cancellation updates the assistant message before the terminal browser event is emitted.
+3. Elysia creates and leases a durable run, persists `turn.started`, and returns a replay-backed SSE v2 stream.
+4. The executor calls FastAPI with the text transcript, run identity, frozen working directory, model settings, and correlation headers.
+5. FastAPI restores the LangGraph checkpoint, invokes provider and runtime tools, and emits normalized v2 events.
+6. Elysia fences and persists durable events and assistant projections before publishing them. Browser frames remain transient.
+7. The web reducer applies ordered events by string cursor. Questions pause the run; resume and cancellation use owned run routes.
+8. Navigation detaches local transports without cancelling cloud work. Reload uses `active_run`, replay, and WebSocket fanout to resume the projection.
 
 ## Invariants
 
@@ -69,3 +74,5 @@ The conversation flow is:
 - The route selects the active conversation; controller state never stores a second active conversation ID.
 - Catalog failures do not erase ready conversation records, and detail failures do not erase catalog data.
 - Late or aborted detail and turn callbacks can update only the record and operation that still own them.
+- Route changes never imply run cancellation; Stop is the explicit cancellation action.
+- One task plan belongs to the conversation task and renders above the composer, not inside message content.

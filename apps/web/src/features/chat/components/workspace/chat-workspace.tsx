@@ -9,9 +9,15 @@ import { useLoadingPresence } from '@/features/chat/components/loading/use-loadi
 import { useScrollBoundary } from '@/features/chat/hooks/use-scroll-boundary'
 import { useSubmittedTurn } from '@/features/chat/hooks/use-submitted-turn'
 import type {
+  ChatBrowserFrame,
+  ChatBrowserSession,
   ChatMessage,
   ChatModelOption,
+  ChatQuestionAnswers,
+  ChatQuestionRequest,
+  ChatReasoningEffort,
   ChatReasoningOption,
+  ChatTodo,
   ChatUserView,
   ConversationSummary,
   ProjectSummary,
@@ -22,6 +28,7 @@ import {
 } from '@/features/chat/motion/conversation-motion'
 import type { ResourceStatus } from '@/features/chat/state/conversation-controller'
 import { ChatComposer } from '../composer/chat-composer'
+import { BrowserPip } from '../browser/browser-pip'
 import { ChatMessageList } from '../messages/chat-message-list'
 import { ResponseError } from '../messages/response-error'
 import { ChatSidebar } from '../sidebar/chat-sidebar'
@@ -30,6 +37,7 @@ import { ConversationPanePresence } from './conversation-pane-presence'
 import { ChatShell } from './chat-shell'
 import { chatWorkspaceMode } from './chat-workspace-state'
 import { createConversationEntry } from '../../motion/conversation-entry'
+import { cn } from '@/lib/utils'
 
 export type ChatWorkspaceProps = {
   title: string
@@ -37,14 +45,18 @@ export type ChatWorkspaceProps = {
   conversationKey: string
   submissionId?: string
   messages: ChatMessage[]
+  plan: ChatTodo[]
+  browser?: ChatBrowserSession
+  browserFrame?: ChatBrowserFrame
   models: ChatModelOption[]
   reasoningOptions: ChatReasoningOption[]
   user: ChatUserView
-  reasoningEffort: string
+  reasoningEffort: ChatReasoningEffort
   model: string
   fastMode: boolean
   signOutStatus: ButtonState
   streaming: boolean
+  runActive: boolean
   status: string
   detailStatus: ResourceStatus
   detailError: string
@@ -73,9 +85,13 @@ export type ChatWorkspaceProps = {
   onConversationDelete: (id: string) => Promise<void>
   onComposerSubmit: (value: string, model?: string, onAccepted?: () => void) => void | Promise<void>
   onComposerStop: () => void
-  onReasoningChange: (value: string) => void
+  onReasoningChange: (value: ChatReasoningEffort) => void
   onModelChange: (value: string) => void
   onSpeedChange: (value: boolean) => void
+  onQuestionSubmit: (
+    request: ChatQuestionRequest,
+    answers: ChatQuestionAnswers,
+  ) => void
   onSignOut: () => void
 }
 
@@ -95,6 +111,9 @@ export function ChatWorkspace({
   conversationKey,
   submissionId,
   messages,
+  plan,
+  browser,
+  browserFrame,
   models,
   reasoningOptions,
   user,
@@ -103,6 +122,7 @@ export function ChatWorkspace({
   fastMode,
   signOutStatus,
   streaming,
+  runActive,
   status,
   detailStatus,
   detailError,
@@ -134,6 +154,7 @@ export function ChatWorkspace({
   onReasoningChange,
   onModelChange,
   onSpeedChange,
+  onQuestionSubmit,
   onSignOut,
 }: ChatWorkspaceProps) {
   const composerViewportId = useId()
@@ -187,6 +208,7 @@ export function ChatWorkspace({
         : paneKind === 'error'
         ? detailError
         : status
+  const browserVisible = Boolean(browser && browser.status !== 'closed')
 
   let transcript: ReactNode
   if (paneKind === 'loading') {
@@ -216,7 +238,8 @@ export function ChatWorkspace({
             anchorMessageKey={deferredTranscript.anchorMessageKey}
             retryingMessageKey={streaming && latestMessage?.retryError ? latestMessage.renderKey ?? latestMessage.id : undefined}
             canRetryTurn={deferredTranscript === currentTranscript && canRetryTurn} onRetryTurn={onRetryTurn}
-            onReloadConversation={activeConversationId ? onRetryLoad : undefined} />
+            onReloadConversation={activeConversationId ? onRetryLoad : undefined}
+            onQuestionSubmit={onQuestionSubmit} />
         </div>
         {cachedDetailError ? (
           <div className="mx-auto w-full max-w-3xl px-6 pb-6">
@@ -270,8 +293,18 @@ export function ChatWorkspace({
             <span role="status" aria-live="polite" className="sr-only">
               {detailStatusText}
             </span>
+            <BrowserPip
+              key={`docked-${browser?.id ?? 'none'}`}
+              session={browser}
+              frame={browserFrame}
+              layout="docked"
+              className="shrink-0 xl:hidden"
+            />
               <div
-                className="relative flex min-h-0 flex-1"
+                className={cn(
+                  'relative flex min-h-0 flex-1',
+                  browserVisible && 'xl:pe-96',
+                )}
                 aria-busy={!centered && detailPending || undefined}
                 aria-hidden={centered || undefined}
                 inert={centered}
@@ -283,18 +316,25 @@ export function ChatWorkspace({
                   {centered ? null : transcript}
                 </ConversationPanePresence>
               </div>
+            <BrowserPip
+              key={`floating-${browser?.id ?? 'none'}`}
+              session={browser}
+              frame={browserFrame}
+              className="absolute end-5 top-5 hidden xl:block"
+            />
             <div className="pointer-events-none relative -mt-4 shrink-0">
               <ChatComposer
                 entry={entry}
                 conversationKey={conversationKey}
                 viewportId={composerViewportId}
+                plan={plan}
                 models={models}
                 reasoningOptions={reasoningOptions}
                 reasoningEffort={reasoningEffort}
                 model={model}
                 fastMode={fastMode}
-                loading={streaming}
-                submitDisabled={!centered && detailStatus !== 'ready'}
+                loading={streaming || runActive}
+                submitDisabled={runActive || (!centered && detailStatus !== 'ready')}
                 submitError={centered ? turnError : undefined}
                 submittedPrompt={submittedPrompt}
                 centered={centered}
