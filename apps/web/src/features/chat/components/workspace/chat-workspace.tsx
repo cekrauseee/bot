@@ -206,7 +206,13 @@ export function ChatWorkspace({
     transcript = (
       <div className="flex h-full min-h-0 flex-col">
         <div className="min-h-0 flex-1">
-          <ChatMessageList messages={deferredTranscript.messages} revealHistory viewportRef={attachTranscript} entry={entry} conversationKey={conversationKey}
+          <ChatMessageList
+            key={conversationKey}
+            messages={deferredTranscript.messages}
+            revealHistory
+            viewportRef={attachTranscript}
+            entry={entry}
+            conversationKey={conversationKey}
             anchorMessageKey={deferredTranscript.anchorMessageKey}
             retryingMessageKey={streaming && latestMessage?.retryError ? latestMessage.renderKey ?? latestMessage.id : undefined}
             canRetryTurn={deferredTranscript === currentTranscript && canRetryTurn} onRetryTurn={onRetryTurn}

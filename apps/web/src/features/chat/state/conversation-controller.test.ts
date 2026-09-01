@@ -108,6 +108,67 @@ describe('conversation controller', () => {
     expect(state.conversationsById.A.messages).toHaveLength(2)
   })
 
+  it('keeps response processing active through text deltas and completes it with the turn', () => {
+    let state = initialConversationControllerState()
+    state = reduce(state, { type: 'turn.started', key: existing('A'), operationId: 'turn',
+      optimisticMessages: createOptimisticMessages('Prompt', 'turn', at) })
+    state = reduce(state, { type: 'turn.event', key: existing('A'), operationId: 'turn', event: started('A'), at })
+    state = reduce(state, { type: 'turn.event', key: existing('A'), operationId: 'turn',
+      event: delta('A', 'Answer'), at: at + 2_000 })
+
+    expect(state.conversationsById.A.messages.at(-1)).toMatchObject({
+      status: 'streaming',
+      processStartedAt: at,
+      processDuration: 2,
+    })
+
+    state = reduce(state, { type: 'turn.event', key: existing('A'), operationId: 'turn',
+      event: completed('A'), at: at + 5_000 })
+    expect(state.conversationsById.A.messages.at(-1)).toMatchObject({
+      status: 'complete',
+      processDuration: 5,
+    })
+    expect(state.conversationsById.A.messages.at(-1)?.processStartedAt).toBeUndefined()
+  })
+
+  it('appends reasoning and searches in stream chronology', () => {
+    let state = initialConversationControllerState()
+    state = reduce(state, { type: 'turn.started', key: existing('A'), operationId: 'turn',
+      optimisticMessages: createOptimisticMessages('Prompt', 'turn', at) })
+    state = reduce(state, { type: 'turn.event', key: existing('A'), operationId: 'turn', event: started('A'), at })
+    const event = (sequence: number, type: 'reasoning.delta' | 'step.started' | 'step.completed', data: Record<string, unknown>): StreamEvent => ({
+      version: 1, sequence, turn_id: 'turn-A', type, data,
+    } as StreamEvent)
+    state = reduce(state, { type: 'turn.event', key: existing('A'), operationId: 'turn',
+      event: event(1, 'reasoning.delta', { delta: 'Before search. ' }), at })
+    state = reduce(state, { type: 'turn.event', key: existing('A'), operationId: 'turn',
+      event: event(2, 'reasoning.delta', { delta: 'Still before search.' }), at })
+    state = reduce(state, { type: 'turn.event', key: existing('A'), operationId: 'turn',
+      event: event(3, 'step.started', { step: {
+        id: 'search', kind: 'web_search', status: 'in_progress', label: 'Web search', query: 'current source',
+      } }), at })
+    state = reduce(state, { type: 'turn.event', key: existing('A'), operationId: 'turn',
+      event: event(4, 'step.completed', { step: {
+        id: 'search', kind: 'web_search', status: 'completed', label: 'Web search', query: 'current source',
+      } }), at })
+    state = reduce(state, { type: 'turn.event', key: existing('A'), operationId: 'turn',
+      event: event(5, 'reasoning.delta', { delta: 'After search.' }), at })
+
+    expect(state.conversationsById.A.messages.at(-1)?.blocks).toEqual([{
+      id: 'A-assistant-activity', type: 'activity', status: 'working', items: [
+        {
+          id: 'A-assistant-reasoning-1', type: 'text',
+          content: 'Before search. Still before search.', lastSequence: 2,
+        },
+        { id: 'search', type: 'search', query: 'current source', results: [] },
+        {
+          id: 'A-assistant-reasoning-5', type: 'text',
+          content: 'After search.', lastSequence: 5,
+        },
+      ],
+    }])
+  })
+
   it('replaces the retained description on another failure without leaving a pending retry', () => {
     let state = initialConversationControllerState()
     state = reduce(state, { type: 'turn.started', key: { kind: 'new' }, operationId: 'first',

@@ -111,24 +111,13 @@ const isActivityItem = (value: unknown): value is ChatActivityItem => {
   return typeof item.id === 'string' && typeof item.type === 'string'
 }
 
-const defaultProcessBlock = (messageId: string): ChatMessageBlock => ({
-  id: `${messageId}-activity`,
-  type: 'activity',
-  status: 'complete',
-  items: [{
-    id: `${messageId}-generated-response`,
-    type: 'step',
-    label: 'Generated the response',
-    status: 'complete',
-  }],
-})
-
 const messageBlocks = (message: ApiConversationMessage): ChatMessageBlock[] => {
   const blocks: ChatMessageBlock[] = []
   const working = message.status === 'streaming'
   const activities = Array.isArray(message.activities)
     ? message.activities.filter(isActivityItem)
     : []
+  const hasSequencedReasoning = activities.some((item) => item.type === 'text')
   if (activities.length) {
     blocks.push({
       id: `${message.id}-activity`,
@@ -137,7 +126,7 @@ const messageBlocks = (message: ApiConversationMessage): ChatMessageBlock[] => {
       items: activities,
     })
   }
-  if (message.reasoning) {
+  if (message.reasoning && !hasSequencedReasoning) {
     blocks.push({
       id: `${message.id}-reasoning`,
       type: 'reasoning',
@@ -147,13 +136,6 @@ const messageBlocks = (message: ApiConversationMessage): ChatMessageBlock[] => {
   }
   if (message.content) {
     blocks.push({ id: `${message.id}-text`, type: 'text', content: message.content })
-  }
-  if (
-    message.role === 'assistant' &&
-    message.content &&
-    !blocks.some((block) => block.type === 'activity' || block.type === 'reasoning')
-  ) {
-    blocks.unshift(defaultProcessBlock(message.id))
   }
   if (!blocks.length && message.error_message && message.status !== 'failed') {
     blocks.push({ id: `${message.id}-error`, type: 'text', content: message.error_message })
@@ -170,12 +152,13 @@ const persistedProcessDuration = (message: ApiConversationMessage) => {
 
 export const mapApiMessage = (message: ApiConversationMessage): ChatMessage => {
   const blocks = messageBlocks(message)
-  const hasProcess = blocks.some(
-    (block) => block.type === 'activity' || block.type === 'reasoning',
-  )
+  const processDuration = message.role === 'assistant'
+    ? persistedProcessDuration(message)
+    : undefined
   return {
     id: message.id,
     role: message.role,
+    createdAt: message.created_at,
     blocks,
     ...(message.status === 'failed' ? { errorMessage: message.error_message || 'The response could not be completed.' } : {}),
     status: message.status === 'streaming'
@@ -183,7 +166,7 @@ export const mapApiMessage = (message: ApiConversationMessage): ChatMessage => {
       : message.status === 'failed'
         ? 'error'
         : 'complete',
-    ...(hasProcess ? { processDuration: persistedProcessDuration(message) } : {}),
+    ...(processDuration !== undefined ? { processDuration } : {}),
   }
 }
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ResponseProcessBlock } from "./response-process-model";
 import {
   formatProcessDuration,
+  formatProcessLabel,
   responseProcessItems,
 } from "./response-process-model";
 
@@ -34,37 +35,45 @@ describe("response process presentation", () => {
     expect(formatProcessDuration(75)).toBe("1m 15s");
   });
 
-  it("shows reasoning summaries as transient process messages", () => {
+  it("keeps the processing label geometry consistent across stream completion", () => {
+    expect(formatProcessLabel(18, true)).toBe("Processing for 18s");
+    expect(formatProcessLabel(18, false)).toBe("Processed for 18s");
+  });
+
+  it("preserves the chronological block and item order while working", () => {
     expect(responseProcessItems(blocks, true)).toEqual([
+      {
+        id: "search",
+        type: "search",
+        query: "premium markdown rendering",
+        moreCount: undefined,
+        results: undefined,
+      },
       {
         id: "reasoning",
         type: "text",
         content: "I am checking the rendering patterns before answering.",
-      },
-      {
-        id: "search",
-        type: "search",
-        query: "premium markdown rendering",
-        moreCount: undefined,
-        results: undefined,
+        format: "markdown",
+        status: "streaming",
       },
     ]);
   });
 
-  it("discards reasoning text but preserves the completed operation", () => {
+  it("preserves the complete Markdown reasoning when the process finishes", () => {
     expect(responseProcessItems(blocks, false)).toEqual([
-      {
-        id: "reasoning",
-        type: "step",
-        label: "Reasoned through the response",
-        status: "complete",
-      },
       {
         id: "search",
         type: "search",
         query: "premium markdown rendering",
         moreCount: undefined,
         results: undefined,
+      },
+      {
+        id: "reasoning",
+        type: "text",
+        content: "I am checking the rendering patterns before answering.",
+        format: "markdown",
+        status: "complete",
       },
     ]);
   });

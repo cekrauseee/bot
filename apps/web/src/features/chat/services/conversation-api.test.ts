@@ -76,9 +76,10 @@ describe('conversation transport', () => {
     })
 
     expect(message.processDuration).toBe(18)
+    expect(message.createdAt).toBe('2026-08-29T12:00:00.000Z')
   })
 
-  it('keeps a process disclosure for completed answers without reported reasoning', () => {
+  it('keeps process timing without inventing a disclosure step', () => {
     const message = mapApiMessage({
       id: 'assistant', role: 'assistant', content: 'A concise answer.', reasoning: null,
       status: 'completed', error_message: null, model: 'gpt-5.6-luna',
@@ -88,10 +89,39 @@ describe('conversation transport', () => {
     })
 
     expect(message.processDuration).toBe(4)
-    expect(message.blocks[0]).toMatchObject({
-      type: 'activity',
-      items: [{ type: 'step', label: 'Generated the response' }],
+    expect(message.blocks).toEqual([{
+      id: 'assistant-text',
+      type: 'text',
+      content: 'A concise answer.',
+    }])
+  })
+
+  it('restores a persisted chronological process without duplicating reasoning', () => {
+    const message = mapApiMessage({
+      id: 'assistant', role: 'assistant', content: 'Final answer.',
+      reasoning: 'Before search.After search.', status: 'completed',
+      error_message: null, model: 'gpt-5.6-sol', reasoning_effort: 'high',
+      speed: 'standard',
+      activities: [
+        { id: 'reasoning-1', type: 'text', content: 'Before search.', lastSequence: 1 },
+        { id: 'search', type: 'search', query: 'current source' },
+        { id: 'reasoning-4', type: 'text', content: 'After search.', lastSequence: 4 },
+      ],
+      created_at: '2026-08-29T12:00:00.000Z',
+      updated_at: '2026-08-29T12:00:05.000Z',
     })
+
+    expect(message.blocks).toEqual([
+      {
+        id: 'assistant-activity', type: 'activity', status: 'complete',
+        items: [
+          { id: 'reasoning-1', type: 'text', content: 'Before search.', lastSequence: 1 },
+          { id: 'search', type: 'search', query: 'current source' },
+          { id: 'reasoning-4', type: 'text', content: 'After search.', lastSequence: 4 },
+        ],
+      },
+      { id: 'assistant-text', type: 'text', content: 'Final answer.' },
+    ])
   })
 
   it('parses CRLF, multiline JSON, and incomplete chunks', () => {

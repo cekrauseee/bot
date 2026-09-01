@@ -2,6 +2,7 @@ import {
   Children,
   createContext,
   isValidElement,
+  memo,
   useContext,
   type ReactElement,
   type ReactNode,
@@ -19,6 +20,7 @@ import {
 import { CodeBlock } from '@/components/agents/code-block'
 import type { SearchSource } from '@/features/chat/model'
 import { cn } from '@/lib/utils'
+import { HoverMessageTimestamp, MessageCopyAction } from './message-meta'
 
 type CodeBlockStatus = 'streaming' | 'complete'
 type AgentCodeLanguage = 'bash' | 'diff' | 'json' | 'text' | 'tsx' | 'typescript'
@@ -205,24 +207,24 @@ const markdownComponents: Components = {
   ),
 }
 
-export function MarkdownResponse({
+export const MarkdownContent = memo(function MarkdownContent({
   content,
-  status,
-  sources,
+  status = 'complete',
+  variant = 'response',
 }: {
   content: string
-  status: StreamingResponseStatus
-  sources: SearchSource[]
+  status?: StreamingResponseStatus
+  variant?: 'response' | 'reasoning'
 }) {
   return (
-    <StreamingResponse
-      status={status}
-      copyText={content}
-      sources={sources}
-      announce={false}
-      className="max-w-3xl"
-      contentClassName="select-text text-sm leading-6 text-foreground/90 [&_.contains-task-list]:ps-0 [&_.katex-display]:my-5 [&_.katex-display]:overflow-x-auto [&_.katex-display]:py-1"
-      actionsClassName="mt-1"
+    <div
+      data-slot="markdown-content"
+      data-variant={variant}
+      className={cn(
+        'min-w-0 max-w-full select-text',
+        variant === 'reasoning' &&
+          '[&_.contains-task-list]:ps-0 [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:py-1',
+      )}
     >
       <CodeStatusContext.Provider
         value={status === 'streaming' ? 'streaming' : 'complete'}
@@ -236,6 +238,33 @@ export function MarkdownResponse({
           {content}
         </ReactMarkdown>
       </CodeStatusContext.Provider>
+    </div>
+  )
+})
+
+export function MarkdownResponse({
+  content,
+  status,
+  sources,
+  createdAt,
+}: {
+  content: string
+  status: StreamingResponseStatus
+  sources: SearchSource[]
+  createdAt?: string
+}) {
+  return (
+    <StreamingResponse
+      status={status}
+      sources={sources}
+      announce={false}
+      actionsBefore={<MessageCopyAction text={content} label="Copy response" />}
+      actionsAfter={<HoverMessageTimestamp createdAt={createdAt} />}
+      className="max-w-3xl"
+      contentClassName="select-text text-sm leading-6 text-foreground/90 [&_.contains-task-list]:ps-0 [&_.katex-display]:my-5 [&_.katex-display]:overflow-x-auto [&_.katex-display]:py-1"
+      actionsClassName="pointer-events-auto mt-1 gap-1.5 opacity-0 motion-safe:transition-opacity motion-safe:duration-150 motion-safe:ease-out hover:opacity-100 group-hover/message:opacity-100 group-has-[:focus-visible]/message:opacity-100 [@media(hover:none)]:opacity-100"
+    >
+      <MarkdownContent content={content} status={status} />
     </StreamingResponse>
   )
 }

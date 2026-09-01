@@ -23,7 +23,14 @@ export function formatProcessDuration(duration = 0) {
   return remainder === 0 ? `${minutes}m` : `${minutes}m ${remainder}s`;
 }
 
-export function toAgentActivityItem(item: ChatActivityItem): AgentActivityItem {
+export function formatProcessLabel(duration: number | undefined, working: boolean) {
+  return `${working ? "Processing" : "Processed"} for ${formatProcessDuration(duration)}`;
+}
+
+export function toAgentActivityItem(
+  item: ChatActivityItem,
+  working = false,
+): AgentActivityItem {
   switch (item.type) {
     case "step":
       return {
@@ -34,7 +41,13 @@ export function toAgentActivityItem(item: ChatActivityItem): AgentActivityItem {
         meta: item.meta,
       };
     case "text":
-      return { id: item.id, type: "text", content: item.content };
+      return {
+        id: item.id,
+        type: "text",
+        content: item.content,
+        format: "markdown",
+        status: working ? "streaming" : "complete",
+      };
     case "search":
       return {
         id: item.id,
@@ -65,27 +78,19 @@ export function toAgentActivityItem(item: ChatActivityItem): AgentActivityItem {
 
 export function responseProcessItems(
   blocks: ResponseProcessBlock[],
-  includeReasoningSummaries: boolean,
+  working = false,
 ): AgentActivityItem[] {
-  const reasoningItems = includeReasoningSummaries
-    ? blocks.flatMap((block) =>
-        block.type === "reasoning" && block.content.trim()
-          ? [{ id: block.id, type: "text" as const, content: block.content }]
-          : [],
-      )
-    : blocks.flatMap((block) =>
-        block.type === "reasoning" && block.content.trim()
-          ? [{
-              id: block.id,
-              type: "step" as const,
-              label: "Reasoned through the response",
-              status: "complete" as const,
-            }]
-          : [],
-      );
-  const activities = blocks.flatMap((block) =>
-    block.type === "activity" ? block.items.map(toAgentActivityItem) : [],
-  );
-
-  return [...reasoningItems, ...activities];
+  return blocks.flatMap((block): AgentActivityItem[] => {
+    if (block.type === "activity") {
+      return block.items.map((item) => toAgentActivityItem(item, working));
+    }
+    if (!block.content.trim()) return [];
+    return [{
+      id: block.id,
+      type: "text",
+      content: block.content,
+      format: "markdown",
+      status: working ? "streaming" : "complete",
+    }];
+  });
 }

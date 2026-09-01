@@ -126,22 +126,24 @@ describe('conversation streaming protocol', () => {
       aiInput = input
       return chunkedResponse([
         providerFrame(1, 'turn.started', { model: options.model }),
-        providerFrame(2, 'reasoning.delta', { delta: 'Checking sources.' }),
-        providerFrame(3, 'step.started', {
+        providerFrame(2, 'reasoning.delta', { delta: 'Checking ' }),
+        providerFrame(3, 'reasoning.delta', { delta: 'sources.' }),
+        providerFrame(4, 'step.started', {
           step: {
             id: 'search-1', kind: 'web_search', status: 'in_progress',
             label: 'Web search', query: 'latest information',
           },
         }),
-        providerFrame(4, 'step.completed', {
+        providerFrame(5, 'step.completed', {
           step: {
             id: 'search-1', kind: 'web_search', status: 'completed',
             label: 'Web search', query: 'latest information',
             sources: [{ title: 'Source', url: 'https://example.com/source' }],
           },
         }),
-        providerFrame(5, 'text.delta', { delta: 'Final answer.' }),
-        providerFrame(6, 'turn.completed', { model: options.model }),
+        providerFrame(6, 'reasoning.delta', { delta: 'Source is current.' }),
+        providerFrame(7, 'text.delta', { delta: 'Final answer.' }),
+        providerFrame(8, 'turn.completed', { model: options.model }),
       ].join(''))
     }
     const response = await streamTurn(
@@ -160,8 +162,10 @@ describe('conversation streaming protocol', () => {
     expect(events.map((event) => event.type)).toEqual([
       'turn.started',
       'reasoning.delta',
+      'reasoning.delta',
       'step.started',
       'step.completed',
+      'reasoning.delta',
       'text.delta',
       'turn.completed',
     ])
@@ -177,18 +181,26 @@ describe('conversation streaming protocol', () => {
     })
     expect(state.updateAssistant).toHaveBeenLastCalledWith(created.assistant.id, {
       content: 'Final answer.',
-      reasoning: 'Checking sources.',
-      activities: [{
-        id: 'search-1',
-        type: 'search',
-        query: 'latest information',
-        results: [{
-          id: 'search-1-0',
-          title: 'Source',
-          domain: 'example.com',
-          url: 'https://example.com/source',
-        }],
-      }],
+      reasoning: 'Checking sources.Source is current.',
+      activities: [
+        {
+          id: 'reasoning-2', type: 'text', content: 'Checking sources.', lastSequence: 3,
+        },
+        {
+          id: 'search-1',
+          type: 'search',
+          query: 'latest information',
+          results: [{
+            id: 'search-1-0',
+            title: 'Source',
+            domain: 'example.com',
+            url: 'https://example.com/source',
+          }],
+        },
+        {
+          id: 'reasoning-6', type: 'text', content: 'Source is current.', lastSequence: 6,
+        },
+      ],
       status: 'completed',
       errorMessage: null,
     })

@@ -1,56 +1,66 @@
 import { AgentActivity } from "@/features/chat/components/activity";
 import { ThinkingShimmer } from "@/features/chat/components/activity/thinking-shimmer";
+import { useEffect, useMemo, useState } from "react";
 import {
-  formatProcessDuration,
+  formatProcessLabel,
   responseProcessItems,
   type ResponseProcessBlock,
 } from "./response-process-model";
 
+function useLiveProcessDuration(
+  working: boolean,
+  startedAt: number | undefined,
+  duration: number | undefined,
+) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!working || startedAt === undefined) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [startedAt, working]);
+
+  return working && startedAt !== undefined
+    ? Math.max(1, (now - startedAt) / 1_000)
+    : duration;
+}
+
 export function ResponseProcess({
   blocks,
-  activeLabel,
+  working = false,
+  startedAt,
   duration,
 }: {
   blocks: ResponseProcessBlock[];
-  activeLabel?: string;
+  working?: boolean;
+  startedAt?: number;
   duration?: number;
 }) {
-  const working = Boolean(activeLabel);
-  const items = responseProcessItems(blocks, working);
-  const durableItemCount = responseProcessItems(blocks, false).length;
-
-  if (!working && durableItemCount === 0) return null;
+  const liveDuration = useLiveProcessDuration(working, startedAt, duration);
+  const items = useMemo(
+    () => responseProcessItems(blocks, working),
+    [blocks, working],
+  );
 
   return (
     <AgentActivity
       items={items}
       contentType="mixed"
       status={working ? "working" : "complete"}
-      activeLabel={activeLabel}
-      duration={duration}
-      summary={
-        <>
-          Processed for{' '}
-          <span className="tabular-nums">
-            {formatProcessDuration(duration)}
-          </span>
-        </>
-      }
+      activeLabel={formatProcessLabel(liveDuration, true)}
+      duration={liveDuration}
+      summary={formatProcessLabel(liveDuration, false)}
       defaultOpen={false}
       collapseOnComplete
       maxHeight={320}
-      className="w-full min-w-0 max-w-3xl border-b border-border/70 pt-0.5 pb-3 text-xs leading-4"
-      contentClassName="gap-1 pt-1 pb-2"
-      renderWorkingStatus={({ label }) => (
-        <span className="block min-w-0 max-w-full text-xs">
-          <ThinkingShimmer className="truncate font-normal">
+      separated={items.length > 0}
+      className="w-full min-w-0 max-w-3xl pt-0.5 text-sm leading-5"
+      contentClassName="gap-4 pt-4 pb-3"
+      renderStatus={({ label, working: isWorking }) => (
+        <span className="block min-w-0 max-w-full text-sm leading-5 tabular-nums">
+          <ThinkingShimmer active={isWorking} className="truncate font-normal">
             {label}
           </ThinkingShimmer>
-        </span>
-      )}
-      renderCompletedStatus={({ summary }) => (
-        <span className="block min-w-0 truncate text-xs font-normal">
-          {summary}
         </span>
       )}
     />

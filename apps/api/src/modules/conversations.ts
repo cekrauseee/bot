@@ -64,6 +64,15 @@ export type SearchActivity = {
   results?: SearchSource[]
 }
 
+export type ReasoningActivity = {
+  id: string
+  type: 'text'
+  content: string
+  lastSequence: number
+}
+
+export type ProcessActivity = SearchActivity | ReasoningActivity
+
 type ConversationStore = Pick<ConversationRepository, 'transcript' | 'updateAssistant'>
 
 const providerEventTypes = new Set<ProviderEvent['type']>([
@@ -204,7 +213,7 @@ const normalizedSource = (value: unknown, index: number, stepId: string) => {
   }
 }
 
-const upsertActivity = (activities: SearchActivity[], rawStep: unknown) => {
+const upsertActivity = (activities: ProcessActivity[], rawStep: unknown) => {
   if (!rawStep || typeof rawStep !== 'object') throw new Error('invalid_provider_event')
   const step = rawStep as Partial<ProviderStep>
   if (!step.id || step.kind !== 'web_search') throw new Error('invalid_provider_event')
@@ -213,16 +222,40 @@ const upsertActivity = (activities: SearchActivity[], rawStep: unknown) => {
         .map((source, index) => normalizedSource(source, index, step.id!))
         .filter((source): source is SearchSource => source !== undefined)
     : []
-  const current = activities.find((activity) => activity.id === step.id)
+  const current = activities.find(
+    (activity): activity is SearchActivity =>
+      activity.type === 'search' && activity.id === step.id,
+  )
   const activity: SearchActivity = {
     id: step.id,
     type: 'search',
     query: step.query ?? current?.query ?? step.label ?? 'Web search',
     ...(sources.length ? { results: sources } : current?.results ? { results: current.results } : {}),
   }
-  const index = activities.findIndex((item) => item.id === activity.id)
+  const index = activities.findIndex(
+    (item) => item.type === 'search' && item.id === activity.id,
+  )
   if (index === -1) activities.push(activity)
   else activities[index] = activity
+}
+
+const appendReasoningActivity = (
+  activities: ProcessActivity[],
+  delta: string,
+  sequence: number,
+) => {
+  const last = activities.at(-1)
+  if (last?.type === 'text' && last.lastSequence === sequence - 1) {
+    last.content += delta
+    last.lastSequence = sequence
+    return
+  }
+  activities.push({
+    id: `reasoning-${sequence}`,
+    type: 'text',
+    content: delta,
+    lastSequence: sequence,
+  })
 }
 
 class ProviderFailure extends Error {
@@ -253,7 +286,7 @@ export async function streamTurn(
     async start(target) {
       let content = ''
       let reasoning = ''
-      const activities: SearchActivity[] = []
+      const activities: ProcessActivity[] = []
       let publicSequence = 0
       let lastProviderSequence = -1
       let terminal: 'completed' | 'failed' | undefined
@@ -318,6 +351,7 @@ export async function streamTurn(
             const delta = event.data.delta
             if (typeof delta !== 'string') throw new Error('invalid_provider_event')
             reasoning += delta
+            appendReasoningActivity(activities, delta, event.sequence)
             send(event.type, event.data)
             return
           }

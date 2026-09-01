@@ -138,10 +138,9 @@ export function ConversationTitle({
         <span className="invisible flex min-w-0 flex-1 items-center gap-2">
           <TitleCopy loadingTitle={loadingTitle} projectName={projectName} title={title} />
         </span>
-        <AnimatePresence initial={false}>
+        <AnimatePresence>
           <motion.span
             key={visualKey}
-            initial={false}
             exit={{
               opacity: 0,
               transition: exitTransition,

@@ -15,6 +15,8 @@ export interface AgentActivityText {
   id: string;
   type: "text";
   content: ReactNode;
+  format?: "text" | "markdown";
+  status?: "streaming" | "complete";
 }
 
 export interface AgentSearchResult {
@@ -89,17 +91,15 @@ export interface AgentActivityProps {
   activeLabel?: ReactNode;
   /** Optional completed summary. Derived from the item types by default. */
   summary?: ReactNode;
-  /** Optional renderer for the contents of the active status row. */
-  renderWorkingStatus?: (context: {
+  /** Optional renderer shared by the working and completed status row. */
+  renderStatus?: (context: {
     label: ReactNode;
     duration: number;
+    working: boolean;
   }) => ReactNode;
-  /** Optional renderer for the contents before the built-in disclosure chevron. */
-  renderCompletedStatus?: (context: {
-    summary: ReactNode;
-    duration: number;
-  }) => ReactNode;
-  /** Maximum visible activity height before the stream begins gliding. */
+  /** Adds a quiet rule between the status row and the activity entries. */
+  separated?: boolean;
+  /** Maximum expanded height after completion. Active work stays in document flow. */
   maxHeight?: number;
   className?: string;
   contentClassName?: string;

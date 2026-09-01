@@ -42,6 +42,7 @@ export function ChatHeader({
       </AnimatedSidebarTrigger>
       {!mobileOnly ? (
         <ConversationTitle
+          key={conversationKey}
           conversationKey={conversationKey}
           loadingTitle={loadingTitle}
           projectName={projectName}

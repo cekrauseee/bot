@@ -189,6 +189,7 @@ export const createOptimisticMessages = (
 ): ChatMessage[] => [{
   id: `pending-user-${optimisticId}`,
   role: 'user',
+  createdAt: new Date(startedAt).toISOString(),
   blocks: [{
     id: `pending-user-${optimisticId}-text`,
     type: 'text',
@@ -198,9 +199,9 @@ export const createOptimisticMessages = (
 }, {
   id: `pending-assistant-${optimisticId}`,
   role: 'assistant',
+  createdAt: new Date(startedAt).toISOString(),
   blocks: [],
   status: 'streaming',
-  processLabel: 'Thinking…',
   processStartedAt: startedAt,
 }]
 
@@ -304,17 +305,31 @@ const searchItem = (step: SearchStep) => ({
   ),
 })
 
-const defaultProcessBlock = (messageId: string): ChatMessageBlock => ({
-  id: `${messageId}-activity`,
-  type: 'activity',
-  status: 'complete',
-  items: [{
-    id: `${messageId}-generated-response`,
-    type: 'step',
-    label: 'Generated the response',
-    status: 'complete',
-  }],
-})
+const updateProcessItems = (
+  assistant: ChatMessage,
+  update: (items: ChatActivityItem[]) => ChatActivityItem[],
+) => {
+  const processIndex = assistant.blocks.findIndex((block) => block.type === 'activity')
+  if (processIndex === -1) {
+    return {
+      ...assistant,
+      blocks: [{
+        id: `${assistant.id}-activity`,
+        type: 'activity' as const,
+        status: 'working' as const,
+        items: update([]),
+      }, ...assistant.blocks],
+    }
+  }
+
+  return {
+    ...assistant,
+    blocks: assistant.blocks.map((block, index) =>
+      index === processIndex && block.type === 'activity'
+        ? { ...block, items: update(block.items) }
+        : block),
+  }
+}
 
 const recordFor = (
   state: ConversationControllerState,
@@ -358,7 +373,6 @@ const reconcileStarted = (
       renderKey: optimisticAssistant.renderKey ?? optimisticAssistant.id,
       retryError: optimisticAssistant.retryError,
       retryAttempted: optimisticAssistant.retryAttempted,
-      processLabel: 'Thinking…',
       processStartedAt: optimisticAssistant.processStartedAt,
       processDuration: undefined,
     }
@@ -386,27 +400,26 @@ const applyNonStartedEvent = (
   if (event.type === 'reasoning.delta') {
     return {
       ...record,
-      messages: updateAssistant(record.messages, record.activeAssistantId, (assistant) => {
-        const existing = assistant.blocks.find((block) => block.type === 'reasoning')
-        return {
-          ...assistant,
-          processLabel: 'Thinking…',
-          blocks: existing
-            ? assistant.blocks.map((block) => block.type === 'reasoning'
-              ? { ...block, content: block.content + event.data.delta }
-              : block)
-            : [
-                ...assistant.blocks.filter((block) => block.type === 'activity'),
-                {
-                  id: `${assistant.id}-reasoning`,
-                  type: 'reasoning',
-                  content: event.data.delta,
-                  status: 'working',
-                },
-                ...assistant.blocks.filter((block) => block.type !== 'activity'),
-              ],
-        }
-      }),
+      messages: updateAssistant(record.messages, record.activeAssistantId, (assistant) =>
+        updateProcessItems(assistant, (items) => {
+          const last = items.at(-1)
+          if (last?.type === 'text' && last.lastSequence === event.sequence - 1) {
+            return [
+              ...items.slice(0, -1),
+              {
+                ...last,
+                content: last.content + event.data.delta,
+                lastSequence: event.sequence,
+              },
+            ]
+          }
+          return [...items, {
+            id: `${assistant.id}-reasoning-${event.sequence}`,
+            type: 'text',
+            content: event.data.delta,
+            lastSequence: event.sequence,
+          }]
+        })),
     }
   }
 
@@ -416,19 +429,15 @@ const applyNonStartedEvent = (
       messages: updateAssistant(record.messages, record.activeAssistantId, (assistant) => {
         const existing = assistant.blocks.find((block) => block.type === 'text')
         const completedProcess = terminalBlocks(assistant.blocks)
-        const hasProcess = completedProcess.some(
-          (block) => block.type === 'activity' || block.type === 'reasoning',
-        )
         return {
           ...assistant,
-          processLabel: undefined,
           processDuration: elapsedProcessDuration(assistant, at),
           blocks: existing
             ? assistant.blocks.map((block) => block.type === 'text'
               ? { ...block, content: block.content + event.data.delta }
               : block)
             : [
-                ...(hasProcess ? completedProcess : [defaultProcessBlock(assistant.id)]),
+                ...completedProcess,
                 { id: `${assistant.id}-text`, type: 'text', content: event.data.delta },
               ],
         }
@@ -445,26 +454,11 @@ const applyNonStartedEvent = (
       ...record,
       messages: updateAssistant(record.messages, record.activeAssistantId, (assistant) => {
         const item: ChatActivityItem = searchItem(event.data.step)
-        const existing = assistant.blocks.find((block) => block.type === 'activity')
-        return {
-          ...assistant,
-          processLabel: event.type === 'step.completed'
-            ? 'Thinking…'
-            : 'Searching the web…',
-          blocks: existing && existing.type === 'activity'
-            ? assistant.blocks.map((block) => block.type === 'activity'
-              ? {
-                  ...block,
-                  items: [...block.items.filter((entry) => entry.id !== item.id), item],
-                }
-              : block)
-            : [{
-                id: `${assistant.id}-activity`,
-                type: 'activity',
-                status: 'working',
-                items: [item],
-              }, ...assistant.blocks],
-        }
+        return updateProcessItems(assistant, (items) => {
+          const index = items.findIndex((entry) => entry.id === item.id)
+          if (index === -1) return [...items, item]
+          return items.map((entry, entryIndex) => entryIndex === index ? item : entry)
+        })
       }),
     }
   }
@@ -480,7 +474,6 @@ const applyNonStartedEvent = (
       errorMessage: failed && !cancelled ? event.data.error.message : undefined,
       retryError: undefined,
       retryable: failed && !cancelled ? event.data.error.retryable : undefined,
-      processLabel: undefined,
       processStartedAt: undefined,
       processDuration: elapsedProcessDuration(assistant, at),
     })),
@@ -509,7 +502,6 @@ const finalizeTurn = (
     errorMessage: cancelled ? undefined : error,
     retryError: undefined,
     retryable: cancelled ? undefined : retryable,
-    processLabel: undefined,
     processStartedAt: undefined,
     processDuration: elapsedProcessDuration(assistant, at),
   })),

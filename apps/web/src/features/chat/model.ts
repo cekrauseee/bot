@@ -23,7 +23,13 @@ export type ChatActivityItem =
       status?: "pending" | "active" | "complete";
       meta?: string;
     }
-  | { id: string; type: "text"; content: string }
+  | {
+      id: string;
+      type: "text";
+      content: string;
+      /** Last stream event folded into this contiguous reasoning segment. */
+      lastSequence?: number;
+    }
   | {
       id: string;
       type: "search";
@@ -94,6 +100,7 @@ export type ChatMessageBlock =
 export type ChatMessage = {
   id: string;
   renderKey?: string;
+  createdAt?: string;
   errorMessage?: string;
   /** Keeps the failed surface visible until a retry produces actual progress. */
   retryError?: string;
@@ -102,11 +109,9 @@ export type ChatMessage = {
   role: "user" | "assistant";
   blocks: ChatMessageBlock[];
   status?: "streaming" | "complete" | "error";
-  /** Ephemeral label for the operation currently producing this response. */
-  processLabel?: string;
-  /** Client timestamp used only while the pre-answer process is active. */
+  /** Client timestamp used while the response is being generated. */
   processStartedAt?: number;
-  /** Completed pre-answer processing time in seconds. */
+  /** Completed response-processing time in seconds. */
   processDuration?: number;
 };
 

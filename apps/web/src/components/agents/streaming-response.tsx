@@ -6,8 +6,6 @@ import {
   ChevronDown,
   Copy,
   RotateCcw,
-  ThumbsDown,
-  ThumbsUp,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
@@ -28,7 +26,6 @@ import { EASE_OUT, SPRING_PRESS, SPRING_SWAP } from "@/lib/ease";
 import { cn } from "@/lib/utils";
 
 export type StreamingResponseStatus = "streaming" | "complete" | "error";
-export type StreamingResponseFeedback = "up" | "down" | null;
 
 export interface StreamingResponseProps {
   /** Rendered response content. Pass plain text or the output of a Markdown renderer. */
@@ -45,13 +42,14 @@ export interface StreamingResponseProps {
   defaultSourcesOpen?: boolean;
   onSourcesOpenChange?: (open: boolean) => void;
   sourceIdPrefix?: string;
-  feedback?: StreamingResponseFeedback;
-  defaultFeedback?: StreamingResponseFeedback;
-  onFeedbackChange?: (feedback: StreamingResponseFeedback) => void;
   /** Set false when a surrounding conversation log announces streamed text. */
   announce?: boolean;
   /** Hides the built-in completion actions without changing response status. */
   showActions?: boolean;
+  /** App-owned actions rendered before the built-in response actions. */
+  actionsBefore?: ReactNode;
+  /** App-owned metadata rendered after the built-in response actions. */
+  actionsAfter?: ReactNode;
   className?: string;
   contentClassName?: string;
   actionsClassName?: string;
@@ -59,12 +57,10 @@ export interface StreamingResponseProps {
 
 function ResponseAction({
   label,
-  active = false,
   onClick,
   children,
 }: {
   label: string;
-  active?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -75,14 +71,10 @@ function ResponseAction({
       type="button"
       aria-label={label}
       title={label}
-      aria-pressed={label === "Helpful" || label === "Not helpful" ? active : undefined}
       onClick={onClick}
       whileTap={reduce ? undefined : { scale: 0.96 }}
       transition={SPRING_PRESS}
-      className={cn(
-        "grid size-7 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
-        active && "bg-muted text-foreground",
-      )}
+      className="grid size-7 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
     >
       {children}
     </motion.button>
@@ -100,11 +92,10 @@ export function StreamingResponse({
   defaultSourcesOpen = false,
   onSourcesOpenChange,
   sourceIdPrefix,
-  feedback,
-  defaultFeedback = null,
-  onFeedbackChange,
   announce = true,
   showActions = true,
+  actionsBefore,
+  actionsAfter,
   className,
   contentClassName,
   actionsClassName,
@@ -112,19 +103,16 @@ export function StreamingResponse({
   const reduce = useReducedMotion() ?? false;
   const baseId = useId();
   const [copied, setCopied] = useState(false);
-  const [internalFeedback, setInternalFeedback] =
-    useState<StreamingResponseFeedback>(defaultFeedback);
   const [internalSourcesOpen, setInternalSourcesOpen] =
     useState(defaultSourcesOpen);
   const copyTimer = useRef<number | undefined>(undefined);
-  const currentFeedback = feedback ?? internalFeedback;
   const currentSourcesOpen = sourcesOpen ?? internalSourcesOpen;
   const streaming = status === "streaming";
-  const complete = status === "complete";
   const canCopy = Boolean(copyText || onCopy);
   const hasSources = sources.length > 0;
   const shouldShowActions =
-    showActions && !streaming && (canCopy || onRetry || complete || hasSources);
+    showActions && !streaming &&
+    (canCopy || onRetry || hasSources || actionsBefore || actionsAfter);
   const sourcesContentId = `${baseId}-sources`;
   const resolvedSourcePrefix =
     sourceIdPrefix ?? `response-source-${baseId.replace(/:/g, "")}`;
@@ -144,12 +132,6 @@ export function StreamingResponse({
     if (copyTimer.current) window.clearTimeout(copyTimer.current);
     copyTimer.current = window.setTimeout(() => setCopied(false), 1600);
   }, [copyText, onCopy]);
-
-  const setFeedback = (next: Exclude<StreamingResponseFeedback, null>) => {
-    const value = currentFeedback === next ? null : next;
-    if (feedback === undefined) setInternalFeedback(value);
-    onFeedbackChange?.(value);
-  };
 
   const setSourcesOpen = useCallback(
     (next: boolean) => {
@@ -184,7 +166,15 @@ export function StreamingResponse({
             transition={{ duration: reduce ? 0.12 : 0.22, ease: EASE_OUT }}
             className="mt-3"
           >
-            <div className={cn("flex items-center gap-0.5", actionsClassName)}>
+            <div
+              data-actions-expanded={currentSourcesOpen || undefined}
+              className={cn(
+                "flex items-center gap-0.5",
+                actionsClassName,
+                currentSourcesOpen && "pointer-events-auto translate-y-0 opacity-100",
+              )}
+            >
+              {actionsBefore}
               {canCopy ? (
                 <ResponseAction
                   label={copied ? "Copied" : "Copy response"}
@@ -201,24 +191,6 @@ export function StreamingResponse({
                 <ResponseAction label="Retry response" onClick={onRetry}>
                   <RotateCcw className="size-3.5" />
                 </ResponseAction>
-              ) : null}
-              {complete ? (
-                <>
-                  <ResponseAction
-                    label="Helpful"
-                    active={currentFeedback === "up"}
-                    onClick={() => setFeedback("up")}
-                  >
-                    <ThumbsUp className="size-3.5" />
-                  </ResponseAction>
-                  <ResponseAction
-                    label="Not helpful"
-                    active={currentFeedback === "down"}
-                    onClick={() => setFeedback("down")}
-                  >
-                    <ThumbsDown className="size-3.5" />
-                  </ResponseAction>
-                </>
               ) : null}
               {hasSources ? (
                 <button
@@ -242,6 +214,7 @@ export function StreamingResponse({
                   </motion.span>
                 </button>
               ) : null}
+              {actionsAfter}
             </div>
 
             {hasSources ? (

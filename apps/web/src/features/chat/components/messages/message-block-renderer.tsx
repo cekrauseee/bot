@@ -36,6 +36,7 @@ export function MessageBlockRenderer({
   onApprovalDecision,
   responseStatus = "complete",
   sources = [],
+  createdAt,
 }: {
   block: ChatMessageBlock;
   onApprovalDecision?: (
@@ -44,11 +45,25 @@ export function MessageBlockRenderer({
   ) => void;
   responseStatus?: "streaming" | "complete" | "error";
   sources?: SearchSource[];
+  createdAt?: string;
 }) {
   switch (block.type) {
     case "reasoning":
       return (
-        <AgentActivity items={[{ id: block.id, type: "text", content: block.content }]} status={block.status ?? "complete"} summary="Reasoning" defaultOpen collapseOnComplete={false} className="max-w-3xl" />
+        <AgentActivity
+          items={[{
+            id: block.id,
+            type: "text",
+            content: block.content,
+            format: "markdown",
+            status: block.status === "working" ? "streaming" : "complete",
+          }]}
+          status={block.status ?? "complete"}
+          summary="Reasoning"
+          defaultOpen
+          collapseOnComplete={false}
+          className="max-w-3xl"
+        />
       );
     case "text":
       return (
@@ -56,12 +71,15 @@ export function MessageBlockRenderer({
           content={block.content}
           status={responseStatus}
           sources={sources}
+          createdAt={createdAt}
         />
       );
     case "activity":
       return (
-        <AgentActivity
-          items={block.items.map(toAgentActivityItem)}
+          <AgentActivity
+          items={block.items.map((item) =>
+            toAgentActivityItem(item, block.status === "working"),
+          )}
           status={block.status ?? "working"}
           duration={block.duration}
           summary={block.summary}

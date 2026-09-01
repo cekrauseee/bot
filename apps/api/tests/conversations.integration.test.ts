@@ -218,12 +218,17 @@ describe('PostgreSQL conversation flow', () => {
         model: 'gpt-5.6-sol',
         reasoning_effort: 'medium',
         speed: 'fast',
-        activities: [{
-          id: 'search-1',
-          type: 'search',
-          query: 'current source',
-          results: [{ title: 'Example', domain: 'example.com' }],
-        }],
+        activities: [
+          {
+            id: 'reasoning-2', type: 'text', content: 'Checked the request.', lastSequence: 2,
+          },
+          {
+            id: 'search-1',
+            type: 'search',
+            query: 'current source',
+            results: [{ title: 'Example', domain: 'example.com' }],
+          },
+        ],
       })
 
       const hidden = await app.handle(new Request(

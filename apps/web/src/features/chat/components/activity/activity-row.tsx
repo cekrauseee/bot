@@ -12,6 +12,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { ReactNode } from "react";
 import { EASE_OUT, SPRING_LAYOUT } from "@/lib/ease";
 import { cn } from "@/lib/utils";
+import { MarkdownContent } from "../messages/markdown-response";
 import type {
   AgentActivityItem,
   AgentActivitySearch,
@@ -107,7 +108,7 @@ function NarrativeRow({ children, className }: { children: ReactNode; className?
   return (
     <div
       className={cn(
-        "min-h-6 w-full min-w-0 max-w-full py-0.5 whitespace-pre-wrap [overflow-wrap:anywhere] leading-5 text-foreground/85",
+        "min-h-6 w-full min-w-0 max-w-full whitespace-pre-wrap py-0.5 text-sm leading-6 text-foreground/90 [overflow-wrap:anywhere]",
         className,
       )}
     >
@@ -117,6 +118,17 @@ function NarrativeRow({ children, className }: { children: ReactNode; className?
 }
 
 function TextRow({ item }: { item: AgentActivityText }) {
+  if (item.format === "markdown" && typeof item.content === "string") {
+    return (
+      <div className="w-full min-w-0 max-w-full text-sm leading-6 text-foreground/90 [overflow-wrap:anywhere]">
+        <MarkdownContent
+          content={item.content}
+          status={item.status ?? "complete"}
+          variant="reasoning"
+        />
+      </div>
+    );
+  }
   return <NarrativeRow>{item.content}</NarrativeRow>;
 }
 
@@ -186,7 +198,7 @@ function SearchRow({ item }: { item: AgentActivitySearch }) {
       };
 
   return (
-    <div className="flex w-full min-w-0 max-w-full flex-col gap-1">
+    <div className="flex w-full min-w-0 max-w-full flex-col gap-2">
       <ActivityRowLayout
         icon={<Search />}
         label={item.query}
@@ -197,7 +209,7 @@ function SearchRow({ item }: { item: AgentActivitySearch }) {
         ) : undefined}
       />
       {item.results?.length ? (
-        <div className="flex min-w-0 max-w-full flex-col gap-1 ps-5.5">
+        <div className="flex min-w-0 max-w-full flex-col gap-2 ps-5.5">
           <AnimatePresence initial mode="popLayout">
             {item.results.map((result) => (
               <motion.div

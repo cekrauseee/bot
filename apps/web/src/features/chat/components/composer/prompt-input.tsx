@@ -159,7 +159,9 @@ export function PromptInput({
       const target = event.target;
       if (
         target instanceof Element &&
-        target.closest('input, textarea, select, button, a[href], [contenteditable="true"], [role]')
+        target.closest(
+          'input, textarea, select, [contenteditable]:not([contenteditable="false"])',
+        )
       ) return;
 
       textareaRef.current?.focus({ preventScroll: true });

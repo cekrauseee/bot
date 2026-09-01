@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { memo, useState, type Ref } from "react";
 import { useHistoryEntrance } from '../../hooks/use-history-entrance';
 import type { ConversationEntry } from '../../motion/conversation-entry';
+import { HoverMessageMeta } from './message-meta';
 
 type MessageRowProps = {
   message: ChatMessage;
@@ -28,9 +29,15 @@ const ChatMessageRow = memo(function ChatMessageRow({
     : []);
   const renderKey = message.renderKey ?? message.id;
   const messageLabel = message.role === 'user' ? 'User message' : 'Assistant message';
+  const copyText = message.blocks
+    .filter((block) => block.type === 'text')
+    .map((block) => block.content)
+    .join('\n\n');
+  const lastTextBlockIndex = message.blocks.findLastIndex((block) => block.type === 'text');
   const content = (
       <MessageContent
         className={cn(
+          "relative",
           message.role === "user"
             ? "max-w-[88%]"
             : "gap-5 text-foreground",
@@ -67,9 +74,13 @@ const ChatMessageRow = memo(function ChatMessageRow({
               onApprovalDecision={onApprovalDecision}
               responseStatus={message.status}
               sources={sources}
+              createdAt={blockIndex === lastTextBlockIndex ? message.createdAt : undefined}
             />
           );
         })}
+        {message.role === 'user' && copyText ? (
+          <HoverMessageMeta copyText={copyText} createdAt={message.createdAt} />
+        ) : null}
       </MessageContent>
   );
   const common = { 'data-scroll-boundary': true, 'data-message-key': renderKey, from: message.role, 'aria-label': messageLabel, animateOut: false } as const;
