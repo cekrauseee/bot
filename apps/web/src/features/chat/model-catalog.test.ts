@@ -12,6 +12,7 @@ const models: ChatModelOption[] = [
     value: "gpt-5.6-sol",
     label: "GPT-5.6 Sol",
     provider: "openai",
+    company: "OpenAI",
     reasoningOptions: ["low", "medium", "high", "xhigh", "max"].map((value) => ({
       value: value as "low" | "medium" | "high" | "xhigh" | "max",
       label: reasoningEffortLabel(value as "low" | "medium" | "high" | "xhigh" | "max"),
@@ -24,11 +25,25 @@ const models: ChatModelOption[] = [
     value: "grok-4.3",
     label: "Grok 4.3",
     provider: "xai",
+    company: "xAI",
     reasoningOptions: ["none", "low", "medium", "high"].map((value) => ({
       value: value as "none" | "low" | "medium" | "high",
       label: reasoningEffortLabel(value as "none" | "low" | "medium" | "high"),
     })),
     defaultReasoningEffort: "medium",
+    processingModes: ["standard"],
+    defaultProcessingMode: "standard",
+  },
+  {
+    value: "glm-5.2",
+    label: "GLM 5.2",
+    provider: "openrouter",
+    company: "Z.ai",
+    reasoningOptions: ["high", "xhigh"].map((value) => ({
+      value: value as "high" | "xhigh",
+      label: reasoningEffortLabel(value as "high" | "xhigh"),
+    })),
+    defaultReasoningEffort: "high",
     processingModes: ["standard"],
     defaultProcessingMode: "standard",
   },
@@ -62,5 +77,6 @@ describe("model capability selection", () => {
   it("only exposes the speed choice for multi-mode models", () => {
     expect(modelSupportsSpeedChoice(models[0])).toBe(true);
     expect(modelSupportsSpeedChoice(models[1])).toBe(false);
+    expect(modelSupportsSpeedChoice(models[2])).toBe(false);
   });
 });

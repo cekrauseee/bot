@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUp, Plus, Square } from "lucide-react";
+import { ArrowUp, ChevronDown, Plus, Square } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   type FormEvent,
@@ -25,12 +25,13 @@ import {
   SelectItem,
   SelectTrigger,
 } from "@/components/motion/select";
-import { SPRING_SWAP } from "@/lib/ease";
+import { EASE_OUT, SPRING_SWAP } from "@/lib/ease";
 import { cn } from "@/lib/utils";
 
 export interface PromptModel {
   value: string;
   label: ReactNode;
+  group?: string;
   icon?: ReactNode;
   disabled?: boolean;
 }
@@ -103,15 +104,29 @@ export function PromptInput({
   const reduce = useReducedMotion() ?? false;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const measurementRef = useRef<HTMLDivElement>(null);
+  const modelMeasurementRef = useRef<HTMLSpanElement>(null);
   const [internalValue, setInternalValue] = useState(defaultValue);
   const [internalModel, setInternalModel] = useState(
     defaultModel ?? models[0]?.value,
   );
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [modelTriggerWidth, setModelTriggerWidth] = useState<number>();
   const currentValue = value ?? internalValue;
   const currentModelValue = model ?? internalModel;
   const currentModel = models.find(
     (option) => option.value === currentModelValue,
+  );
+  const modelGroups = models.reduce<Array<{ label?: string; options: PromptModel[] }>>(
+    (groups, option) => {
+      const current = groups.at(-1);
+      if (current && current.label === option.group) {
+        current.options.push(option);
+      } else {
+        groups.push({ label: option.group, options: [option] });
+      }
+      return groups;
+    },
+    [],
   );
   const canSubmit =
     Boolean(currentValue.trim()) &&
@@ -137,6 +152,20 @@ export function PromptInput({
   useLayoutEffect(() => {
     resizeTextarea();
   }, [resizeTextarea]);
+
+  useLayoutEffect(() => {
+    const measurement = modelMeasurementRef.current;
+    if (!measurement) return;
+    const update = () => {
+      const width = Math.ceil(measurement.getBoundingClientRect().width);
+      setModelTriggerWidth((current) => current === width ? current : width);
+    };
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(update);
+    observer.observe(measurement);
+    return () => observer.disconnect();
+  }, [currentModel]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -310,39 +339,78 @@ export function PromptInput({
             value={currentModelValue}
             onValueChange={setModel}
             disabled={disabled || loading}
-            className="min-w-0 max-w-52 flex-1"
+            className="min-w-0 max-w-52"
           >
-            <SelectTrigger className="h-8 w-auto max-w-full rounded-xl border-0 bg-transparent px-2 py-0 text-xs hover:bg-muted focus-visible:ring-2 disabled:opacity-100">
-              <span className="flex min-w-0 items-center gap-1.5">
+            <span
+              ref={modelMeasurementRef}
+              aria-hidden="true"
+              className="pointer-events-none invisible absolute flex h-8 w-max items-center justify-between gap-2 px-2 text-xs"
+            >
+              <span className="flex items-center gap-1.5">
                 {currentModel?.icon ? (
-                  <span className="grid size-4 shrink-0 place-items-center text-muted-foreground [&_svg]:size-3.5">
+                  <span className="grid size-4 shrink-0 place-items-center [&_svg]:size-3.5">
                     {currentModel.icon}
                   </span>
                 ) : null}
-                <span className="truncate text-muted-foreground">
-                  {currentModel?.label ?? "Choose model"}
-                </span>
+                <span>{currentModel?.label ?? "Choose model"}</span>
               </span>
-            </SelectTrigger>
-            <SelectContent className="right-auto w-52 shadow-none">
-              {models.map((option) => (
-                <SelectItem
-                  key={option.value}
-                  value={option.value}
-                  disabled={option.disabled}
-                  className="py-1.5"
-                >
-                  <span className="flex min-w-0 items-center gap-1.5">
-                    {option.icon ? (
-                      <span className="grid size-4 shrink-0 place-items-center text-muted-foreground [&_svg]:size-3.5">
-                        {option.icon}
-                      </span>
-                    ) : null}
-                    <span className="min-w-0 truncate text-xs text-foreground">
-                      {option.label}
+              <ChevronDown className="size-4 shrink-0" />
+            </span>
+            <motion.div
+              initial={false}
+              animate={modelTriggerWidth === undefined ? undefined : { width: modelTriggerWidth }}
+              transition={reduce ? { duration: 0 } : { duration: 0.22, ease: EASE_OUT }}
+              className="max-w-full"
+            >
+              <SelectTrigger className="h-8 w-full rounded-xl border-0 bg-transparent px-2 py-0 text-xs hover:bg-muted focus-visible:ring-2 disabled:opacity-100">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  {currentModel?.icon ? (
+                    <span className="grid size-4 shrink-0 place-items-center text-muted-foreground [&_svg]:size-3.5">
+                      {currentModel.icon}
                     </span>
+                  ) : null}
+                  <span className="truncate text-muted-foreground">
+                    {currentModel?.label ?? "Choose model"}
                   </span>
-                </SelectItem>
+                </span>
+              </SelectTrigger>
+            </motion.div>
+            <SelectContent className="right-auto w-52 shadow-none">
+              {modelGroups.map((group, groupIndex) => (
+                <div
+                  key={group.label ?? `models-${groupIndex}`}
+                  role={group.label ? "group" : "presentation"}
+                  aria-label={group.label}
+                  className={cn(groupIndex > 0 && "mt-1 border-t border-border/70 pt-1")}
+                >
+                  {group.label ? (
+                    <div
+                      aria-hidden="true"
+                      className="px-2.5 pb-1 pt-1.5 text-[11px] font-medium text-muted-foreground"
+                    >
+                      {group.label}
+                    </div>
+                  ) : null}
+                  {group.options.map((option) => (
+                    <SelectItem
+                      key={option.value}
+                      value={option.value}
+                      disabled={option.disabled}
+                      className="py-1.5"
+                    >
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        {option.icon ? (
+                          <span className="grid size-4 shrink-0 place-items-center text-muted-foreground [&_svg]:size-3.5">
+                            {option.icon}
+                          </span>
+                        ) : null}
+                        <span className="min-w-0 truncate text-xs text-foreground">
+                          {option.label}
+                        </span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </div>
               ))}
             </SelectContent>
           </Select>

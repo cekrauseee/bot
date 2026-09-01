@@ -2,6 +2,7 @@ export const modelCatalog = [
   {
     id: 'gpt-5.6-sol',
     provider: 'openai',
+    company: 'OpenAI',
     label: 'GPT-5.6 Sol',
     reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
     defaultReasoningEffort: 'medium',
@@ -11,6 +12,7 @@ export const modelCatalog = [
   {
     id: 'gpt-5.6-terra',
     provider: 'openai',
+    company: 'OpenAI',
     label: 'GPT-5.6 Terra',
     reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
     defaultReasoningEffort: 'medium',
@@ -20,6 +22,7 @@ export const modelCatalog = [
   {
     id: 'gpt-5.6-luna',
     provider: 'openai',
+    company: 'OpenAI',
     label: 'GPT-5.6 Luna',
     reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
     defaultReasoningEffort: 'medium',
@@ -29,6 +32,7 @@ export const modelCatalog = [
   {
     id: 'grok-4.6',
     provider: 'xai',
+    company: 'xAI',
     label: 'Grok 4.6',
     reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
     defaultReasoningEffort: 'high',
@@ -38,9 +42,20 @@ export const modelCatalog = [
   {
     id: 'grok-4.3',
     provider: 'xai',
+    company: 'xAI',
     label: 'Grok 4.3',
     reasoningEfforts: ['none', 'low', 'medium', 'high'],
     defaultReasoningEffort: 'medium',
+    processingModes: ['standard'],
+    defaultProcessingMode: 'standard',
+  },
+  {
+    id: 'glm-5.2',
+    provider: 'openrouter',
+    company: 'Z.ai',
+    label: 'GLM 5.2',
+    reasoningEfforts: ['high', 'xhigh'],
+    defaultReasoningEffort: 'high',
     processingModes: ['standard'],
     defaultProcessingMode: 'standard',
   },
@@ -56,6 +71,7 @@ export const publicModelCatalog = () => ({
   models: modelCatalog.map((model) => ({
     id: model.id,
     provider: model.provider,
+    company: model.company,
     label: model.label,
     reasoning_efforts: {
       options: [...model.reasoningEfforts],

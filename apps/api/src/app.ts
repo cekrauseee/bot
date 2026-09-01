@@ -32,6 +32,7 @@ import {
   publicAgentEvent,
 } from './modules/agent-control-plane.js'
 import {
+  modelCatalog,
   modelDefinition,
   publicModelCatalog,
   validModelSelection,
@@ -638,13 +639,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   const turnBody = t.Object({
     retry_of: t.Optional(t.String({ format: 'uuid' })),
     message: t.String({ minLength: 1, maxLength: 1_048_576 }),
-    model: t.Union([
-      t.Literal('gpt-5.6-sol'),
-      t.Literal('gpt-5.6-terra'),
-      t.Literal('gpt-5.6-luna'),
-      t.Literal('grok-4.6'),
-      t.Literal('grok-4.3'),
-    ]),
+    model: t.Union(modelCatalog.map(({ id }) => t.Literal(id))),
     reasoning_effort: t.Union([
       t.Literal('none'),
       t.Literal('low'),

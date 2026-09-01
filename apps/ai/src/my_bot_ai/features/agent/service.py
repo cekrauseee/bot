@@ -86,7 +86,7 @@ def _explicit_summary_values(value: Any) -> list[str]:
 
 
 def _reasoning_summaries(chunk: Any, provider: ProviderName | None) -> list[str]:
-    """Return provider summaries while excluding xAI's raw reasoning_content."""
+    """Return explicit provider summaries without exposing raw reasoning."""
 
     summaries: list[str] = []
     metadata = getattr(chunk, "response_metadata", {}) or {}
@@ -100,9 +100,9 @@ def _reasoning_summaries(chunk: Any, provider: ProviderName | None) -> list[str]
         if block.get("type") != "reasoning":
             continue
         summaries.extend(_explicit_summary_values(block.get("summary")))
-        if inferred_provider == "xai":
-            # ChatXAI maps streamed `reasoning_content` to a generic reasoning
-            # block. That field is raw reasoning, not a safe summary.
+        if inferred_provider in {"xai", "openrouter"}:
+            # Compatible adapters can map streamed raw reasoning to a generic
+            # reasoning block. Only explicit summary fields are safe to expose.
             continue
         for key in ("reasoning", "text"):
             value = block.get(key)

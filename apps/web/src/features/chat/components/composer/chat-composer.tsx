@@ -1,5 +1,6 @@
 import { OpenAIIcon } from "@/components/icons/openai-icon";
 import { XIcon } from "@/components/icons/x-icon";
+import { ZAiIcon } from "@/components/icons/z-ai-icon";
 import { PromptInput } from "./prompt-input";
 import { ReasoningEffort } from "@/features/chat/components/reasoning-effort";
 import { SpeedToggle } from "@/features/chat/components/speed-toggle";
@@ -69,9 +70,14 @@ export const ChatComposer = memo(function ChatComposer({
   const errorId = useId();
   const promptModels = useMemo(() => models.map((option) => ({
     ...option,
-    icon: option.provider === 'xai'
+    group: option.company,
+    icon: option.company === 'xAI'
       ? <XIcon aria-hidden="true" />
-      : <OpenAIIcon aria-hidden="true" />,
+      : option.company === 'Z.ai'
+        ? <ZAiIcon aria-hidden="true" />
+        : option.company === 'OpenAI'
+          ? <OpenAIIcon aria-hidden="true" />
+          : undefined,
   })), [models]);
   const selectedModel = models.find((option) => option.value === model);
   const visibleError = centered && !loading && draft.trim() === submittedPrompt ? submitError : '';

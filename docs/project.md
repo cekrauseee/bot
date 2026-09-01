@@ -13,7 +13,7 @@ The current implementation includes:
 - light and dark appearances with the system preference as the default;
 - beUI inputs, buttons, and theme transition installed through its shadcn registry;
 - an Elysia application API with health, authentication, conversation, and streaming endpoints;
-- an authenticated FastAPI boundary using LangChain and OpenAI Responses;
+- an authenticated FastAPI boundary using LangChain with OpenAI, xAI, and OpenRouter integrations;
 - durable LangGraph checkpoints, resumable questions, plans, and recursive child agents;
 - a private Vercel Sandbox runtime for a global filesystem, unprivileged processes, and run-scoped browsers;
 - passwordless email OTP and Google OpenID Connect login;
@@ -21,7 +21,7 @@ The current implementation includes:
 - Redis-backed OTP challenges and abuse limits;
 - a repository-owned React Email component rendered locally and sent through Resend;
 - persistent multi-conversation text chat with reasoning summaries, web search, and Markdown responses;
-- GPT-5.6 Sol, Terra, and Luna plus Grok 4.6 and 4.3 with provider-aware reasoning and processing controls;
+- GPT-5.6 Sol, Terra, and Luna, Grok 4.6 and 4.3, and GLM 5.2 through OpenRouter with provider-aware reasoning and processing controls;
 - durable background runs, cursor-based replay, and transient browser picture-in-picture frames.
 
 Production deployment is not implemented yet. Real model calls require the corresponding server-side provider key. Runtime tools additionally require Vercel Sandbox credentials.

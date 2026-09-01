@@ -7,6 +7,7 @@ import {
   loadConversationDetail,
   mapApiMessage,
   mapBrowserFrame,
+  mapModelCatalog,
   mapQuestionRequest,
   parseEventSequence,
   parseSseBuffer,
@@ -67,6 +68,27 @@ const startedFrame = () => frame(0, 'turn.started', {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('conversation transport', () => {
+  it('accepts OpenRouter models from the application catalog', () => {
+    expect(mapModelCatalog({
+      models: [{
+        id: 'glm-5.2',
+        label: 'GLM 5.2',
+        provider: 'openrouter',
+        company: 'Z.ai',
+        reasoning_efforts: { options: ['high', 'xhigh'], default: 'high' },
+        processing_modes: { options: ['standard'], default: 'standard' },
+      }],
+    })).toEqual([
+      expect.objectContaining({
+        value: 'glm-5.2',
+        provider: 'openrouter',
+        company: 'Z.ai',
+        defaultReasoningEffort: 'high',
+        processingModes: ['standard'],
+      }),
+    ])
+  })
+
   it('restores the persisted processing duration from message timestamps', () => {
     const message = mapApiMessage({
       id: 'assistant',

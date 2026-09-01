@@ -186,9 +186,9 @@ describe('PostgreSQL conversation flow', () => {
         },
         body: JSON.stringify({
           message: '  First persistent conversation  ',
-          model: 'gpt-5.6-sol',
-          reasoning_effort: 'medium',
-          speed: 'fast',
+          model: 'glm-5.2',
+          reasoning_effort: 'high',
+          speed: 'standard',
         }),
       }))
       expect(started.status).toBe(200)
@@ -236,9 +236,9 @@ describe('PostgreSQL conversation flow', () => {
         content: 'A **streamed** answer.\n\n```ts\nconst ready = true\n```',
         reasoning: 'Checked the request.',
         status: 'completed',
-        model: 'gpt-5.6-sol',
-        reasoning_effort: 'medium',
-        speed: 'fast',
+        model: 'glm-5.2',
+        reasoning_effort: 'high',
+        speed: 'standard',
         activities: [
           {
             id: 'reasoning-2', type: 'text', content: 'Checked the request.', lastSequence: 2,
@@ -526,8 +526,8 @@ describe('PostgreSQL conversation flow', () => {
           },
           body: JSON.stringify({
             message: 'Continue this seeded conversation.',
-            model: 'gpt-5.6-sol',
-            reasoning_effort: 'medium',
+            model: 'glm-5.2',
+            reasoning_effort: 'high',
             speed: 'standard',
           }),
         },
@@ -710,6 +710,7 @@ describe('PostgreSQL conversation flow', () => {
           { id: 'gpt-5.6-luna', provider: 'openai' },
           { id: 'grok-4.6', provider: 'xai' },
           { id: 'grok-4.3', provider: 'xai' },
+          { id: 'glm-5.2', provider: 'openrouter' },
         ],
       })
 

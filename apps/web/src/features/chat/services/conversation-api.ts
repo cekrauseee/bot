@@ -238,7 +238,9 @@ export const mapModelCatalog = (value: unknown): ChatModelOption[] => {
   }
   const models = rawModels.flatMap((raw): ChatModelOption[] => {
     const model = plainRecord(raw)
-    const provider = model?.provider === 'openai' || model?.provider === 'xai'
+    const provider = model?.provider === 'openai' ||
+      model?.provider === 'xai' ||
+      model?.provider === 'openrouter'
       ? model.provider as ChatModelProvider
       : undefined
     const reasoning = plainRecord(model?.reasoning_efforts)
@@ -260,6 +262,7 @@ export const mapModelCatalog = (value: unknown): ChatModelOption[] => {
     if (
       typeof model?.id !== 'string' ||
       typeof model.label !== 'string' ||
+      typeof model.company !== 'string' ||
       !provider ||
       !defaultEffort ||
       !effortOptions.includes(defaultEffort) ||
@@ -270,6 +273,7 @@ export const mapModelCatalog = (value: unknown): ChatModelOption[] => {
       value: model.id,
       label: model.label,
       provider,
+      company: model.company,
       reasoningOptions: effortOptions.map((effort) => ({
         value: effort,
         label: reasoningEffortLabel(effort),

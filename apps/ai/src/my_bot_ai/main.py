@@ -37,6 +37,7 @@ def create_app(
         provider_keys = (
             resolved_settings.openai_api_key or "",
             resolved_settings.xai_api_key or "",
+            resolved_settings.openrouter_api_key or "",
         )
         if _is_placeholder(token) or token == "dev-ai-service-token" or len(token) < 32:
             raise ValueError("AI_SERVICE_TOKEN must be a strong production secret")

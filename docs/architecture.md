@@ -23,7 +23,7 @@ The chat feature is application-owned under `apps/web/src/features/chat`. Its pu
 
 The application API uses an Elysia application factory with the official Node.js adapter, typed runtime schemas, and OpenAPI documentation. It is the only browser-facing backend. It authenticates users and owns conversations, projects, workspaces, runs, messages, plans, and append-only events in PostgreSQL. Its leased executor continues work after the initiating HTTP response disconnects, publishes transient updates through Redis, and fences every durable write.
 
-The AI service uses a FastAPI application factory in `my_bot_ai.main`. It accepts only bearer-authenticated service requests from the application API. LangGraph checkpoints own resumable orchestration; OpenAI and xAI adapters expose provider-aware models. The service normalizes agent, tool, child, plan, question, browser, and terminal events. It calls the runtime with a separate bearer token and does not own browser authentication or product persistence.
+The AI service uses a FastAPI application factory in `my_bot_ai.main`. It accepts only bearer-authenticated service requests from the application API. LangGraph checkpoints own resumable orchestration; OpenAI, xAI, and OpenRouter adapters expose provider-aware models. The service normalizes agent, tool, child, plan, question, browser, and terminal events. It calls the runtime with a separate bearer token and does not own browser authentication or product persistence.
 
 The runtime maps one durable user workspace to an isolated Vercel Sandbox. It executes unprivileged filesystem, process, and run-scoped browser tools with deterministic operation IDs. Project paths choose a run's starting directory without restricting access to the rest of `/workspace`.
 
@@ -63,7 +63,7 @@ The conversation flow is:
 - API behavior is exposed through routers and covered by tests.
 - Product routes, authentication, and relational data remain owned by `apps/api`.
 - Model-provider integrations and AI execution remain owned by `apps/ai`.
-- The browser never receives OpenAI credentials or provider-native event payloads.
+- The browser never receives model-provider credentials or provider-native event payloads.
 - OpenAI response storage stays disabled; PostgreSQL is the conversation source of truth.
 - Authentication secrets and raw OTP or session tokens never enter persistent storage or logs.
 - Account lookup behavior does not reveal whether an email already exists.

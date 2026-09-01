@@ -198,7 +198,7 @@ export type ApiConversationMessage = {
   updated_at: string;
 };
 
-export type ChatModelProvider = "openai" | "xai";
+export type ChatModelProvider = "openai" | "xai" | "openrouter";
 export type ChatReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh" | "max";
 export type ChatProcessingMode = "standard" | "fast";
 export type ChatReasoningOption = { value: ChatReasoningEffort; label: string };
@@ -206,6 +206,7 @@ export type ChatModelOption = {
   value: string;
   label: string;
   provider: ChatModelProvider;
+  company: string;
   reasoningOptions: ChatReasoningOption[];
   defaultReasoningEffort: ChatReasoningEffort;
   processingModes: ChatProcessingMode[];

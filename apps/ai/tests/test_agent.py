@@ -292,6 +292,12 @@ def test_xai_stream_exposes_only_explicit_reasoning_summaries() -> None:
     assert "raw secret reasoning" not in json.dumps(events)
 
 
+def test_openrouter_stream_excludes_raw_reasoning_blocks() -> None:
+    events = collect(stream_model(XAIStream(), [], provider="openrouter"))
+    assert events == [{"type": "reasoning.delta", "data": {"delta": "Safe xAI summary"}}]
+    assert "raw secret reasoning" not in json.dumps(events)
+
+
 def test_plan_tool_and_child_events_are_normalized() -> None:
     events = collect(stream_model(ActivityStream(), []))
     assert [event["type"] for event in events] == [
@@ -529,6 +535,7 @@ def test_stream_rejects_bad_auth_and_extra_fields() -> None:
     [
         ("grok-4.6", "high", "fast"),
         ("grok-4.3", "xhigh", "standard"),
+        ("glm-5.2", "medium", "standard"),
     ],
 )
 def test_request_validates_provider_capabilities(model, effort, speed) -> None:
@@ -545,6 +552,22 @@ def test_missing_xai_provider_is_safe() -> None:
     response = TestClient(application).post(
         "/agent/stream",
         json={**PAYLOAD, "model": "grok-4.6", "reasoning_effort": "high"},
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": {
+            "code": "provider_missing",
+            "message": "The selected AI provider is not configured.",
+        }
+    }
+
+
+def test_missing_openrouter_provider_is_safe() -> None:
+    application = create_app(Settings(environment="test", ai_service_token="test-token"))
+    response = TestClient(application).post(
+        "/agent/stream",
+        json={**PAYLOAD, "model": "glm-5.2", "reasoning_effort": "high"},
         headers={"Authorization": "Bearer test-token"},
     )
     assert response.status_code == 503
@@ -577,6 +600,24 @@ def test_provider_constructors_receive_only_supported_settings() -> None:
     assert "service_tier" not in xai
     assert "use_responses_api" not in xai
     assert provider_builtin_tools(xai_settings) == []
+
+    with patch(
+        "my_bot_ai.features.agent.models.ChatOpenAI", side_effect=lambda **kwargs: kwargs
+    ):
+        glm, glm_settings = build_chat_model(
+            Settings(openrouter_api_key="openrouter-key"),
+            "glm-5.2",
+            None,
+            "standard",
+        )
+    assert glm["model"] == "z-ai/glm-5.2:free"
+    assert glm["base_url"] == "https://openrouter.ai/api/v1"
+    assert glm["use_responses_api"] is False
+    assert glm["extra_body"] == {
+        "reasoning": {"effort": "high", "exclude": True}
+    }
+    assert "store" not in glm
+    assert provider_builtin_tools(glm_settings) == []
 
     assert resolve_model_settings("gpt-5.6-terra", "none", "standard").reasoning_effort == "none"
 
