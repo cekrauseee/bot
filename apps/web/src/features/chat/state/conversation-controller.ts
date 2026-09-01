@@ -513,7 +513,7 @@ const applyNonStartedEvent = (
         updateProcessItems(assistant, (items) => {
           const last = items.at(-1)
           if (last?.type === 'text' && last.lastSequence !== undefined &&
-            parseEventSequence(last.lastSequence) + 1n === parseEventSequence(event.sequence)) {
+            BigInt(last.lastSequence) + 1n === parseEventSequence(event.sequence)) {
             return [
               ...items.slice(0, -1),
               {

@@ -286,6 +286,26 @@ const upsertActivity = (
   else activities[index] = next
 }
 
+const appendReasoningActivity = (
+  activities: Array<Record<string, unknown>>,
+  delta: string,
+  sequence: number,
+) => {
+  const last = activities.at(-1)
+  if (last?.type === 'text' && last.lastSequence === sequence - 1 &&
+    typeof last.content === 'string') {
+    last.content += delta
+    last.lastSequence = sequence
+    return
+  }
+  activities.push({
+    id: `reasoning-${sequence}`,
+    type: 'text',
+    content: delta,
+    lastSequence: sequence,
+  })
+}
+
 const questionProjection = (data: Record<string, unknown>) =>
   plainRecord(data.question) ?? data
 
@@ -611,6 +631,7 @@ export class AgentRunExecutor {
         } else if (event.type === 'reasoning.delta') {
           if (typeof data.delta !== 'string') throw new Error('invalid_provider_event')
           reasoning += data.delta
+          appendReasoningActivity(activities, data.delta, event.sequence)
         }
         upsertActivity(activities, event.type, data)
 
