@@ -1,0 +1,92 @@
+type ApiErrorDetail = {
+  code?: string
+  message?: string
+  retry_after_seconds?: number
+}
+
+type ApiErrorBody = {
+  detail?: ApiErrorDetail | Array<{ msg?: string }>
+}
+
+export type User = {
+  id: string
+  email: string
+  first_name: string | null
+  last_name: string | null
+  avatar_url: string | null
+}
+
+export type OtpChallenge = {
+  challenge_id: string
+  expires_in_seconds: number
+  resend_after_seconds: number
+  development_code?: string
+}
+
+export class AuthApiError extends Error {
+  readonly status: number
+  readonly code?: string
+  readonly retryAfterSeconds?: number
+
+  constructor(message: string, status: number, detail?: ApiErrorDetail) {
+    super(message)
+    this.name = "AuthApiError"
+    this.status = status
+    this.code = detail?.code
+    this.retryAfterSeconds = detail?.retry_after_seconds
+  }
+}
+
+const apiBaseUrl = (
+  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000"
+).replace(/\/$/, "")
+
+async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    ...init,
+    credentials: "include",
+    headers: init?.body
+      ? { "Content-Type": "application/json", ...init.headers }
+      : init?.headers,
+  })
+
+  if (response.ok) {
+    if (response.status === 204) return undefined as T
+    return (await response.json()) as T
+  }
+
+  let body: ApiErrorBody | undefined
+  try {
+    body = (await response.json()) as ApiErrorBody
+  } catch {
+    body = undefined
+  }
+
+  const detail = Array.isArray(body?.detail) ? undefined : body?.detail
+  const validationMessage = Array.isArray(body?.detail)
+    ? body.detail[0]?.msg
+    : undefined
+  throw new AuthApiError(
+    detail?.message ??
+      validationMessage ??
+      "The request could not be completed.",
+    response.status,
+    detail
+  )
+}
+
+export const authApi = {
+  googleStartUrl: `${apiBaseUrl}/auth/google/start`,
+  session: () => apiRequest<User>("/auth/session"),
+  requestOtp: (email: string) =>
+    apiRequest<OtpChallenge>("/auth/otp/request", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+  verifyOtp: (challengeId: string, code: string) =>
+    apiRequest<{ user: User }>("/auth/otp/verify", {
+      method: "POST",
+      body: JSON.stringify({ challenge_id: challengeId, code }),
+    }),
+  signOut: () => apiRequest<void>("/auth/sign-out", { method: "POST" }),
+}
