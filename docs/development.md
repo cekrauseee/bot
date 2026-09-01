@@ -21,7 +21,7 @@ The setup script:
 - installs the npm workspace and Python AI lockfiles. A marker under `node_modules` records a fingerprint of the root npm lockfile, Turbo configuration, npm workspace manifests, and `apps/ai/pyproject.toml`, `apps/ai/uv.lock`, and `apps/ai/.python-version` only after both installs succeed; changing any of these dependency inputs invalidates readiness and reruns installation;
 - builds the `@my-bot/email` workspace package consumed by the API;
 - creates the canonical root `.env` when absent and aligns existing values to `.env.example` order;
-- generates independent local authentication and AI service secrets without printing or replacing existing values;
+- generates independent local authentication, AI, and runtime service secrets without printing or replacing existing values;
 - starts the dedicated PostgreSQL and Redis services;
 - applies all database migrations;
 - verifies the database schema and migration history before reporting readiness.
@@ -34,12 +34,13 @@ The environment groups runtime mode, infrastructure, service origins, internal s
 | --- | --- | --- |
 | Runtime | `ENVIRONMENT` | Must be `development`, `test`, or `production` |
 | Infrastructure | `DATABASE_URL`, `REDIS_URL` | Required explicitly; setup copies the dedicated local origins |
-| Service origins | `WEB_BASE_URL`, `API_BASE_URL`, `VITE_API_BASE_URL`, `AI_BASE_URL` | Required explicitly and used by startup, CORS, and service clients |
-| Internal security | `SESSION_SECRET`, `OTP_PEPPER`, `RATE_LIMIT_PEPPER`, `AI_SERVICE_TOKEN` | Setup generates independent values without printing them |
-| Providers | `OPENAI_API_KEY`, Google variables, `RESEND_API_KEY`, `RESEND_FROM` | Google, Resend, and OpenAI credentials may remain placeholders or empty during local UI work |
+| Service origins | `WEB_BASE_URL`, `API_BASE_URL`, `VITE_API_BASE_URL`, `AI_BASE_URL`, `RUNTIME_BASE_URL` | Required explicitly and used by startup, CORS, and service clients |
+| Runtime service | `RUNTIME_PORT`, `RUNTIME_ENVIRONMENT` | Port must match `RUNTIME_BASE_URL`; environment scopes provider resources |
+| Internal security | `SESSION_SECRET`, `OTP_PEPPER`, `RATE_LIMIT_PEPPER`, `AI_SERVICE_TOKEN`, `RUNTIME_SERVICE_TOKEN` | Setup generates independent values without printing them |
+| Providers | `OPENAI_API_KEY`, `XAI_API_KEY`, Vercel variables, Google variables, `RESEND_API_KEY`, `RESEND_FROM` | External credentials may remain placeholders or empty during local UI work |
 | Optional tooling | `MYBOT_SEED_USER_EMAIL` | Selects an explicit account for `db:seed` when set |
 
-Add Google and Resend credentials to `.env`, register `http://localhost:8000/auth/google/callback`, then run `npm run auth:check`. Set `OPENAI_API_KEY` when real agent responses are needed. Setup never provisions or prints provider keys.
+Add Google and Resend credentials to `.env`, register `http://localhost:8000/auth/google/callback`, then run `npm run auth:check`. Set `OPENAI_API_KEY` or `XAI_API_KEY` for real model requests. Add Vercel OIDC or access-token credentials for real sandbox tools. Setup never provisions or prints provider keys.
 
 ## Daily Development
 
@@ -47,7 +48,7 @@ Add Google and Resend credentials to `.env`, register `http://localhost:8000/aut
 npm run dev
 ```
 
-After ensuring `.env` exists, this command reads the Vite, Elysia, and FastAPI ports from `WEB_BASE_URL`, `API_BASE_URL`, and `AI_BASE_URL`. If a port is occupied, startup stops with one line per service showing its port, process, and PID, followed by a single command to stop all identified owners. PID discovery uses `lsof` when available; otherwise the log provides an inspection command. Nothing is stopped automatically. Verify the PIDs before running the command, or use `Ctrl+C` in the existing development terminal, then retry `npm run dev`.
+After ensuring `.env` exists, this command reads the Vite, Elysia, FastAPI, and runtime ports from `WEB_BASE_URL`, `API_BASE_URL`, `AI_BASE_URL`, and `RUNTIME_PORT`. Runtime startup also requires `RUNTIME_PORT` to match `RUNTIME_BASE_URL`. If a port is occupied, startup stops with one line per service showing its port, process, and PID, followed by a single command to stop all identified owners. PID discovery uses `lsof` when available; otherwise the log provides an inspection command. Nothing is stopped automatically. Verify the PIDs before running the command, or use `Ctrl+C` in the existing development terminal, then retry `npm run dev`.
 
 Once the ports are available, the command ensures environment files, dependencies, infrastructure, and migrations are ready, then starts the services. Vite retains `strictPort` to prevent silently switching ports if a conflict appears after the check. The Turbo process remains attached to the root development process so terminal or host shutdown cannot orphan package watchers. `Ctrl+C` stops every application process; the API releases its listener before closing Redis and PostgreSQL clients. Open `http://localhost:5173`; use `localhost`, not `127.0.0.1`, so the configured browser origin matches.
 
@@ -71,7 +72,7 @@ Run `npm run help` for the current command guide. The primary workflows are:
 | --- | --- |
 | `npm run help` | Show the categorized command guide |
 | `npm run setup` | Bootstrap dependencies, environment, infrastructure, and migrations |
-| `npm run dev` | Prepare and run the web, Elysia API, and FastAPI AI service together |
+| `npm run dev` | Prepare and run the web, API, AI, and runtime services together |
 | `npm run verify` | Run the complete repository and authentication integration verification |
 | `npm run check` | Run checks and production builds without integration infrastructure |
 
@@ -101,6 +102,7 @@ Project-specific commands remain available for focused development and diagnosis
 | API | `api:dev` | `api:lint`, `api:typecheck`, `api:test`, `api:test:integration` | `api:build` |
 | AI | `ai:dev` | `ai:lint`, `ai:test` | — |
 | Web | `web:dev` | `web:lint`, `web:typecheck`, `web:test` | `web:build` |
+| Runtime | `runtime:dev` | `runtime:lint`, `runtime:typecheck`, `runtime:test` | `runtime:build` |
 | Email | `email:dev` | `email:typecheck` | `email:build` |
 | Automation | — | `scripts:lint`, `scripts:test` | — |
 

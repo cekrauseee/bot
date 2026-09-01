@@ -32,7 +32,7 @@ Authenticated conversation routes are:
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/conversations` | List the current user's conversations newest first |
-| `GET` | `/conversations/:conversationId` | Load one owned conversation and its messages |
+| `GET` | `/conversations/:conversationId` | Load messages, task plan, and the current active-run projection |
 | `PATCH` | `/conversations/:conversationId` | Rename an owned conversation with `{ title: string }` |
 | `POST` | `/conversations/turns` | Create a conversation and stream its first turn |
 | `POST` | `/conversations/:conversationId/turns` | Stream a turn in an existing conversation |
@@ -59,6 +59,8 @@ Agent control routes are:
 
 Starting a turn creates a durable run and returns named `text/event-stream` events with a v2 envelope. PostgreSQL assigns the public decimal event sequence. The executor validates the AI service sequence, fences every write with a renewable execution token, stores partial state, and completes only after a valid terminal event. One active run is allowed per conversation across application instances.
 
+The API preserves validated request and correlation IDs in response headers and forwards them to the immediate AI execution, resume, or cancellation attempt. Recovered background work has no originating HTTP request and therefore starts a new logging context inside the worker boundary. Logs exclude prompts, message content, credentials, cookies, and provider reasoning.
+
 Runs may continue after the initiating HTTP connection closes. Clients hydrate `active_run`, reconnect with the last sequence, replay through a fixed high-water mark, and then receive Redis-backed live fanout. PostgreSQL remains authoritative if Redis drops a message. Browser images are validated and fanned out separately without a database insert.
 
 Conversation details expose one current task `plan`, projected from the latest nonempty run snapshot. New runs inherit that plan and pass it to the AI service as context. Plan updates replace the current snapshot; they do not create message blocks or independent plans per turn.
@@ -77,4 +79,4 @@ Existing-conversation turn requests may include `retry_of`, the UUID of the late
 
 ## Database Compatibility
 
-Drizzle owns the schema and migration workflow. The agent control-plane migration adds one global workspace per user, durable runs, and append-only events without changing existing conversation ownership. Migration checks verify the complete relational contract before delivery.
+Drizzle owns the schema and migration workflow. After the conversation pin/title and project-order migrations, `0005_lyrical_captain_britain` adds one global workspace per user, durable runs, and append-only events. `0006_yellow_scorpion` adds immutable project workspace paths and frozen run working directories. `0007_crazy_maginty` permits retry attempts to create separate run histories while reusing the failed assistant message. These migrations are non-destructive and preserve existing conversation ownership. Migration checks verify the complete relational contract before delivery.
