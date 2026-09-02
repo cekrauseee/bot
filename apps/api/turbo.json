@@ -1,0 +1,9 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "dev": {
+      "passThroughEnv": ["CODEX_BINARY", "CODEX_HOME_ROOT", "CODEX_LOGIN_MODE"]
+    }
+  }
+}

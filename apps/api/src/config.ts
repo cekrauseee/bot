@@ -1,4 +1,6 @@
 import { fileURLToPath } from 'node:url'
+import { tmpdir } from 'node:os'
+import { isAbsolute, join } from 'node:path'
 import dotenv from 'dotenv'
 
 // Resolve the repository environment file from this module rather than from
@@ -36,6 +38,9 @@ export type Settings = {
   apiOrigin: string
   aiBaseUrl: string
   aiServiceToken: string
+  codexBinary: string
+  codexHomeRoot: string | null
+  codexLoginMode: 'browser' | 'device'
 }
 
 const isPlaceholder = (value: string) => {
@@ -138,6 +143,17 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
       throw new Error('RESEND_FROM must contain a valid sender address')
     }
   }
+  const configuredCodexHome = env.CODEX_HOME_ROOT?.trim()
+  if (configuredCodexHome && !isAbsolute(configuredCodexHome)) {
+    throw new Error('CODEX_HOME_ROOT must be an absolute path')
+  }
+  const codexBinary = env.CODEX_BINARY?.trim() || 'codex'
+  if (codexBinary.includes('\0')) throw new Error('CODEX_BINARY is invalid')
+  const configuredLoginMode = env.CODEX_LOGIN_MODE?.trim()
+  if (configuredLoginMode !== undefined && configuredLoginMode !== 'browser' && configuredLoginMode !== 'device') {
+    throw new Error('CODEX_LOGIN_MODE must be browser or device')
+  }
+  const codexLoginMode = configuredLoginMode ?? (environment === 'production' ? 'device' : 'browser')
   return {
     environment: environment as Environment, databaseUrl, redisUrl,
     webBaseUrl: webOrigin, apiBaseUrl: apiOrigin, ...secrets,
@@ -148,5 +164,10 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     sessionCookieName: environment === 'production' ? '__Host-mybot_session' : 'mybot_session',
     secureCookies: environment === 'production', webOrigin, apiOrigin,
     aiBaseUrl, aiServiceToken: requiredValue(env, 'AI_SERVICE_TOKEN'),
+    codexBinary,
+    codexLoginMode,
+    codexHomeRoot: configuredCodexHome || (environment === 'production'
+      ? null
+      : join(tmpdir(), 'my-bot-codex')),
   }
 }

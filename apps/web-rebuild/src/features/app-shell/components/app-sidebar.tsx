@@ -1,19 +1,6 @@
 import { useMemo, useState } from "react"
-import {
-  ChevronDownIcon,
-  LogOutIcon,
-  RefreshCwIcon,
-  SquarePenIcon,
-} from "lucide-react"
+import { RefreshCwIcon, SquarePenIcon } from "lucide-react"
 
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import {
   Sidebar,
   SidebarContent,
@@ -28,8 +15,8 @@ import {
   SidebarRail,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
-import { Spinner } from "@/components/ui/spinner"
 import type { ConversationSummary } from "@/features/app-shell/api"
+import { AccountMenu } from "@/features/provider-connections/components/account-menu"
 import { SidebarConversationRow } from "@/features/app-shell/components/sidebar-conversation-row"
 import { SidebarCreateProjectDialog } from "@/features/app-shell/components/sidebar-create-project-dialog"
 import { SidebarProjectRow } from "@/features/app-shell/components/sidebar-project-row"
@@ -45,20 +32,6 @@ type AppSidebarProps = {
   signingOut: boolean
   signOutFailed: boolean
   user: User
-}
-
-function getUserName(user: User) {
-  const name = [user.first_name, user.last_name].filter(Boolean).join(" ")
-  return name || user.email
-}
-
-function getUserInitials(user: User) {
-  const initials = [user.first_name, user.last_name]
-    .filter(Boolean)
-    .map((part) => part?.charAt(0))
-    .join("")
-
-  return (initials || user.email.charAt(0)).toUpperCase()
 }
 
 const newestFirst = (a: ConversationSummary, b: ConversationSummary) =>
@@ -83,7 +56,6 @@ export function AppSidebar({
   signOutFailed,
   user,
 }: AppSidebarProps) {
-  const userName = getUserName(user)
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(
     () => new Set()
   )
@@ -392,49 +364,11 @@ export function AppSidebar({
         )}
         <SidebarMenu>
           <SidebarMenuItem>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <SidebarMenuButton
-                    tooltip={userName}
-                    className="data-open:bg-sidebar-accent"
-                  />
-                }
-              >
-                <span className="relative grid size-4 shrink-0 place-items-center">
-                  <Avatar size="sm" className="absolute size-6 rounded-md">
-                    {user.avatar_url && (
-                      <AvatarImage src={user.avatar_url} alt="" className="rounded-md" />
-                    )}
-                    <AvatarFallback className="rounded-md">{getUserInitials(user)}</AvatarFallback>
-                  </Avatar>
-                </span>
-                <span className="min-w-0 flex-1 truncate text-left group-data-[collapsible=icon]:hidden">
-                  {userName}
-                </span>
-                <ChevronDownIcon
-                  aria-hidden="true"
-                  className="ml-auto transition-transform duration-150 group-data-[collapsible=icon]:hidden group-data-open/menu-button:rotate-180 motion-reduce:transition-none"
-                />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                side="top"
-                align="start"
-                sideOffset={8}
-                className="min-w-56"
-              >
-                <DropdownMenuGroup>
-                  <DropdownMenuItem disabled={signingOut} onClick={onSignOut}>
-                    {signingOut ? (
-                      <Spinner aria-hidden="true" />
-                    ) : (
-                      <LogOutIcon aria-hidden="true" />
-                    )}
-                    <span>Sign out</span>
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <AccountMenu
+              user={user}
+              onSignOut={onSignOut}
+              signingOut={signingOut}
+            />
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>

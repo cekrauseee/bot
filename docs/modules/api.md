@@ -11,6 +11,7 @@
 - `src/modules/auth`: OTP, Google OpenID Connect, and session services.
 - `src/modules/conversations.ts`: private AI client and public conversation serialization.
 - `src/modules/agent-control-plane.ts`: leased execution, checkpoint projection, event replay, Redis fanout, and WebSocket transport.
+- `src/modules/codex-app-server.ts`: isolated Codex process lifecycle, ChatGPT browser or device login, account state, and rate-limit projection.
 - `src/modules/models.ts`: provider-aware public model capability catalog.
 - `src/db`: Drizzle schema, repository, connection, migration, drift checks, and local application seed.
 - `src/email.ts`: React Email composition and Resend delivery.
@@ -26,6 +27,18 @@
 ```
 
 The response is validated by an Elysia runtime schema and covered by API tests. Authentication routes live under `/auth`; their stable behavior is documented in [Authentication](authentication.md). The service does not add an `/api` path prefix because the API is hosted on its own domain. Interactive OpenAPI documentation is available at `/openapi`, with its JSON document at `/openapi/json`.
+
+Authenticated Codex provider-connection routes are:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/provider-connections/openai-codex` | Return safe connection, account, and rate-limit state |
+| `POST` | `/provider-connections/openai-codex/logins` | Start an owned ChatGPT login using the validated server login mode |
+| `GET` | `/provider-connections/openai-codex/logins/:loginId` | Poll one owned browser or device login attempt |
+| `DELETE` | `/provider-connections/openai-codex/logins/:loginId` | Cancel one owned login attempt |
+| `DELETE` | `/provider-connections/openai-codex` | Log out the connected OpenAI account |
+
+The API communicates with Codex app-server over JSONL `stdio`. `CODEX_LOGIN_MODE` is explicitly validated as `browser` or `device`, defaults to browser outside production and device in production, and has no silent fallback. Browser mode starts official app-server ChatGPT browser login and returns `auth_url`; device mode returns `verification_url` and `user_code`. Each application user receives a separate HMAC-derived `CODEX_HOME`; app-server uses file-backed credential storage and refreshes ChatGPT tokens itself. Public responses contain only login URLs/codes, safe account metadata, and normalized rate-limit windows. Provider tokens and native error bodies do not enter PostgreSQL, Redis, browser responses, or logs. Production exposes the connection only when an absolute durable `CODEX_HOME_ROOT` is configured.
 
 Authenticated conversation routes are:
 
