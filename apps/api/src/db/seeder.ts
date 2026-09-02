@@ -165,16 +165,23 @@ export async function seedApplication(
       lastMessageAt.getTime() + (lastFixtureMessage.durationSeconds ?? 0) * 1_000,
     )
 
+    const conversationModel = [...fixture.messages]
+      .reverse()
+      .find((message) => message.role === 'assistant')?.model ?? 'gpt-5.6-sol'
     await db.insert(conversations).values({
       id: conversationId,
       userId: user.id,
       title: fixture.title,
+      model: conversationModel,
+      modelUpdatedAt: lastUpdatedAt,
       createdAt: new Date(firstMessageAt.getTime() - 60_000),
       updatedAt: lastUpdatedAt,
     }).onConflictDoUpdate({
       target: conversations.id,
       set: {
         title: fixture.title,
+        model: conversationModel,
+        modelUpdatedAt: lastUpdatedAt,
         createdAt: new Date(firstMessageAt.getTime() - 60_000),
         updatedAt: lastUpdatedAt,
       },

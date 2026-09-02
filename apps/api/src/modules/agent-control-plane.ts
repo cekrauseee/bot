@@ -333,6 +333,7 @@ const upsertActivity = (
       query: typeof raw.query === 'string'
         ? raw.query
         : typeof raw.label === 'string' ? raw.label : 'Web search',
+      ...(typeof raw.status === 'string' ? { status: raw.status } : {}),
       ...(sources.length ? { results: sources } : {}),
     }
   } else {
@@ -340,7 +341,7 @@ const upsertActivity = (
   }
   const index = activities.findIndex((activity) => activity.id === id)
   if (index === -1) activities.push(next)
-  else activities[index] = next
+  else activities[index] = { ...activities[index], ...next }
 }
 
 const appendReasoningActivity = (

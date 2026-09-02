@@ -8,7 +8,7 @@ export type Speed = ProcessingMode
 export type TurnOptions = {
   retry_of?: string
   message: string
-  model: ModelName
+  model?: ModelName
   reasoning_effort: ReasoningEffort
   speed: Speed
 }
@@ -27,6 +27,8 @@ const iso = (value: Date | string) =>
 export const publicConversation = (conversation: Conversation) => ({
   id: conversation.id,
   title: conversation.title,
+  model: conversation.model,
+  model_updated_at: iso(conversation.modelUpdatedAt),
   project_id: conversation.projectId,
   pinned_order: conversation.pinnedOrder,
   pin_updated_at: conversation.pinUpdatedAt ? iso(conversation.pinUpdatedAt) : null,

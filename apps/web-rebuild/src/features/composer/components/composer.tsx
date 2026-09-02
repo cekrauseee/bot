@@ -35,25 +35,23 @@ import { Spinner } from "@/components/ui/spinner"
 import { shouldSubmitComposerKey } from "@/features/composer/composer-keyboard"
 import { shouldStackComposer } from "@/features/composer/composer-layout"
 import { useGlobalComposerInput } from "@/features/composer/hooks/use-global-composer-input"
+import type { ComposerModel } from "@/features/composer/model-catalog"
 import { cn } from "@/lib/utils"
 
-const OPENAI_MODELS = [
-  { label: "GPT-5.6 Sol", value: "gpt-5.6-sol" },
-  { label: "GPT-5.6 Terra", value: "gpt-5.6-terra" },
-  { label: "GPT-5.6 Luna", value: "gpt-5.6-luna" },
-] as const
+const SELECTABLE_MODEL_IDS = new Set([
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+])
 
-const REASONING_EFFORTS = [
-  { label: "None", value: "none" },
-  { label: "Low", value: "low" },
-  { label: "Medium", value: "medium" },
-  { label: "High", value: "high" },
-  { label: "Extra high", value: "xhigh" },
-  { label: "Max", value: "max" },
-] as const
+const reasoningEffortLabel = (value: string) => {
+  if (value === "none") return "None"
+  if (value === "xhigh") return "Extra high"
+  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`
+}
 
-type OpenAiModel = (typeof OPENAI_MODELS)[number]["value"]
-type ReasoningEffort = (typeof REASONING_EFFORTS)[number]["value"]
+const processingModeLabel = (value: string) =>
+  value === "fast" ? "Fast" : "Standard"
 
 export type ComposerSubmission = {
   fastMode: boolean
@@ -63,13 +61,27 @@ export type ComposerSubmission = {
 }
 
 type ComposerProps = {
+  model: string
+  models: ComposerModel[]
+  modelContextKey: string
+  modelDisabled?: boolean
+  modelScope: "conversation" | "default"
+  onModelChange: (model: string) => Promise<void>
   onSubmit?: (
     submission: ComposerSubmission,
     onAccepted: () => void
   ) => Promise<void>
 }
 
-export function Composer({ onSubmit }: ComposerProps) {
+export function Composer({
+  model,
+  models,
+  modelContextKey,
+  modelDisabled = false,
+  modelScope,
+  onModelChange,
+  onSubmit,
+}: ComposerProps) {
   const [message, setMessage] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const submittingRef = useRef(false)
@@ -78,16 +90,77 @@ export function Composer({ onSubmit }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [stackControls, setStackControls] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
-  const [model, setModel] = useState<OpenAiModel>("gpt-5.6-sol")
-  const [reasoningEffort, setReasoningEffort] =
-    useState<ReasoningEffort>("medium")
+  const [modelError, setModelError] = useState<{
+    contextKey: string
+    message: string
+  } | null>(null)
+  const [pendingModel, setPendingModel] = useState<{
+    contextKey: string
+    model: string
+  } | null>(null)
+  const [modelChanging, setModelChanging] = useState(false)
+  const modelChangingRef = useRef(false)
+  const [reasoningEffort, setReasoningEffort] = useState("medium")
   const [fastMode, setFastMode] = useState(false)
-  const selectedModel = OPENAI_MODELS.find((item) => item.value === model)!
-  const selectedReasoningEffort = REASONING_EFFORTS.find(
-    (item) => item.value === reasoningEffort
-  )!
+  const effectiveModel =
+    pendingModel?.contextKey === modelContextKey ? pendingModel.model : model
+  const visibleModelError =
+    modelError?.contextKey === modelContextKey ? modelError.message : null
+  const selectedModel = models.find((item) => item.id === effectiveModel)
+  const availableReasoningEfforts =
+    selectedModel?.reasoning_efforts.options ?? [reasoningEffort]
+  const effectiveReasoningEffort = availableReasoningEfforts.includes(
+    reasoningEffort
+  )
+    ? reasoningEffort
+    : (selectedModel?.reasoning_efforts.default ?? reasoningEffort)
+  const selectedReasoningEffortLabel = reasoningEffortLabel(
+    effectiveReasoningEffort
+  )
+  const requestedProcessingMode = fastMode ? "fast" : "standard"
+  const effectiveProcessingMode = selectedModel?.processing_modes.options.includes(
+    requestedProcessingMode
+  )
+    ? requestedProcessingMode
+    : (selectedModel?.processing_modes.default ?? "standard")
+  const effectiveFastMode = effectiveProcessingMode === "fast"
+  const selectedModelLabel = selectedModel?.label ?? effectiveModel
 
-  useGlobalComposerInput(textareaRef, !submitting)
+  const error = submitError ?? visibleModelError
+
+  useGlobalComposerInput(textareaRef, !submitting && !modelChanging)
+
+  const handleModelChange = async (value: string) => {
+    if (
+      value === effectiveModel ||
+      submittingRef.current ||
+      modelChangingRef.current ||
+      modelDisabled
+    ) {
+      return
+    }
+
+    modelChangingRef.current = true
+    setModelChanging(true)
+    setModelError(null)
+    setPendingModel({ contextKey: modelContextKey, model: value })
+
+    try {
+      await onModelChange(value)
+    } catch (changeError) {
+      setModelError({
+        contextKey: modelContextKey,
+        message:
+          changeError instanceof Error
+            ? changeError.message
+            : "Unable to save the selected model. Try again.",
+      })
+    } finally {
+      modelChangingRef.current = false
+      setModelChanging(false)
+      setPendingModel(null)
+    }
+  }
 
   const updateComposerLayout = useCallback(() => {
     const surface = composerSurfaceRef.current
@@ -146,7 +219,15 @@ export function Composer({ onSubmit }: ComposerProps) {
     event.preventDefault()
 
     const trimmedMessage = message.trim()
-    if (!trimmedMessage || !onSubmit || submittingRef.current) return
+    if (
+      !trimmedMessage ||
+      !onSubmit ||
+      submittingRef.current ||
+      modelChangingRef.current ||
+      modelDisabled
+    ) {
+      return
+    }
 
     submittingRef.current = true
     setSubmitting(true)
@@ -155,10 +236,10 @@ export function Composer({ onSubmit }: ComposerProps) {
     try {
       await onSubmit(
         {
-          fastMode,
+          fastMode: effectiveFastMode,
           message: trimmedMessage,
           model,
-          reasoningEffort,
+          reasoningEffort: effectiveReasoningEffort,
         },
         () => setMessage("")
       )
@@ -177,11 +258,11 @@ export function Composer({ onSubmit }: ComposerProps) {
   return (
     <form
       aria-label="Message composer"
-      aria-busy={submitting}
+      aria-busy={submitting || modelChanging}
       onSubmit={handleSubmit}
     >
       <FieldGroup className="gap-2">
-        <Field data-invalid={submitError ? true : undefined}>
+        <Field data-invalid={error ? true : undefined}>
           <FieldLabel htmlFor="composer-message" className="sr-only">
             Message
           </FieldLabel>
@@ -214,7 +295,7 @@ export function Composer({ onSubmit }: ComposerProps) {
               readOnly={submitting}
               aria-invalid={submitError ? true : undefined}
               aria-describedby={
-                submitError ? "composer-submit-error" : undefined
+                submitError ? "composer-error" : undefined
               }
               className="max-h-48 min-h-10 min-w-0 overflow-y-auto px-(--composer-inset) pt-(--composer-inset) pb-1"
             />
@@ -233,13 +314,20 @@ export function Composer({ onSubmit }: ComposerProps) {
               >
                 <DropdownMenu>
                   <DropdownMenuTrigger
-                    aria-label={`${selectedModel.label}, ${selectedReasoningEffort.label}${fastMode ? ", fast mode" : ""}`}
-                    disabled={submitting}
+                    aria-label={`${modelScope === "default" ? "Default model" : "Conversation model"}: ${selectedModelLabel}, ${selectedReasoningEffortLabel}${effectiveFastMode ? ", fast mode" : ""}`}
+                    aria-describedby={
+                      visibleModelError ? "composer-error" : undefined
+                    }
+                    disabled={submitting || modelChanging || modelDisabled}
                     render={
-                      <InputGroupButton variant="ghost-contrast" size="sm" />
+                      <InputGroupButton
+                        variant="ghost-contrast"
+                        size="sm"
+                        className="gap-1"
+                      />
                     }
                   >
-                    {fastMode && (
+                    {effectiveFastMode && (
                       <ZapIcon
                         aria-hidden="true"
                         data-icon="inline-start"
@@ -247,66 +335,72 @@ export function Composer({ onSubmit }: ComposerProps) {
                         strokeWidth={1.5}
                       />
                     )}
-                    <span className="truncate">{selectedModel.label}</span>
-                    <span className="font-normal text-muted-foreground">
-                      {selectedReasoningEffort.label}
+                    <span className="truncate font-semibold text-foreground">
+                      {selectedModelLabel}
                     </span>
+                    {effectiveReasoningEffort !== "none" ? (
+                      <span className="font-normal text-muted-foreground">
+                        {selectedReasoningEffortLabel}
+                      </span>
+                    ) : null}
                   </DropdownMenuTrigger>
                   <DropdownMenuContent
                     side="top"
                     align="end"
-                    className="min-w-52"
+                    className="w-max min-w-52"
                   >
                     <DropdownMenuGroup>
                       <DropdownMenuSub>
-                        <DropdownMenuSubTrigger className="[&>svg:last-child]:ml-2">
-                          Model
-                          <span className="ms-auto text-xs text-muted-foreground">
-                            {selectedModel.label}
+                        <DropdownMenuSubTrigger className="whitespace-nowrap [&>svg:last-child]:ml-2">
+                          {modelScope === "default" ? "Default model" : "Model"}
+                          <span className="ms-auto shrink-0 whitespace-nowrap text-xs text-muted-foreground">
+                            {selectedModelLabel}
                           </span>
                         </DropdownMenuSubTrigger>
                         <DropdownMenuSubContent className="min-w-44">
                           <DropdownMenuGroup>
                             <DropdownMenuRadioGroup
-                              value={model}
+                              value={effectiveModel}
                               onValueChange={(value) =>
-                                setModel(value as OpenAiModel)
+                                void handleModelChange(value)
                               }
                             >
-                              {OPENAI_MODELS.map((item) => (
-                                <DropdownMenuRadioItem
-                                  key={item.value}
-                                  value={item.value}
-                                >
-                                  {item.label}
-                                </DropdownMenuRadioItem>
-                              ))}
+                              {models
+                                .filter((item) =>
+                                  SELECTABLE_MODEL_IDS.has(item.id)
+                                )
+                                .map((item) => (
+                                  <DropdownMenuRadioItem
+                                    key={item.id}
+                                    value={item.id}
+                                  >
+                                    {item.label}
+                                  </DropdownMenuRadioItem>
+                                ))}
                             </DropdownMenuRadioGroup>
                           </DropdownMenuGroup>
                         </DropdownMenuSubContent>
                       </DropdownMenuSub>
 
                       <DropdownMenuSub>
-                        <DropdownMenuSubTrigger className="[&>svg:last-child]:ml-2">
+                        <DropdownMenuSubTrigger className="whitespace-nowrap [&>svg:last-child]:ml-2">
                           Effort
-                          <span className="ms-auto text-xs text-muted-foreground">
-                            {selectedReasoningEffort.label}
+                          <span className="ms-auto shrink-0 whitespace-nowrap text-xs text-muted-foreground">
+                            {selectedReasoningEffortLabel}
                           </span>
                         </DropdownMenuSubTrigger>
                         <DropdownMenuSubContent className="min-w-40">
                           <DropdownMenuGroup>
                             <DropdownMenuRadioGroup
-                              value={reasoningEffort}
-                              onValueChange={(value) =>
-                                setReasoningEffort(value as ReasoningEffort)
-                              }
+                              value={effectiveReasoningEffort}
+                              onValueChange={setReasoningEffort}
                             >
-                              {REASONING_EFFORTS.map((item) => (
+                              {availableReasoningEfforts.map((value) => (
                                 <DropdownMenuRadioItem
-                                  key={item.value}
-                                  value={item.value}
+                                  key={value}
+                                  value={value}
                                 >
-                                  {item.label}
+                                  {reasoningEffortLabel(value)}
                                 </DropdownMenuRadioItem>
                               ))}
                             </DropdownMenuRadioGroup>
@@ -315,26 +409,30 @@ export function Composer({ onSubmit }: ComposerProps) {
                       </DropdownMenuSub>
 
                       <DropdownMenuSub>
-                        <DropdownMenuSubTrigger className="[&>svg:last-child]:ml-2">
+                        <DropdownMenuSubTrigger className="whitespace-nowrap [&>svg:last-child]:ml-2">
                           Speed
-                          <span className="ms-auto text-xs text-muted-foreground">
-                            {fastMode ? "Fast" : "Standard"}
+                          <span className="ms-auto shrink-0 whitespace-nowrap text-xs text-muted-foreground">
+                            {processingModeLabel(effectiveProcessingMode)}
                           </span>
                         </DropdownMenuSubTrigger>
                         <DropdownMenuSubContent className="min-w-36">
                           <DropdownMenuGroup>
                             <DropdownMenuRadioGroup
-                              value={fastMode ? "fast" : "standard"}
+                              value={effectiveProcessingMode}
                               onValueChange={(value) =>
                                 setFastMode(value === "fast")
                               }
                             >
-                              <DropdownMenuRadioItem value="standard">
-                                Standard
-                              </DropdownMenuRadioItem>
-                              <DropdownMenuRadioItem value="fast">
-                                Fast
-                              </DropdownMenuRadioItem>
+                              {(selectedModel?.processing_modes.options ?? [
+                                "standard",
+                              ]).map((value) => (
+                                <DropdownMenuRadioItem
+                                  key={value}
+                                  value={value}
+                                >
+                                  {processingModeLabel(value)}
+                                </DropdownMenuRadioItem>
+                              ))}
                             </DropdownMenuRadioGroup>
                           </DropdownMenuGroup>
                         </DropdownMenuSubContent>
@@ -348,7 +446,12 @@ export function Composer({ onSubmit }: ComposerProps) {
                   variant="default"
                   size="icon"
                   aria-label={submitting ? "Sending message" : "Send message"}
-                  disabled={!message.trim() || submitting}
+                  disabled={
+                    !message.trim() ||
+                    submitting ||
+                    modelChanging ||
+                    modelDisabled
+                  }
                 >
                   {submitting ? (
                     <Spinner aria-hidden="true" data-icon="inline-start" />
@@ -359,7 +462,7 @@ export function Composer({ onSubmit }: ComposerProps) {
               </div>
             </InputGroupAddon>
           </InputGroup>
-          <FieldError id="composer-submit-error">{submitError}</FieldError>
+          <FieldError id="composer-error">{error}</FieldError>
         </Field>
       </FieldGroup>
     </form>

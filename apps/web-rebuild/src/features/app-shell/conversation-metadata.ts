@@ -10,18 +10,25 @@ export function mergeConversationTitle(
   current: ConversationSummary | undefined,
   incoming: ConversationSummary
 ) {
-  if (
-    !current ||
-    timestamp(incoming.title_updated_at) >= timestamp(current.title_updated_at)
-  ) {
-    return incoming
-  }
+  if (!current) return incoming
 
-  return {
-    ...incoming,
-    title: current.title,
-    title_updated_at: current.title_updated_at,
-  }
+  const merged =
+    timestamp(incoming.title_updated_at) >= timestamp(current.title_updated_at)
+      ? incoming
+      : {
+          ...incoming,
+          title: current.title,
+          title_updated_at: current.title_updated_at,
+        }
+
+  return timestamp(incoming.model_updated_at) >=
+    timestamp(current.model_updated_at)
+    ? merged
+    : {
+        ...merged,
+        model: current.model,
+        model_updated_at: current.model_updated_at,
+      }
 }
 
 export function mergeConversationCatalog(
@@ -48,6 +55,8 @@ export function parseConversationSummary(
   if (
     typeof conversation.id !== "string" ||
     typeof conversation.title !== "string" ||
+    typeof conversation.model !== "string" ||
+    typeof conversation.model_updated_at !== "string" ||
     (conversation.project_id !== null &&
       typeof conversation.project_id !== "string") ||
     (conversation.pinned_order !== null &&
@@ -65,6 +74,8 @@ export function parseConversationSummary(
   return {
     id: conversation.id,
     title: conversation.title,
+    model: conversation.model,
+    model_updated_at: conversation.model_updated_at,
     project_id: conversation.project_id,
     pinned_order: conversation.pinned_order,
     pin_updated_at: conversation.pin_updated_at,

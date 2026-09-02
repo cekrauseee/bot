@@ -21,12 +21,12 @@ function AssistantMessage({
   const hasResponse = content.trim().length > 0
 
   return (
-    <div className="flex w-full max-w-3xl min-w-0 flex-col gap-4">
+    <div className="flex w-full min-w-0 flex-col gap-4">
       {process ? (
         <ResponseProcess hasResponse={hasResponse} process={process} />
       ) : null}
       {hasResponse ? (
-        <div className="typeset typeset-docs max-w-[37em]">
+        <div className="typeset typeset-docs w-full max-w-none">
           <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml>
             {content}
           </ReactMarkdown>
@@ -49,14 +49,16 @@ export function ConversationMessage({
       align={align}
       className={cn((message.createdAt || message.content.trim()) && "pb-7")}
     >
-      <MessageContent className="max-w-3xl">
+      <MessageContent>
         <Bubble
           align={align}
           variant={isUser ? "secondary" : "ghost"}
-          className={cn(!isUser && "w-full")}
+          className={cn(!isUser && "w-full max-w-full")}
         >
           <BubbleContent
-            className={cn(isUser ? "px-4 py-2.5" : "w-full overflow-visible")}
+            className={cn(
+              isUser ? "px-4 py-2.5" : "w-full max-w-none overflow-visible"
+            )}
           >
             {isUser ? (
               <p className="whitespace-pre-wrap">{message.content}</p>

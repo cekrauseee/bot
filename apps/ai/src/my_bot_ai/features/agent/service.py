@@ -144,13 +144,68 @@ def _activity_id(event: dict[str, Any], name: str) -> str:
     return str(event.get("run_id") or event.get("id") or name)
 
 
+def _tool_label(name: str, status: str) -> str:
+    active = status == "in_progress"
+    failed = status == "failed"
+    labels = {
+        "ask_user": ("Asking for input", "Asked for input", "Could not ask for input"),
+        "filesystem_list": ("Inspecting files", "Inspected files", "Could not inspect files"),
+        "filesystem_read": ("Reading files", "Read files", "Could not read files"),
+        "filesystem_write": ("Updating files", "Updated files", "Could not update files"),
+        "shell_exec": ("Running a command", "Ran a command", "Could not run a command"),
+        "browser_open": ("Opening the browser", "Opened the browser", "Could not open the browser"),
+        "browser_snapshot": (
+            "Inspecting the page",
+            "Inspected the page",
+            "Could not inspect the page",
+        ),
+        "browser_click": (
+            "Interacting with the page",
+            "Interacted with the page",
+            "Could not interact with the page",
+        ),
+        "browser_type": (
+            "Entering text on the page",
+            "Entered text on the page",
+            "Could not enter text on the page",
+        ),
+        "browser_close": (
+            "Closing the browser",
+            "Closed the browser",
+            "Could not close the browser",
+        ),
+    }
+    pending, completed, error = labels.get(
+        name,
+        ("Using a tool", "Used a tool", "Could not use a tool"),
+    )
+    return error if failed else pending if active else completed
+
+
+def _tool_target(name: str, data: dict[str, Any]) -> str | None:
+    tool_input = data.get("input")
+    if not isinstance(tool_input, dict):
+        return None
+    field = {
+        "filesystem_list": "path",
+        "filesystem_read": "path",
+        "filesystem_write": "path",
+        "shell_exec": "command",
+        "browser_open": "url",
+    }.get(name)
+    value = tool_input.get(field) if field else None
+    return value[:4_096] if isinstance(value, str) and value else None
+
+
 def _tool_activity(event: dict[str, Any], data: dict[str, Any], status: str) -> dict[str, Any]:
     name = _event_name(event, data)
+    target = _tool_target(name, data)
     return {
         "id": _activity_id(event, name),
         "name": name,
-        "label": name.replace("_", " ").strip().capitalize(),
+        "label": _tool_label(name, status),
         "status": status,
+        **({"target": target} if target else {}),
     }
 
 
@@ -288,7 +343,9 @@ def _tool_event(event: dict[str, Any]) -> NormalizedEvent | None:
             return None
         child = _tool_activity(event, data, status)
         child["name"] = "child_agent"
-        child["label"] = "Child agent"
+        child["label"] = (
+            "Delegating a task" if status == "in_progress" else "Delegated a task"
+        )
         return NormalizedEvent(type=event_type, data={"child": child})
 
     event_type = {

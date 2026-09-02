@@ -191,9 +191,14 @@ class ActivityStream:
                 }
             },
         }
-        yield {"event": "on_tool_start", "name": "runtime_read", "run_id": "tool-1", "data": {}}
-        yield {"event": "on_tool_stream", "name": "runtime_read", "run_id": "tool-1", "data": {}}
-        yield {"event": "on_tool_end", "name": "runtime_read", "run_id": "tool-1", "data": {}}
+        yield {
+            "event": "on_tool_start",
+            "name": "filesystem_read",
+            "run_id": "tool-1",
+            "data": {"input": {"path": "/workspace/package.json"}},
+        }
+        yield {"event": "on_tool_stream", "name": "filesystem_read", "run_id": "tool-1", "data": {}}
+        yield {"event": "on_tool_end", "name": "filesystem_read", "run_id": "tool-1", "data": {}}
         yield {
             "event": "on_tool_start",
             "name": "delegate_to_child_agent",
@@ -318,6 +323,20 @@ def test_plan_tool_and_child_events_are_normalized() -> None:
     assert events[0]["data"]["plan"] == [
         {"id": "one", "title": "First", "status": "in_progress"}
     ]
+    assert events[1]["data"]["tool"] == {
+        "id": "tool-1",
+        "name": "filesystem_read",
+        "label": "Reading files",
+        "status": "in_progress",
+        "target": "/workspace/package.json",
+    }
+    assert events[3]["data"]["tool"] == {
+        "id": "tool-1",
+        "name": "filesystem_read",
+        "label": "Read files",
+        "status": "completed",
+    }
+    assert events[-1]["data"]["child"]["label"] == "Delegated a task"
     assert events[-1]["data"]["child"]["status"] == "completed"
 
 

@@ -2,6 +2,7 @@ import type { TurnStreamEvent } from "@/features/composer/api"
 import type {
   ConversationMessageData,
   ProcessActivity,
+  ProcessActivityStatus,
   ProcessSearchSource,
 } from "@/features/conversation/model"
 
@@ -12,6 +13,7 @@ export type ConversationRecord = {
   processStartedAt?: number
   runId?: string
   status: "error" | "idle" | "loading" | "ready"
+  turnSpacerAnchorId?: string
   version: number
 }
 
@@ -22,6 +24,14 @@ export const emptyConversationRecord = (): ConversationRecord => ({
   version: 0,
 })
 
+export function consumeTurnSpacerAnchor(
+  current: ConversationRecord,
+  anchorId: string
+) {
+  if (current.turnSpacerAnchorId !== anchorId) return current
+  return { ...current, turnSpacerAnchorId: undefined }
+}
+
 const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -29,6 +39,11 @@ const record = (value: unknown): Record<string, unknown> | null =>
 
 const string = (value: unknown) =>
   typeof value === "string" ? value : undefined
+
+const activityStatus = (value: unknown): ProcessActivityStatus | undefined =>
+  ["completed", "failed", "in_progress"].includes(String(value))
+    ? (value as ProcessActivityStatus)
+    : undefined
 
 function parseSource(
   value: unknown,
@@ -79,6 +94,9 @@ export function parseProcessActivity(value: unknown): ProcessActivity | null {
       id,
       type: "search",
       query: activity.query,
+      ...(activityStatus(activity.status)
+        ? { status: activityStatus(activity.status) }
+        : {}),
       ...(results?.length ? { results } : {}),
       ...(typeof activity.moreCount === "number"
         ? { moreCount: activity.moreCount }
@@ -106,11 +124,10 @@ export function parseProcessActivity(value: unknown): ProcessActivity | null {
       id,
       type: "tool",
       action: string(activity.action) ?? string(activity.name) ?? "tool",
-      target:
-        string(activity.target) ??
-        string(activity.label) ??
-        string(activity.name) ??
-        "Tool activity",
+      ...(string(activity.target) ? { target: string(activity.target) } : {}),
+      ...(activityStatus(activity.status)
+        ? { status: activityStatus(activity.status) }
+        : {}),
       ...(typeof activity.additions === "number"
         ? { additions: activity.additions }
         : {}),
@@ -127,6 +144,9 @@ export function parseProcessActivity(value: unknown): ProcessActivity | null {
       kind: string(activity.kind) ?? "message",
       label: string(activity.label) ?? "Activity",
       ...(string(activity.detail) ? { detail: string(activity.detail) } : {}),
+      ...(activityStatus(activity.status)
+        ? { status: activityStatus(activity.status) }
+        : {}),
     }
   }
 
@@ -136,17 +156,21 @@ export function parseProcessActivity(value: unknown): ProcessActivity | null {
       id,
       type: "tool",
       action: string(activity.name) ?? "tool",
-      target:
-        string(activity.label) ?? string(activity.name) ?? "Tool activity",
+      ...(string(activity.target) ? { target: string(activity.target) } : {}),
+      ...(activityStatus(activity.status)
+        ? { status: activityStatus(activity.status) }
+        : {}),
     }
   }
   if (eventType?.startsWith("child.")) {
     return {
       id,
       type: "trace",
-      kind: "message",
-      label: string(activity.label) ?? "Child agent",
-      ...(string(activity.name) ? { detail: string(activity.name) } : {}),
+      kind: "child",
+      label: "Delegated a task",
+      ...(activityStatus(activity.status)
+        ? { status: activityStatus(activity.status) }
+        : {}),
     }
   }
 
@@ -281,8 +305,30 @@ function upsertActivity(
   const index = activities.findIndex((entry) => entry.id === activity.id)
   if (index === -1) return [...activities, activity]
   return activities.map((entry, entryIndex) =>
-    entryIndex === index ? activity : entry
+    entryIndex === index ? mergeActivity(entry, activity) : entry
   )
+}
+
+function mergeActivity(
+  current: ProcessActivity,
+  next: ProcessActivity
+): ProcessActivity {
+  if (current.type === "step" && next.type === "step") {
+    return { ...current, ...next }
+  }
+  if (current.type === "text" && next.type === "text") {
+    return { ...current, ...next }
+  }
+  if (current.type === "search" && next.type === "search") {
+    return { ...current, ...next }
+  }
+  if (current.type === "tool" && next.type === "tool") {
+    return { ...current, ...next }
+  }
+  if (current.type === "trace" && next.type === "trace") {
+    return { ...current, ...next }
+  }
+  return next
 }
 
 function eventActivity(event: TurnStreamEvent): ProcessActivity | null {
@@ -308,6 +354,9 @@ function eventActivity(event: TurnStreamEvent): ProcessActivity | null {
       id,
       type: "search",
       query: string(raw.query) ?? string(raw.label) ?? "Web search",
+      ...(activityStatus(raw.status)
+        ? { status: activityStatus(raw.status) }
+        : {}),
       ...(results?.length ? { results } : {}),
     }
   }
@@ -316,16 +365,21 @@ function eventActivity(event: TurnStreamEvent): ProcessActivity | null {
       id,
       type: "tool",
       action: string(raw.name) ?? "tool",
-      target: string(raw.label) ?? string(raw.name) ?? "Tool activity",
+      ...(string(raw.target) ? { target: string(raw.target) } : {}),
+      ...(activityStatus(raw.status)
+        ? { status: activityStatus(raw.status) }
+        : {}),
     }
   }
   if (key === "child") {
     return {
       id,
       type: "trace",
-      kind: "message",
-      label: string(raw.label) ?? "Child agent",
-      ...(string(raw.name) ? { detail: string(raw.name) } : {}),
+      kind: "child",
+      label: "Delegated a task",
+      ...(activityStatus(raw.status)
+        ? { status: activityStatus(raw.status) }
+        : {}),
     }
   }
   return null
@@ -360,6 +414,7 @@ export function applyTurnEvent(
       messages: upsertMessages(next.messages, [user, assistant]),
       processStartedAt,
       runId: event.run_id,
+      turnSpacerAnchorId: user.id,
       version: next.version + 1,
     }
   }

@@ -13,6 +13,7 @@ import {
   ProjectRepository,
   normalizeEmail,
   type AgentRun,
+  type User,
 } from './db/repository.js'
 import type { Database } from './db/database.js'
 import { GoogleOAuthService } from './modules/auth/oauth.js'
@@ -103,12 +104,14 @@ const challengeSchema = t.Object({
   expires_in_seconds: t.Integer(),
   resend_after_seconds: t.Integer(),
 })
+const modelSchema = t.Union(modelCatalog.map(({ id }) => t.Literal(id)))
 const userSchema = t.Object({
   id: t.String(),
   email: t.String({ format: 'email' }),
   first_name: t.Union([t.String(), t.Null()]),
   last_name: t.Union([t.String(), t.Null()]),
   avatar_url: t.Union([t.String(), t.Null()]),
+  default_model: t.String(),
 })
 const otpRequestBody = t.Object({ email: t.String({ format: 'email' }) })
 const otpVerifyBody = t.Object({
@@ -388,12 +391,13 @@ const cookieValue = (request: Request, name: string) => {
   return undefined
 }
 
-const userResponse = (user: { id: string; email: string; firstName: string | null; lastName: string | null; avatarUrl: string | null }) => ({
+const userResponse = (user: Pick<User, 'id' | 'email' | 'firstName' | 'lastName' | 'avatarUrl' | 'defaultModel'>) => ({
   id: user.id,
   email: user.email,
   first_name: user.firstName,
   last_name: user.lastName,
   avatar_url: user.avatarUrl,
+  default_model: user.defaultModel,
 })
 
 export function createApp(settings: Settings, services: Services, peerResolver: PeerResolver = nodeSocketPeer) {
@@ -627,6 +631,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   const conversationTitleBody = t.Object({
     title: t.String({ minLength: 1, maxLength: 120 }),
   })
+  const modelPreferenceBody = t.Object({ model: modelSchema })
   const projectOrderBody = t.Object({
     project_ids: t.Array(t.String({ format: 'uuid' })),
   })
@@ -640,7 +645,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   const turnBody = t.Object({
     retry_of: t.Optional(t.String({ format: 'uuid' })),
     message: t.String({ minLength: 1, maxLength: 1_048_576 }),
-    model: t.Union(modelCatalog.map(({ id }) => t.Literal(id))),
+    model: t.Optional(modelSchema),
     reasoning_effort: t.Union([
       t.Literal('none'),
       t.Literal('low'),
@@ -700,6 +705,15 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     await sessionUser(request)
     return publicModelCatalog()
   })
+
+  app.patch('/preferences/model', async ({ request, body }) => {
+    browserOrigin(request)
+    const user = await sessionUser(request)
+    const updated = await services.database.transaction((db) =>
+      new AuthRepository(db).updateDefaultModel(user.id, body.model))
+    if (!updated) throw new AuthError('not_found', 'Not Found', 404)
+    return userResponse(updated)
+  }, { body: modelPreferenceBody })
 
   app.get('/projects', async ({ request }) => {
     const user = await sessionUser(request)
@@ -856,6 +870,23 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     return publicConversation(conversation)
   }, { params: conversationParams, body: conversationTitleBody })
 
+  app.patch('/conversations/:conversationId/model', async ({ request, params, body, set }) => {
+    browserOrigin(request)
+    const user = await sessionUser(request)
+    const conversation = await services.database.transaction(async (db) => {
+      const repository = new ConversationRepository(db)
+      const owned = await repository.lockOwned(user.id, params.conversationId)
+      if (!owned) return undefined
+      if (owned.model === body.model) return owned
+      return repository.updateModel(user.id, owned, body.model)
+    })
+    if (!conversation) {
+      set.status = 404
+      return { detail: { code: 'not_found', message: 'Not Found' } }
+    }
+    return publicConversation(conversation)
+  }, { params: conversationParams, body: modelPreferenceBody })
+
   app.delete('/conversations/:conversationId', async ({ request, params, set }) => {
     browserOrigin(request)
     const user = await sessionUser(request)
@@ -949,34 +980,47 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
 
   const beginTurn = async (
     request: Request,
-    userId: string,
+    user: User,
     options: TurnOptions,
     conversationId?: string,
   ) => {
     const context = requestContexts.get(request)
-    if (context) context.userId = userId
+    if (context) context.userId = user.id
     const message = options.message.trim()
     if (!message) throw new AuthError('invalid_message', 'Enter a message to continue.', 400)
     if (options.retry_of && !conversationId) {
       throw new AuthError('retry_unavailable', 'Open the conversation before retrying this response.', 409)
     }
-    if (!validModelSelection(options.model, options.reasoning_effort, options.speed)) {
-      throw new AuthError(
-        'invalid_model_options',
-        'The selected reasoning effort or processing mode is not available for this model.',
-        400,
-      )
-    }
-    const definition = modelDefinition(options.model)!
     try {
       const result = await services.database.transaction(async (db) => {
         const repository = new ConversationRepository(db)
-        const conversation = conversationId
-          ? await repository.lockOwned(userId, conversationId)
-          : await repository.create(userId, conversationTitle(message))
+        let conversation = conversationId
+          ? await repository.lockOwned(user.id, conversationId)
+          : undefined
+        const requestedModel = options.model ?? (conversation?.model || user.defaultModel)
+        const definition = modelDefinition(requestedModel)
+        if (!definition || !validModelSelection(
+          definition.id,
+          options.reasoning_effort,
+          options.speed,
+        )) {
+          throw new AuthError(
+            'invalid_model_options',
+            'The selected reasoning effort or processing mode is not available for this model.',
+            400,
+          )
+        }
+        if (!conversationId) {
+          conversation = await repository.create(user.id, conversationTitle(message), definition.id)
+          if (user.defaultModel !== definition.id) {
+            await new AuthRepository(db).updateDefaultModel(user.id, definition.id)
+          }
+        } else if (conversation && conversation.model !== definition.id) {
+          conversation = await repository.updateModel(user.id, conversation, definition.id)
+        }
         if (!conversation) throw new AuthError('not_found', 'Not Found', 404)
         const modelOptions = {
-          model: options.model,
+          model: definition.id,
           reasoningEffort: options.reasoning_effort,
           speed: options.speed,
         }
@@ -988,10 +1032,10 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
         const queued = await runs.create({
           id: crypto.randomUUID(),
           turnId: crypto.randomUUID(),
-          userId,
+          userId: user.id,
           conversationId: resolvedConversation.id,
           assistantMessageId: created.assistant.id,
-          model: options.model,
+          model: definition.id,
           provider: definition.provider,
           reasoningEffort: options.reasoning_effort,
           speed: options.speed,
@@ -1035,13 +1079,13 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   app.post('/conversations/turns', async ({ request, body }) => {
     browserOrigin(request)
     const user = await sessionUser(request)
-    return beginTurn(request, user.id, body)
+    return beginTurn(request, user, body)
   }, { body: turnBody })
 
   app.post('/conversations/:conversationId/turns', async ({ request, params, body }) => {
     browserOrigin(request)
     const user = await sessionUser(request)
-    return beginTurn(request, user.id, body, params.conversationId)
+    return beginTurn(request, user, body, params.conversationId)
   }, { body: turnBody, params: conversationParams })
 
   app.get('/agent-runs', async ({ request }) => {

@@ -1,8 +1,8 @@
-import { useEffect } from "react"
+import { useCallback, useEffect } from "react"
 import { Navigate } from "react-router-dom"
 
 import { useAppShell } from "@/features/app-shell/app-shell-context"
-import { Spinner } from "@/components/ui/spinner"
+import { ConversationSkeleton } from "@/features/conversation/components/conversation-skeleton"
 import { ConversationView } from "@/features/conversation/components/conversation-view"
 
 export default function ConversationPage() {
@@ -11,19 +11,34 @@ export default function ConversationPage() {
     activeConversationRecord,
     catalogFailed,
     catalogLoading,
+    consumeTurnSpacerAnchor,
     loadConversation,
   } = useAppShell()
+  const previewConversationSkeleton =
+    import.meta.env.DEV &&
+    new URLSearchParams(window.location.search).get("preview") ===
+      "conversation-skeleton"
 
   useEffect(() => {
     if (activeConversation) void loadConversation(activeConversation.id)
   }, [activeConversation, loadConversation])
 
+  const activeConversationId = activeConversation?.id
+  const handleTurnSpacerAnchorConsumed = useCallback(
+    (anchorId: string) => {
+      if (activeConversationId) {
+        consumeTurnSpacerAnchor(activeConversationId, anchorId)
+      }
+    },
+    [activeConversationId, consumeTurnSpacerAnchor]
+  )
+
+  if (previewConversationSkeleton) {
+    return <ConversationSkeleton />
+  }
+
   if (catalogLoading && !activeConversation) {
-    return (
-      <div className="flex size-full items-center justify-center">
-        <Spinner aria-label="Loading conversation" />
-      </div>
-    )
+    return <ConversationSkeleton />
   }
 
   if (!activeConversation && !catalogFailed) {
@@ -36,11 +51,7 @@ export default function ConversationPage() {
       activeConversationRecord.status === "loading") &&
       !activeConversationRecord.messages.length)
   ) {
-    return (
-      <div className="flex size-full items-center justify-center">
-        <Spinner aria-label="Loading conversation messages" />
-      </div>
-    )
+    return <ConversationSkeleton />
   }
 
   if (activeConversationRecord.status === "error") {
@@ -53,5 +64,16 @@ export default function ConversationPage() {
     )
   }
 
-  return <ConversationView messages={activeConversationRecord.messages} />
+  if (!activeConversation) {
+    return <Navigate to="/" replace />
+  }
+
+  return (
+    <ConversationView
+      key={activeConversation.id}
+      messages={activeConversationRecord.messages}
+      onTurnSpacerAnchorConsumed={handleTurnSpacerAnchorConsumed}
+      turnSpacerAnchorId={activeConversationRecord.turnSpacerAnchorId}
+    />
+  )
 }

@@ -5,6 +5,8 @@ export type ProcessSearchSource = {
   url?: string
 }
 
+export type ProcessActivityStatus = "completed" | "failed" | "in_progress"
+
 export type ProcessActivity =
   | {
       id: string
@@ -24,6 +26,7 @@ export type ProcessActivity =
       moreCount?: number
       query: string
       results?: readonly ProcessSearchSource[]
+      status?: ProcessActivityStatus
       type: "search"
     }
   | {
@@ -31,7 +34,8 @@ export type ProcessActivity =
       additions?: number
       deletions?: number
       id: string
-      target: string
+      status?: ProcessActivityStatus
+      target?: string
       type: "tool"
     }
   | {
@@ -39,6 +43,7 @@ export type ProcessActivity =
       id: string
       kind: string
       label: string
+      status?: ProcessActivityStatus
       type: "trace"
     }
 

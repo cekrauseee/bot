@@ -8,11 +8,8 @@ import {
   type ReactNode,
 } from "react"
 
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar"
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
+import { cn } from "@/lib/utils"
 import { AppShellContext } from "@/features/app-shell/app-shell-context"
 import { AppSidebar } from "@/features/app-shell/components/app-sidebar"
 import { useLiveConversationTitles } from "@/features/app-shell/hooks/use-live-conversation-titles"
@@ -42,6 +39,7 @@ export function AuthenticatedAppShell({
 }: AuthenticatedAppShellProps) {
   const [signingOut, setSigningOut] = useState(false)
   const [signOutFailed, setSignOutFailed] = useState(false)
+  const [defaultModel, setDefaultModel] = useState(user.default_model)
   const turnController = useRef<AbortController | null>(null)
   const shellRef = useRef<HTMLElement>(null)
   const composerDockRef = useRef<HTMLElement>(null)
@@ -49,9 +47,11 @@ export function AuthenticatedAppShell({
   const {
     activeRecord: activeConversationRecord,
     applyEvent: applyConversationEvent,
+    consumeTurnSpacerAnchor,
     loadConversation,
   } = useConversations(activeConversationId)
   const refreshCatalog = catalog.refresh
+  const setConversationModel = catalog.setConversationModel
   const upsertConversation = catalog.upsertConversation
   const activeConversation =
     catalog.conversations.find(
@@ -67,12 +67,18 @@ export function AuthenticatedAppShell({
           ? "Loading conversation"
           : "Conversation"
       : "New conversation")
+  const centeredComposer = activeConversationId === null
+  const greetingName = user.first_name?.trim()
+  const greeting = greetingName
+    ? `What’s on your mind today, ${greetingName}?`
+    : "What’s on your mind today?"
   const context = useMemo(
     () => ({
       activeConversation,
       activeConversationRecord,
       catalogFailed,
       catalogLoading: catalog.loading,
+      consumeTurnSpacerAnchor,
       loadConversation,
     }),
     [
@@ -80,6 +86,7 @@ export function AuthenticatedAppShell({
       activeConversationRecord,
       catalogFailed,
       catalog.loading,
+      consumeTurnSpacerAnchor,
       loadConversation,
     ]
   )
@@ -192,6 +199,19 @@ export function AuthenticatedAppShell({
     ]
   )
 
+  const handleModelChange = useCallback(
+    async (model: string) => {
+      if (activeConversationId) {
+        await setConversationModel(activeConversationId, model)
+        return
+      }
+
+      const updated = await authApi.setDefaultModel(model)
+      setDefaultModel(updated.default_model)
+    },
+    [activeConversationId, setConversationModel]
+  )
+
   return (
     <AppShellContext.Provider value={context}>
       <SidebarProvider className="h-svh min-h-0 overflow-hidden">
@@ -215,23 +235,45 @@ export function AuthenticatedAppShell({
           id="main-content"
           className="min-h-0 overflow-hidden"
         >
-          <header className="flex h-12 min-w-0 shrink-0 items-center gap-2 border-b px-3.5">
-            <SidebarTrigger aria-label="Open sidebar" className="md:hidden" />
-            <h1
-              id="conversation-title"
-              className="min-w-0 truncate text-sm leading-5 font-medium"
-              title={conversationTitle}
-            >
-              {conversationTitle}
-            </h1>
-          </header>
+          {!centeredComposer && (
+            <header className="flex h-12 min-w-0 shrink-0 items-center border-b px-3.5">
+              <h1
+                id="conversation-title"
+                className="min-w-0 truncate text-sm leading-5 font-medium"
+                title={conversationTitle}
+              >
+                {conversationTitle}
+              </h1>
+            </header>
+          )}
           <div className="min-h-0 flex-1">{children}</div>
           <footer
             ref={composerDockRef}
-            className="pointer-events-none absolute inset-x-0 bottom-0 w-full px-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
+            className={cn(
+              "pointer-events-none absolute inset-x-0 w-full px-4",
+              centeredComposer
+                ? "top-1/2 -translate-y-1/2"
+                : "bottom-0 pb-[max(1rem,env(safe-area-inset-bottom))]"
+            )}
           >
             <div className="pointer-events-auto mx-auto w-full max-w-3xl">
-              <Composer onSubmit={handleComposerSubmit} />
+              {centeredComposer && (
+                <h1 className="mb-4 text-center text-xl font-medium tracking-tight text-balance">
+                  {greeting}
+                </h1>
+              )}
+              <Composer
+                model={activeConversation?.model ?? defaultModel}
+                models={catalog.models}
+                modelContextKey={activeConversationId ?? "new"}
+                modelDisabled={
+                  catalog.models.length === 0 ||
+                  (activeConversationId !== null && activeConversation === null)
+                }
+                modelScope={activeConversationId ? "conversation" : "default"}
+                onModelChange={handleModelChange}
+                onSubmit={handleComposerSubmit}
+              />
             </div>
           </footer>
         </SidebarInset>

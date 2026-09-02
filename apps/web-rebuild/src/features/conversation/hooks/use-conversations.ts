@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { conversationApi } from "@/features/conversation/api"
 import {
   applyTurnEvent,
+  consumeTurnSpacerAnchor,
   emptyConversationRecord,
   recordFromDetail,
   type ConversationRecord,
@@ -109,11 +110,25 @@ export function useConversations(activeConversationId: string | null) {
     []
   )
 
+  const consumeSpacerAnchor = useCallback(
+    (conversationId: string, anchorId: string) => {
+      setRecords((state) => {
+        const current = state[conversationId]
+        if (!current) return state
+        const next = consumeTurnSpacerAnchor(current, anchorId)
+        if (next === current) return state
+        return { ...state, [conversationId]: next }
+      })
+    },
+    []
+  )
+
   return {
     activeRecord: activeConversationId
       ? (records[activeConversationId] ?? idleRecord)
       : null,
     applyEvent,
+    consumeTurnSpacerAnchor: consumeSpacerAnchor,
     loadConversation,
   }
 }

@@ -11,16 +11,19 @@ import {
   mergeConversationTitle,
 } from "@/features/app-shell/conversation-metadata"
 import { apiErrorMessage } from "@/lib/api"
+import type { ComposerModel } from "@/features/composer/model-catalog"
 
 type SidebarCatalog = {
   activeRuns: ActiveTitleRun[]
   conversations: ConversationSummary[]
+  models: ComposerModel[]
   projects: ProjectSummary[]
 }
 
 const emptyCatalog: SidebarCatalog = {
   activeRuns: [],
   conversations: [],
+  models: [],
   projects: [],
 }
 
@@ -49,6 +52,7 @@ export function useSidebarCatalog(enabled: boolean) {
               current.conversations,
               nextCatalog.conversations
             ),
+            models: nextCatalog.models,
             projects: nextCatalog.projects,
           }))
         }
@@ -235,6 +239,18 @@ export function useSidebarCatalog(enabled: boolean) {
     [replaceConversation, runMutation]
   )
 
+  const setConversationModel = useCallback(
+    (conversationId: string, model: string) =>
+      runMutation(
+        `conversation-model:${conversationId}`,
+        "Unable to save this conversation model. Try again.",
+        () => appShellApi.setConversationModel(conversationId, model),
+        replaceConversation,
+        false
+      ),
+    [replaceConversation, runMutation]
+  )
+
   const renameProject = useCallback(
     (projectId: string, name: string) =>
       runMutation(
@@ -338,6 +354,7 @@ export function useSidebarCatalog(enabled: boolean) {
     renameProject,
     reorderPinnedConversations,
     reorderProjects,
+    setConversationModel,
     setConversationPinned,
     upsertConversation,
   }
