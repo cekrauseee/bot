@@ -15,6 +15,7 @@ const LOCAL_DEFAULTS = new Map([
   ['RUNTIME_BASE_URL', 'http://localhost:8002'],
   ['RUNTIME_PORT', '8002'],
   ['RUNTIME_ENVIRONMENT', 'development'],
+  ['RUNTIME_PROVIDER', 'docker'],
 ])
 const GOOGLE_CONFIG_KEYS = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET']
 const RESEND_CONFIG_KEYS = ['RESEND_API_KEY']

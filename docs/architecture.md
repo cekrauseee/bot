@@ -25,7 +25,7 @@ The application API uses an Elysia application factory with the official Node.js
 
 The AI service uses a FastAPI application factory in `my_bot_ai.main`. It accepts only bearer-authenticated service requests from the application API. LangGraph checkpoints own resumable orchestration; OpenAI, xAI, and OpenRouter adapters expose provider-aware models. The service normalizes agent, tool, child, plan, question, browser, and terminal events. It calls the runtime with a separate bearer token and does not own browser authentication or product persistence.
 
-The runtime maps one durable user workspace to an isolated Vercel Sandbox. It executes unprivileged filesystem, process, and run-scoped browser tools with deterministic operation IDs. Project paths choose a run's starting directory without restricting access to the rest of `/workspace`.
+The runtime maps one durable user workspace to one isolated execution environment. Development uses a hardened local Docker container with persistent named volumes; production uses a persistent Vercel Sandbox. Both providers execute unprivileged filesystem, process, and run-scoped browser tools with deterministic operation IDs. Project paths choose a run's starting directory without restricting access to the rest of `/workspace`.
 
 ## Data Flow
 

@@ -224,4 +224,22 @@ describe('runtime HTTP boundary', () => {
     expect(ready.status).toBe(200)
     expect(await ready.json()).toEqual({ status: 'ready', service: 'runtime' })
   })
+
+  it('reports a provider-specific readiness reason', async () => {
+    const service = new RuntimeService({ providerFactory: async () => createFakeRuntimeProvider() })
+    const server = createRuntimeServer({
+      service,
+      serviceToken: 'service-secret',
+      isReady: () => false,
+      unavailableReason: () => 'docker_unavailable',
+    })
+    servers.push(server)
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const port = (server.address() as AddressInfo).port
+
+    const ready = await fetch(`http://127.0.0.1:${port}/ready`)
+    expect(ready.status).toBe(503)
+    expect(await ready.json()).toEqual({ status: 'unavailable', service: 'runtime', reason: 'docker_unavailable' })
+  })
 })

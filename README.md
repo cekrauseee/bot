@@ -7,7 +7,7 @@ myBot is a portfolio project for a durable cloud agent. It includes passwordless
 - `apps/web`: Vite, React, React Router, Tailwind CSS 4, and beUI.
 - `apps/api`: Node.js, TypeScript, Elysia, Drizzle, PostgreSQL, and Redis.
 - `apps/ai`: Python 3.14 and FastAPI boundary for model capabilities.
-- `apps/runtime`: Node.js boundary for Vercel Sandbox filesystem, shell, and browser tools.
+- `apps/runtime`: Node.js boundary for isolated filesystem, shell, and browser tools through local Docker or Vercel Sandbox.
 - `packages/email`: React Email source and consumable package for transactional messages.
 
 ## Development

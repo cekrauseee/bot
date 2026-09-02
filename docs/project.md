@@ -15,7 +15,7 @@ The current implementation includes:
 - an Elysia application API with health, authentication, conversation, and streaming endpoints;
 - an authenticated FastAPI boundary using LangChain with OpenAI, xAI, and OpenRouter integrations;
 - durable LangGraph checkpoints, resumable questions, plans, and recursive child agents;
-- a private Vercel Sandbox runtime for a global filesystem, unprivileged processes, and run-scoped browsers;
+- a private runtime using local Docker in development and Vercel Sandbox in production for a global filesystem, unprivileged processes, and run-scoped browsers;
 - passwordless email OTP and Google OpenID Connect login;
 - PostgreSQL user, identity, and session persistence;
 - Redis-backed OTP challenges and abuse limits;
@@ -24,7 +24,7 @@ The current implementation includes:
 - GPT-5.6 Sol, Terra, and Luna, Grok 4.6 and 4.3, and GLM 5.2 through OpenRouter with provider-aware reasoning and processing controls;
 - durable background runs, cursor-based replay, and transient browser picture-in-picture frames.
 
-Production deployment is not implemented yet. Real model calls require the corresponding server-side provider key. Runtime tools additionally require Vercel Sandbox credentials.
+Production deployment is not implemented yet. Real model calls require the corresponding server-side provider key. Development runtime tools require Docker; the production runtime requires Vercel Sandbox credentials.
 
 ## Core Concepts
 

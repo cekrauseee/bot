@@ -19,6 +19,7 @@ RUNTIME_SERVICE_TOKEN=replace-with-runtime-service-token
 RUNTIME_BASE_URL=http://localhost:8002
 RUNTIME_PORT=8002
 RUNTIME_ENVIRONMENT=development
+RUNTIME_PROVIDER=docker
 GOOGLE_CLIENT_ID=example.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=replace-with-google-client-secret
 RESEND_API_KEY=re_example
@@ -106,7 +107,8 @@ test('prepareEnvironment aligns missing runtime settings and preserves overrides
     example
       .replace('RUNTIME_BASE_URL=http://localhost:8002\n', '')
       .replace('RUNTIME_PORT=8002\n', 'RUNTIME_PORT=9002\n')
-      .replace('RUNTIME_ENVIRONMENT=development\n', ''),
+      .replace('RUNTIME_ENVIRONMENT=development\n', '')
+      .replace('RUNTIME_PROVIDER=docker\n', ''),
   )
 
   const result = await prepareEnvironment(root, {
@@ -118,6 +120,7 @@ test('prepareEnvironment aligns missing runtime settings and preserves overrides
   assert.equal(values.get('RUNTIME_BASE_URL'), 'http://localhost:8002')
   assert.equal(values.get('RUNTIME_PORT'), '9002')
   assert.equal(values.get('RUNTIME_ENVIRONMENT'), 'development')
+  assert.equal(values.get('RUNTIME_PROVIDER'), 'docker')
 })
 
 test('prepareEnvironment rejects repeated or weak generated values', async (context) => {

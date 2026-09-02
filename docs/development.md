@@ -22,6 +22,7 @@ The setup script:
 - builds the `@my-bot/email` workspace package consumed by the API;
 - creates the canonical root `.env` when absent and aligns existing values to `.env.example` order;
 - generates independent local authentication, AI, and runtime service secrets without printing or replacing existing values;
+- builds the cached local agent-runtime image with Node.js, Chromium, and agent-browser;
 - starts the dedicated PostgreSQL and Redis services;
 - applies all database migrations;
 - verifies the database schema and migration history before reporting readiness.
@@ -35,12 +36,12 @@ The environment groups runtime mode, infrastructure, service origins, internal s
 | Runtime | `ENVIRONMENT` | Must be `development`, `test`, or `production` |
 | Infrastructure | `DATABASE_URL`, `REDIS_URL` | Required explicitly; setup copies the dedicated local origins |
 | Service origins | `WEB_BASE_URL`, `API_BASE_URL`, `VITE_API_BASE_URL`, `AI_BASE_URL`, `RUNTIME_BASE_URL` | Required explicitly and used by startup, CORS, and service clients |
-| Runtime service | `RUNTIME_PORT`, `RUNTIME_ENVIRONMENT` | Port must match `RUNTIME_BASE_URL`; environment scopes provider resources |
+| Runtime service | `RUNTIME_PORT`, `RUNTIME_ENVIRONMENT`, `RUNTIME_PROVIDER` | Port must match `RUNTIME_BASE_URL`; development defaults to local Docker and production requires Vercel |
 | Internal security | `SESSION_SECRET`, `OTP_PEPPER`, `RATE_LIMIT_PEPPER`, `AI_SERVICE_TOKEN`, `RUNTIME_SERVICE_TOKEN` | Setup generates independent values without printing them |
 | Providers | `OPENAI_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY`, Vercel variables, Google variables, `RESEND_API_KEY`, `RESEND_FROM` | External credentials may remain placeholders or empty during local UI work |
 | Optional tooling | `MYBOT_SEED_USER_EMAIL` | Selects an explicit account for `db:seed` when set |
 
-Add Google and Resend credentials to `.env`, register `http://localhost:8000/auth/google/callback`, then run `npm run auth:check`. Set `OPENAI_API_KEY`, `XAI_API_KEY`, or `OPENROUTER_API_KEY` for real model requests through the corresponding provider. Add Vercel OIDC or access-token credentials for real sandbox tools. Setup never provisions or prints provider keys.
+Add Google and Resend credentials to `.env`, register `http://localhost:8000/auth/google/callback`, then run `npm run auth:check`. Set `OPENAI_API_KEY`, `XAI_API_KEY`, or `OPENROUTER_API_KEY` for real model requests through the corresponding provider. Runtime tools work locally through Docker without Vercel credentials. Set `RUNTIME_PROVIDER=vercel` and add Vercel OIDC or access-token credentials only when testing the production provider. Setup never provisions or prints provider keys.
 
 ## Daily Development
 

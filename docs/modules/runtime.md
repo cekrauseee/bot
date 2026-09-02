@@ -6,13 +6,15 @@
 
 ## Workspace and isolation
 
-Each application user owns one global agent workspace. The runtime maps its stable workspace ID to one named persistent Vercel Sandbox, so conversations and project folders can share `/workspace` without making projects separate machines.
+Each application user owns one global agent workspace. The runtime maps its stable workspace ID to one persistent execution environment, so conversations and project folders can share `/workspace` without making projects separate machines. Development uses one local Docker container per workspace. Production uses one named persistent Vercel Sandbox.
+
+The Docker provider is the development default and requires no Vercel credentials. `npm run setup` and `npm run dev` build a cached Node.js 24 image with Chromium and agent-browser before starting the application. The provider creates workspace and private-state named volumes on demand, reuses compatible stopped containers, and recreates outdated managed containers without deleting their volumes. Graceful runtime shutdown stops active workspace containers while retaining both volumes for the next development session. The container runs with a read-only root filesystem, no Linux capabilities, no privilege escalation, bounded CPU, memory, processes, and shared memory, and writable temporary home and `/tmp` mounts. The Docker socket is never mounted into the agent container.
 
 Each project has a persisted path under `/workspace/projects/`, generated from its initial slug and immutable ID. A run snapshots that path when it starts; projectless runs use `/workspace`. Renaming a project or moving its conversation does not redirect an existing run, including after recovery. Project metadata changes never move or delete files.
 
 The directory is created lazily before the first filesystem or shell operation, using the unprivileged agent user. Creating project metadata or using only conversation/browser tools does not provision a project directory. Relative file paths and shell `cwd` values resolve from the run's `working_directory`; absolute paths anywhere inside `/workspace` remain available. Projects are starting directories, not isolation boundaries. The application does not expose a file explorer or a folder picker.
 
-Model-controlled commands run as the dedicated unprivileged `mybot-agent` Linux user. That user owns `/workspace`, has no sudo access, and cannot read the root-owned operation journal under `/var/lib/mybot/runtime`. Shell commands use an executable plus an explicit argument list; the runtime does not interpolate shell syntax.
+Model-controlled commands run as the dedicated unprivileged `mybot-agent` Linux user. That user owns `/workspace`, has no sudo access, and cannot read the root-owned operation journal under `/var/lib/mybot/runtime`. Shell commands use an executable plus an explicit argument list; the runtime does not interpolate shell syntax. Docker publishes no container ports and mounts no host paths, while retaining normal outbound networking for browser and package operations.
 
 Browser controllers and agent-browser session names are scoped by `run_id`. Concurrent runs share files but do not share browser navigation, frames, or future control leases.
 
@@ -37,6 +39,6 @@ Browser actions may attach a bounded PNG capture to their immediate response. Th
 ## Health
 
 - `GET /health` is process liveness.
-- `GET /ready` returns `503` until Vercel credentials are present. It checks configuration presence, not credential validity or an already-running browser.
+- `GET /ready` reports ready for the configured Docker development provider when the Docker Engine is reachable, or returns `503` with `docker_unavailable`. The Vercel provider returns `503` with `provider_credentials_missing` until credentials are present. The check does not provision a workspace or launch a browser.
 
-The provider accepts Vercel OIDC credentials or an access token with project and team IDs. `AGENT_BROWSER_SNAPSHOT_ID` skips first-boot browser installation when a compatible snapshot exists.
+`RUNTIME_PROVIDER` accepts `docker` or `vercel`. It defaults to Docker outside production and Vercel in production; production rejects Docker explicitly. The Vercel provider accepts OIDC credentials or an access token with project and team IDs. `AGENT_BROWSER_SNAPSHOT_ID` skips first-boot browser installation when a compatible snapshot exists.
