@@ -66,14 +66,14 @@ function MessageScrollerItem({
   scrollAnchor = false,
   ...props
 }: React.ComponentProps<typeof MessageScrollerPrimitive.Item>) {
+  // The scroller needs each real item height when it positions a loaded
+  // conversation at the end. Intrinsic-size estimates can leave long histories
+  // inside the final message after the skipped items are laid out.
   return (
     <MessageScrollerPrimitive.Item
       data-slot="message-scroller-item"
       scrollAnchor={scrollAnchor}
-      className={cn(
-        "min-w-0 shrink-0 [contain-intrinsic-size:auto_10rem] [content-visibility:auto]",
-        className
-      )}
+      className={cn("min-w-0 shrink-0", className)}
       {...props}
     />
   )
