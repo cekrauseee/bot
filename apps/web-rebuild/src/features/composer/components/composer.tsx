@@ -271,7 +271,7 @@ export function Composer({
           </FieldLabel>
           <InputGroup
             ref={composerSurfaceRef}
-            className="rounded-2xl shadow-sm [--composer-inset:--spacing(2.5)]"
+            className="rounded-2xl border-border/80 bg-muted/80 shadow-sm [--composer-inset:--spacing(2.5)] dark:bg-muted"
           >
             <InputGroupTextarea
               ref={textareaRef}
@@ -450,6 +450,7 @@ export function Composer({
                   type="submit"
                   variant="default"
                   size="icon"
+                  className="bg-foreground/10 text-foreground hover:bg-foreground/15 dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/80"
                   aria-label={submitting ? "Sending message" : "Send message"}
                   disabled={
                     !message.trim() ||
