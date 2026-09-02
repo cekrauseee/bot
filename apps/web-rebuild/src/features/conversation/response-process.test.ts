@@ -71,4 +71,38 @@ describe("response process", () => {
     expect(markup).toContain('title="Read src/app.ts"')
     expect(markup).not.toContain("filesystem_read")
   })
+
+  it("renders executed commands as nested code disclosures", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(ResponseProcess, {
+        hasResponse: false,
+        process: {
+          activities: [
+            {
+              action: "shell_exec",
+              id: "command-1",
+              status: "completed",
+              target: "npm run test --workspace=@my-bot/api -- seed.test.ts",
+              type: "tool",
+            },
+            {
+              action: "shell_exec",
+              id: "command-2",
+              status: "completed",
+              target: "git diff --check",
+              type: "tool",
+            },
+          ],
+          durationSeconds: 12,
+          status: "processing",
+        },
+      })
+    )
+
+    expect(markup).toContain("Ran commands")
+    expect(markup).toContain("Ran</span>")
+    expect(markup).toContain("<code>git diff --check</code>")
+    expect(markup).toContain('aria-expanded="false"')
+    expect(markup).not.toContain("shell_exec")
+  })
 })
