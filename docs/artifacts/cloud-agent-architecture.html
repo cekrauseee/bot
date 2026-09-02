@@ -128,7 +128,7 @@
         <div class="flow" role="group" aria-label="Requests flow from the web app to the API, the agent service, and the isolated tool runtime">
           <article class="node">
             <span class="number">01</span><h3>Web interface</h3>
-            <span class="tech">Vite · React · beUI</span>
+            <span class="tech">Vite · React · shadcn/Base UI</span>
             <p>Messages, model controls, task-plan badge, questions, Stop, and browser preview.</p>
             <p><code>apps/web</code> · port 5173</p>
           </article>
@@ -198,7 +198,7 @@
           <summary>Ask for input and resume<small>Structured questions with a durable waiting state.</small></summary>
           <ul>
             <li><code>ask_user</code> interrupts the graph for one or more sequential questions.</li>
-            <li>Questions support single choice, multiple choice, descriptions, and optional custom answers through beUI.</li>
+            <li>Questions support single choice, multiple choice, descriptions, and optional custom answers through the web interface.</li>
             <li>Answers retain their string or array shape. A matching answer resumes the checkpoint once.</li>
             <li>Stop remains available while waiting. Cancellation disables the pending question and ends the browser preview.</li>
           </ul>
@@ -295,7 +295,7 @@
         </table>
       </div>
       <aside class="note" aria-label="Technology decisions">
-        <p><strong>One current stack:</strong> LangChain/LangGraph for orchestration; Node/Elysia for the product API; Node + Vercel Sandbox for tools; PostgreSQL for durable state; Redis for fanout; React/beUI for the interface.</p>
+        <p><strong>One current stack:</strong> LangChain/LangGraph for orchestration; Node/Elysia for the product API; Node + Vercel Sandbox for tools; PostgreSQL for durable state; Redis for fanout; React with shadcn/Base UI for the interface.</p>
         <p>Just Bash, a separate app-level Playwright integration, per-user Docker provisioning, and a custom behavior harness were not added. Turbo owns JavaScript tasks; <code>uv</code> owns Python dependencies. Local Docker Compose runs PostgreSQL and Redis.</p>
       </aside>
     </section>

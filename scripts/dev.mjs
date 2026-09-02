@@ -44,12 +44,12 @@ try {
   const environment = await prepareEnvironment()
   await assertDevelopmentPortsAvailable()
   await prepareDevelopment({ environment })
-  console.log('\nmyBot is starting at:\n  Web rebuild: http://localhost:5173\n  Legacy web:  http://localhost:5174\n')
+  console.log('\nmyBot is starting at:\n  Web: http://localhost:5173\n')
 
   const invocation = turboInvocation()
   const turbo = start(
     invocation.command,
-    [...invocation.args, 'run', 'dev', '--ui=tui', '--filter=./apps/*'],
+    [...invocation.args, 'run', 'dev', '--ui=tui', '--filter=./apps/*', '--filter=!@my-bot/desktop'],
     'Turbo development tasks',
   )
 

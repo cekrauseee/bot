@@ -1,35 +1,25 @@
 # myBot
 
-myBot is a portfolio project for a durable cloud agent. It includes passwordless email and Google authentication, persistent streamed conversations, a LangGraph model service, and an isolated tool runtime.
+myBot is a portfolio project for a durable cloud agent. It combines passwordless email and Google authentication, persistent conversations, a Python AI boundary, and an isolated tool runtime.
 
 ## Repository
 
-- `apps/web`: Vite, React, React Router, Tailwind CSS 4, and beUI.
+- `apps/web`: Vite, React, React Router, Tailwind CSS 4, and official shadcn/Base UI components.
+- `apps/desktop`: Electron 44 shell packaging the canonical `apps/web` build.
 - `apps/api`: Node.js, TypeScript, Elysia, Drizzle, PostgreSQL, and Redis.
-- `apps/ai`: Python 3.14 and FastAPI boundary for model capabilities.
-- `apps/runtime`: Node.js boundary for isolated filesystem, shell, and browser tools through local Docker or Vercel Sandbox.
-- `packages/email`: React Email source and consumable package for transactional messages.
+- `apps/ai`: Python and FastAPI model-provider boundary.
+- `apps/runtime`: isolated filesystem, process, and browser tools.
+- `packages/email`: React Email source used by the API.
 
 ## Development
 
-Discover the available workflows at any time:
-
-```bash
-npm run help
-```
-
-Prepare the complete local environment once:
-
 ```bash
 npm run setup
-```
-
-Then start PostgreSQL, Redis, migrations, Elysia, the FastAPI AI service, and Vite with:
-
-```bash
 npm run dev
 ```
 
-Run the complete unit, integration, lint, migration, and build verification with `npm run verify`. Turbo owns the JavaScript/TypeScript task graph; `uv` remains the sole Python dependency manager.
+Use `npm run help` for the current command guide. `npm run check` runs repository lint, typecheck, tests, and builds; `npm run verify` adds integration checks. Turbo owns JavaScript/TypeScript tasks and `uv` owns Python dependencies.
 
-See the [developer documentation](docs/index.md) for architecture, setup, and project boundaries.
+Build the unsigned desktop package with `npm run desktop:package`. The build reads only the public `WEB_BASE_URL` and `VITE_API_BASE_URL` origins from the root environment and embeds them in a small packaged config; secrets are never embedded. `npm run desktop:install` is macOS-only, stages a fresh `myBot.app`, and retains a recoverable backup before replacing the current-user installation. Signing and notarization remain release concerns.
+
+See [developer documentation](docs/index.md) for architecture, setup, and module boundaries.

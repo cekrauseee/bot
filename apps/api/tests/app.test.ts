@@ -267,6 +267,7 @@ describe('HTTP contract', () => {
       expect(response.headers.getSetCookie()).toEqual([
         'mybot_session=session-token',
         'mybot_oauth_state=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax',
+        'mybot_desktop_transaction=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax',
       ])
     } finally {
       await server.stop()

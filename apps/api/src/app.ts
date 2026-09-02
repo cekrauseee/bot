@@ -19,6 +19,7 @@ import type { Database } from './db/database.js'
 import { GoogleOAuthService } from './modules/auth/oauth.js'
 import { OtpService } from './modules/auth/otp.js'
 import { SessionManager } from './modules/auth/sessions.js'
+import { DesktopAuthService } from './modules/auth/desktop.js'
 import {
   ProviderConnectionError,
   type ProviderConnection,
@@ -66,6 +67,7 @@ export type Services = {
   database: Database
   otp: OtpService
   sessions: SessionManager
+  desktopAuth?: DesktopAuthService
   google: GoogleOAuthService
   ai?: AiClient
   agentRuns?: AgentRunExecutor
@@ -480,6 +482,14 @@ const cookieValue = (request: Request, name: string) => {
   return undefined
 }
 
+const bearerValue = (request: Request) => {
+  const value = request.headers.get('authorization')
+  if (!value) return undefined
+  const match = /^Bearer ([A-Za-z0-9_-]{32,256})$/.exec(value)
+  if (!match) throw new AuthError('unauthorized', 'Sign in to continue.', 401)
+  return match[1]
+}
+
 const userResponse = (user: Pick<User, 'id' | 'email' | 'firstName' | 'lastName' | 'avatarUrl' | 'defaultModel'>) => ({
   id: user.id,
   email: user.email,
@@ -556,10 +566,10 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       }
     })
     .use(cors({
-      origin: settings.webOrigin,
+      origin: [settings.webOrigin, 'app://mybot'],
       credentials: true,
       methods: ['GET', 'POST', 'PATCH', 'DELETE'],
-      allowedHeaders: ['Content-Type', 'X-Request-Id', 'X-Correlation-Id'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id', 'X-Correlation-Id'],
       exposeHeaders: ['X-Request-Id', 'X-Correlation-Id'],
     }))
     .use(openapi({ documentation: { info: { title: 'myBot API', version: '0.1.0' } } }))
@@ -622,22 +632,87 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
 
   const browserOrigin = (request: Request) => {
     const origin = request.headers.get('origin')
-    if (origin === settings.webOrigin || (settings.environment !== 'production' && !origin)) return
+    if (origin === settings.webOrigin || origin === 'app://mybot' || (settings.environment !== 'production' && !origin)) return
     throw new AuthError('invalid_origin', 'This request did not come from an allowed origin.', 403)
   }
+  const webBrowserOrigin = (request: Request) => {
+    const origin = request.headers.get('origin')
+    if (origin === settings.webOrigin) return
+    throw new AuthError('invalid_origin', 'This request did not come from the web application.', 403)
+  }
   const websocketOrigin = (request: Request) => {
-    if (request.headers.get('origin') === settings.webOrigin) return
+    if (bearerValue(request)) return
+    if (request.headers.get('origin') === settings.webOrigin || request.headers.get('origin') === 'app://mybot') return
     throw new AuthError('invalid_origin', 'This request did not come from an allowed origin.', 403)
   }
 
   const oauthStateCookieName = settings.environment === 'production' ? '__Host-mybot_oauth_state' : 'mybot_oauth_state'
+  const desktopTransactionCookieName = 'mybot_desktop_transaction'
   const oauthStateCookie = (state: string) => `${oauthStateCookieName}=${encodeURIComponent(signValue(state, settings.sessionSecret))}; Max-Age=600; Path=/; HttpOnly; SameSite=Lax${settings.secureCookies ? '; Secure' : ''}`
   const clearOauthStateCookie = () => `${oauthStateCookieName}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax${settings.secureCookies ? '; Secure' : ''}`
+  const desktopRequestOrigin = (request: Request) => {
+    const origin = request.headers.get('origin')
+    if (!origin || origin === settings.webOrigin || origin === 'app://mybot') return
+    throw new AuthError('invalid_origin', 'This request did not come from an allowed origin.', 403)
+  }
+
+  const desktopTransactionSchema = t.Object({
+    transaction_id: t.String({ minLength: 32, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$' }),
+    client_secret: t.String({ minLength: 32, maxLength: 128 }),
+  })
+  const desktopStartSchema = t.Object({
+    transaction_id: t.String(),
+    client_secret: t.String(),
+    verification_url: t.String({ format: 'uri' }),
+    expires_in_seconds: t.Integer(),
+  })
+  const desktopApprovalSchema = t.Object({
+    transaction_id: t.String({ minLength: 32, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$' }),
+  })
 
   app.get('/health', () => ({ status: 'ok' as const }), { response: t.Object({ status: t.Literal('ok') }) })
 
+  app.post('/auth/desktop/start', async ({ request, set }) => {
+    desktopRequestOrigin(request)
+    if (!services.desktopAuth) throw new AuthError('desktop_auth_unavailable', 'Desktop sign-in is unavailable.', 503)
+    const result = await services.desktopAuth.start()
+    set.headers['cache-control'] = 'no-store'
+    return {
+      transaction_id: result.transactionId,
+      client_secret: result.clientSecret,
+      verification_url: result.verificationUrl,
+      expires_in_seconds: result.expiresInSeconds,
+    }
+  }, { response: { 200: desktopStartSchema, 403: detailSchema, 503: detailSchema } })
+
+  app.post('/auth/desktop/exchange', async ({ request, body, set }) => {
+    desktopRequestOrigin(request)
+    if (!services.desktopAuth) throw new AuthError('desktop_auth_unavailable', 'Desktop sign-in is unavailable.', 503)
+    const userId = await services.desktopAuth.exchange(body.transaction_id, body.client_secret)
+    if (!userId) throw new AuthError('invalid_desktop_transaction', 'This desktop sign-in request is invalid, expired, or already used.', 400)
+    const issued = await services.database.transaction(async (db) => services.sessions.issue(new AuthRepository(db), userId))
+    set.headers['cache-control'] = 'no-store'
+    return { token: issued.token }
+  }, { body: desktopTransactionSchema, response: { 200: t.Object({ token: t.String() }), 400: detailSchema, 403: detailSchema, 503: detailSchema } })
+
+  app.post('/auth/desktop/approve', async ({ request, body }) => {
+    webBrowserOrigin(request)
+    if (!services.desktopAuth) throw new AuthError('desktop_auth_unavailable', 'Desktop sign-in is unavailable.', 503)
+    const token = cookieValue(request, settings.sessionCookieName)
+    if (!token) throw new AuthError('unauthorized', 'Sign in to continue.', 401)
+    const active = await services.database.transaction(async (db) => {
+      const session = await services.sessions.resolve(new AuthRepository(db), token)
+      if (!session) throw new AuthError('unauthorized', 'Sign in to continue.', 401)
+      return session
+    })
+    const userId = active.user?.id
+    if (!userId) throw new AuthError('unauthorized', 'Sign in to continue.', 401)
+    await services.desktopAuth.approve(body.transaction_id, userId)
+    return new Response(null, { status: 204 })
+  }, { body: desktopApprovalSchema, response: { 204: t.Void(), 400: detailSchema, 401: detailSchema, 403: detailSchema, 503: detailSchema } })
+
   app.post('/auth/otp/request', async ({ request, body, set }) => {
-    browserOrigin(request)
+    webBrowserOrigin(request)
     const challenge = await services.otp.issue(normalizeEmail(body.email), clientIp(request, peerResolver))
     set.status = 202
     set.headers['cache-control'] = 'no-store'
@@ -652,7 +727,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   }, { body: otpRequestBody, response: otpRequestResponses })
 
   app.post('/auth/otp/verify', async ({ request, body, set }) => {
-    browserOrigin(request)
+    webBrowserOrigin(request)
     const reservation = await services.otp.reserve(body.challenge_id, body.code, clientIp(request, peerResolver))
     let issued: { user: Parameters<typeof userResponse>[0]; session: { token: string } }
     try {
@@ -679,11 +754,14 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     return { user: userResponse(issued.user) }
   }, { body: otpVerifyBody, response: otpVerifyResponses })
 
-  app.get('/auth/google/start', async ({ set }) => {
+  app.get('/auth/google/start', async ({ request, set }) => {
     const result = await services.google.start()
     set.status = 303
     set.headers.Location = result.url
-    set.headers['set-cookie'] = [oauthStateCookie(result.state)] as any
+    const transactionId = new URL(request.url).searchParams.get('desktop_transaction')
+    set.headers['set-cookie'] = [oauthStateCookie(result.state), ...(transactionId && /^[A-Za-z0-9_-]{32,64}$/.test(transactionId)
+      ? [`${desktopTransactionCookieName}=${encodeURIComponent(transactionId)}; Max-Age=600; Path=/; HttpOnly; SameSite=Lax${settings.secureCookies ? '; Secure' : ''}`]
+      : [])] as any
     return undefined
   }, { response: { 303: t.Void(), 503: detailSchema } })
 
@@ -705,20 +783,26 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
         })
         return services.sessions.issue(repository, user.id)
       })
+      const transactionId = cookieValue(request, desktopTransactionCookieName)
       set.status = 303
-      set.headers.Location = `${settings.webOrigin}/`
-      set.headers['set-cookie'] = [services.sessions.cookie(issued.token), clearOauthStateCookie()] as any
+      set.headers.Location = transactionId
+        ? `${settings.webOrigin}/sign?desktop_transaction=${encodeURIComponent(transactionId)}`
+        : `${settings.webOrigin}/`
+      set.headers['set-cookie'] = [services.sessions.cookie(issued.token), clearOauthStateCookie(), `${desktopTransactionCookieName}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax`] as any
       return undefined
     } catch {
       set.status = 303
-      set.headers.Location = `${settings.webOrigin}/login?error=google`
-      set.headers['set-cookie'] = [clearOauthStateCookie()] as any
+      const transactionId = cookieValue(request, desktopTransactionCookieName)
+      set.headers.Location = transactionId
+        ? `${settings.webOrigin}/sign?desktop_transaction=${encodeURIComponent(transactionId)}`
+        : `${settings.webOrigin}/login?error=google`
+      set.headers['set-cookie'] = [clearOauthStateCookie(), ...(transactionId ? [`${desktopTransactionCookieName}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax`] : [])] as any
       return undefined
     }
   }, { response: { 303: t.Void() } })
 
   app.get('/auth/session', async ({ request }) => {
-    const token = cookieValue(request, settings.sessionCookieName)
+    const token = bearerValue(request) ?? cookieValue(request, settings.sessionCookieName)
     const session = await services.database.transaction(async (db) => {
       const repository = new AuthRepository(db)
       const active = await services.sessions.resolve(repository, token)
@@ -730,12 +814,14 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   }, { response: { 200: userSchema, 401: detailSchema } })
 
   app.post('/auth/sign-out', async ({ request }) => {
-    browserOrigin(request)
-    const token = cookieValue(request, settings.sessionCookieName)
+    const bearer = bearerValue(request)
+    if (!bearer) browserOrigin(request)
+    const token = bearer ?? cookieValue(request, settings.sessionCookieName)
     if (token) {
       await services.database.transaction(async (db) => {
         const repository = new AuthRepository(db)
         const session = await services.sessions.resolve(repository, token)
+        if (bearer && !session) throw new AuthError('unauthorized', 'Sign in to continue.', 401)
         if (session) await repository.revokeSession(session.id)
       })
     }
@@ -787,7 +873,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     speed: t.Union([t.Literal('standard'), t.Literal('fast')]),
   })
   const sessionUser = async (request: Request) => {
-    const token = cookieValue(request, settings.sessionCookieName)
+    const token = bearerValue(request) ?? cookieValue(request, settings.sessionCookieName)
     return services.database.transaction(async (db) => {
       const active = await services.sessions.resolve(new AuthRepository(db), token)
       if (!active) throw new AuthError('unauthorized', 'Sign in to continue.', 401)

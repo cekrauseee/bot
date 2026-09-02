@@ -10,8 +10,8 @@
 
 ## Interface
 
-- Build interfaces by composing existing beUI components before writing custom interactive UI.
-- Add or update beUI components only through the shadcn CLI and the `@beui` registry. Review generated source after every CLI operation.
+- Build interfaces by composing the existing official shadcn/Base UI components before writing custom interactive UI.
+- Add or update shadcn components only through the official shadcn CLI and registry. Review generated source after every CLI operation.
 - Use Tailwind CSS 4 semantic tokens for styling. Do not hardcode light and dark colors in components.
 - Support light and dark appearances, with the system preference as the default.
 - Keep motion restrained, purposeful, accessible, and compatible with `prefers-reduced-motion`.

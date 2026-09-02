@@ -1,0 +1,72 @@
+import assert from 'node:assert/strict'
+import { access, readFile } from 'node:fs/promises'
+import test from 'node:test'
+
+import { projectRoot } from '../lib/project.mjs'
+
+test('desktop package consumes the canonical web artifact and uses a hardened renderer', async () => {
+  const config = await readFile(`${projectRoot}/apps/desktop/forge.config.cjs`, 'utf8')
+  const main = await readFile(`${projectRoot}/apps/desktop/src/main.ts`, 'utf8')
+  const preload = await readFile(`${projectRoot}/apps/desktop/src/preload.ts`, 'utf8')
+  const providerHook = await readFile(`${projectRoot}/apps/web/src/features/provider-connections/hooks/use-provider-connection.ts`, 'utf8')
+  assert.match(config, /\.\.\/web\/dist/)
+  assert.match(main, /contextIsolation: true/)
+  assert.match(main, /nodeIntegration: false/)
+  assert.match(main, /sandbox: true/)
+  assert.match(main, /app:\/\/mybot/)
+  assert.match(main, /Authorization = `Bearer/)
+  assert.doesNotMatch(main, /shell\.openExternal\(result\.client_secret\)/)
+  assert.match(config, /@electron-forge\/plugin-fuses/)
+  assert.match(config, /FuseV1Options\.OnlyLoadAppFromAsar\]: true/)
+  assert.match(config, /FuseV1Options\.GrantFileProtocolExtraPrivileges\]: false/)
+  assert.match(config, /appBundleId: 'eu\.cekrause\.mybot'/)
+  assert.match(main, /path\.resolve\(__dirname, '\.\.\/\.\.\/web\/dist'\)/)
+  assert.match(main, /path\.resolve\(process\.resourcesPath, 'dist'\)/)
+  assert.ok(main.indexOf('const __dirname') < main.indexOf('loadPublicConfig'))
+  assert.match(main, /desktop:open-external-url/)
+  assert.match(main, /url\.protocol === 'https:'/)
+  assert.match(preload, /openExternalUrl/)
+  assert.match(providerHook, /window\.myBotDesktop\.openExternalUrl/)
+})
+
+test('icon source and install workflow are deterministic and scoped', async () => {
+  const icon = await readFile(`${projectRoot}/apps/desktop/assets/icon.svg`, 'utf8')
+  const installer = await readFile(`${projectRoot}/scripts/desktop-install.mjs`, 'utf8')
+  assert.match(icon, /viewBox="0 0 24 24"/)
+  assert.match(icon, /#172033/)
+  assert.match(installer, /process\.platform !== 'darwin'/)
+  assert.doesNotMatch(installer, /MYBOT_[A-Z_]+/)
+  assert.match(installer, /desktop:package/)
+  assert.match(installer, /myBot-darwin/)
+  const png = await readFile(`${projectRoot}/apps/desktop/assets/generated/icon.png`)
+  const retina = await readFile(`${projectRoot}/apps/desktop/assets/generated/icon.iconset/icon_512x512@2x.png`)
+  const ico = await readFile(`${projectRoot}/apps/desktop/assets/icon.ico`)
+  assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10])
+  assert.equal(png.readUInt32BE(16), 512)
+  assert.equal(retina.readUInt32BE(16), 1024)
+  assert.equal(ico.readUInt16LE(2), 1)
+  assert.equal(ico.readUInt16LE(4), 6)
+  await access(`${projectRoot}/apps/desktop/assets/generated/icon.iconset/icon_512x512@2x.png`)
+  await access(`${projectRoot}/apps/desktop/scripts/build-icons.mjs`)
+})
+
+test('desktop public config contains only validated origins', async () => {
+  const script = await readFile(`${projectRoot}/apps/desktop/scripts/build-public-config.mjs`, 'utf8')
+  assert.match(script, /VITE_API_BASE_URL/)
+  assert.match(script, /WEB_BASE_URL/)
+  assert.match(script, /credentials/)
+  assert.match(script, /pathname !== '\/'/)
+  assert.doesNotMatch(script, /SESSION_SECRET|GOOGLE_CLIENT_SECRET|OPENAI_API_KEY/)
+})
+
+test('desktop packaging uses the repository-pinned Node runner', async () => {
+  const rootPackage = JSON.parse(await readFile(`${projectRoot}/package.json`, 'utf8'))
+  const desktopPackage = JSON.parse(await readFile(`${projectRoot}/apps/desktop/package.json`, 'utf8'))
+  const runner = await readFile(`${projectRoot}/scripts/desktop-forge.mjs`, 'utf8')
+  assert.equal(desktopPackage.devDependencies.node, '24.19.0')
+  assert.match(rootPackage.scripts['desktop:package'], /desktop-forge\.mjs package/)
+  assert.match(rootPackage.scripts['desktop:make'], /desktop-forge\.mjs make/)
+  assert.match(runner, /node_modules\/node\/bin\/node/)
+  assert.match(runner, /24\.19\.0|pinnedNode/)
+  assert.doesNotMatch(runner, /nvm|codex|Users\//)
+})

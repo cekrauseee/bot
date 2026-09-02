@@ -14,7 +14,7 @@ Read only the documents relevant to the task.
 
 | Module | Read when |
 | --- | --- |
-| [Web application](modules/web.md) | Changing routes, interface structure, theming, or beUI components |
+| [Web application](modules/web.md) | Changing routes, interface structure, theming, or shadcn/Base UI components |
 | [HTTP API](modules/api.md) | Changing Elysia setup, routing, persistence, or API tests |
 | [AI service](modules/ai.md) | Changing the Python service or future model integrations |
 | [Agent runtime](modules/runtime.md) | Changing sandboxed filesystem, shell, browser, or operation recovery |
