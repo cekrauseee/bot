@@ -85,6 +85,82 @@ describe('application seed data', () => {
     expect(activityTypes).toEqual(
       new Set(['search', 'step', 'text', 'tool', 'trace']),
     )
+
+    const activities = assistantMessages.flatMap(
+      (message) => message.activities ?? [],
+    )
+    const toolActions = new Set(
+      activities.flatMap((activity) =>
+        activity.type === 'tool' && typeof activity.action === 'string'
+          ? [activity.action]
+          : [],
+      ),
+    )
+    for (const action of [
+      'ask_user',
+      'browser_click',
+      'browser_close',
+      'browser_open',
+      'browser_snapshot',
+      'filesystem_list',
+      'filesystem_read',
+      'filesystem_write',
+      'shell_exec',
+    ]) {
+      expect(toolActions.has(action)).toBe(true)
+    }
+
+    expect(activities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'trace', kind: 'approval' }),
+        expect.objectContaining({ type: 'trace', kind: 'child' }),
+        expect.objectContaining({ type: 'tool', status: 'failed' }),
+      ]),
+    )
+
+    const commandActivities = activities.filter(
+      (activity) =>
+        activity.type === 'tool' && activity.action === 'shell_exec',
+    )
+    expect(commandActivities.length).toBeGreaterThan(50)
+    expect(
+      commandActivities.every(
+        (activity) =>
+          typeof activity.target === 'string' && activity.target.length > 0,
+      ),
+    ).toBe(true)
+
+    const family = (activity: Record<string, unknown>) => {
+      if (activity.type === 'search') return 'web-search'
+      if (activity.type !== 'tool' || typeof activity.action !== 'string')
+        return undefined
+      if (activity.action.startsWith('browser_')) return 'browser'
+      if (activity.action === 'filesystem_list') return 'files-inspected'
+      if (activity.action === 'filesystem_read') return 'files-read'
+      if (activity.action === 'filesystem_write') return 'files-updated'
+      if (activity.action === 'shell_exec') return 'commands'
+      return undefined
+    }
+    const groupedFamilies = new Set<string>()
+    for (const message of assistantMessages) {
+      const messageActivities = message.activities ?? []
+      for (let index = 1; index < messageActivities.length; index += 1) {
+        const current = family(messageActivities[index])
+        if (current && current === family(messageActivities[index - 1])) {
+          groupedFamilies.add(current)
+        }
+      }
+    }
+    expect(groupedFamilies).toEqual(
+      new Set([
+        'browser',
+        'commands',
+        'files-inspected',
+        'files-read',
+        'files-updated',
+        'web-search',
+      ]),
+    )
   })
 
   it('derives stable local UUIDs without sharing IDs between users', () => {

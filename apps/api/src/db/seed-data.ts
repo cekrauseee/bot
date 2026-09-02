@@ -1016,7 +1016,8 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     artifact: 'apps/web/src/features/chat/components/chat-sidebar.tsx',
     system: 'the responsive chat shell',
     risk: 'hover, focus, and collapsed states can expose competing controls or move the primary action',
-    outcome: 'one stable hit target with predictable keyboard, pointer, and narrow-width behavior',
+    outcome:
+      'one stable hit target with predictable keyboard, pointer, and narrow-width behavior',
     searchQuery: 'WAI-ARIA disclosure navigation focus keyboard interaction',
   },
   {
@@ -1027,7 +1028,8 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     artifact: 'apps/web/src/features/chat/services/conversation-api.ts',
     system: 'the SSE event reducer and persisted transcript',
     risk: 'a delta can be applied twice when reconnect and completion paths converge',
-    outcome: 'exactly-once visible content across streaming, completion, and reload',
+    outcome:
+      'exactly-once visible content across streaming, completion, and reload',
     searchQuery: 'server sent events reconnect idempotent event handling',
   },
   {
@@ -1038,7 +1040,8 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     artifact: 'apps/api/src/modules/conversations.ts',
     system: 'the Node API streaming lifecycle',
     risk: 'an aborted browser request can leave a streaming row or lose readable partial output',
-    outcome: 'a durable partial response with deterministic recovery and no orphaned active turn',
+    outcome:
+      'a durable partial response with deterministic recovery and no orphaned active turn',
     searchQuery: 'AbortSignal server sent events cleanup streaming response',
   },
   {
@@ -1049,8 +1052,10 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     artifact: 'apps/api/src/app.ts',
     system: 'the polyglot monorepo service boundary',
     risk: 'moving routes without preserving ownership and error contracts can split one workflow across incompatible services',
-    outcome: 'Node owns product workflows while Python remains a narrow model-interaction service',
-    searchQuery: 'Elysia validation lifecycle error handling official documentation',
+    outcome:
+      'Node owns product workflows while Python remains a narrow model-interaction service',
+    searchQuery:
+      'Elysia validation lifecycle error handling official documentation',
   },
   {
     key: 'react-email-otp',
@@ -1060,7 +1065,8 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     artifact: 'packages/email/src/otp-email.tsx',
     system: 'the local React Email package and Resend transport',
     risk: 'provider-hosted copy can drift from the product and make local review impossible',
-    outcome: 'a repository-owned, testable email with transport kept behind the API',
+    outcome:
+      'a repository-owned, testable email with transport kept behind the API',
     searchQuery: 'React Email render transactional email accessibility',
   },
   {
@@ -1071,8 +1077,10 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     artifact: 'apps/api/src/modules/otp.ts',
     system: 'the passwordless authentication workflow',
     risk: 'consuming a code before delivery or masking provider errors can lock out a valid user',
-    outcome: 'reserve, deliver, finalize, and verify as explicit recoverable states',
-    searchQuery: 'one time password retry rate limit secure verification guidance',
+    outcome:
+      'reserve, deliver, finalize, and verify as explicit recoverable states',
+    searchQuery:
+      'one time password retry rate limit secure verification guidance',
   },
   {
     key: 'dark-mode-review',
@@ -1082,7 +1090,8 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     artifact: 'apps/web/src/index.css',
     system: 'Tailwind semantic color tokens',
     risk: 'hardcoded surface colors can flatten hierarchy and fail contrast outside the light theme',
-    outcome: 'the same information hierarchy in light, dark, and increased-contrast settings',
+    outcome:
+      'the same information hierarchy in light, dark, and increased-contrast settings',
     searchQuery: 'WCAG contrast non text UI components dark mode',
   },
   {
@@ -1093,7 +1102,8 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     artifact: 'apps/web/src/features/chat/components/chat-workspace.tsx',
     system: 'the responsive message list, sidebar, and composer',
     risk: 'wide Markdown, fixed controls, or safe-area omissions can create horizontal overflow',
-    outcome: 'a 390-pixel flow with readable messages, reachable controls, and stable scrolling',
+    outcome:
+      'a 390-pixel flow with readable messages, reachable controls, and stable scrolling',
     searchQuery: 'CSS safe area inset mobile viewport responsive overflow',
   },
   {
@@ -1104,7 +1114,8 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     artifact: 'apps/api/src/middleware/rate-limit.ts',
     system: 'the authenticated Node API',
     risk: 'one global limit can punish normal chat usage while remaining too permissive for OTP abuse',
-    outcome: 'endpoint-specific budgets with safe retry guidance and observable enforcement',
+    outcome:
+      'endpoint-specific budgets with safe retry guidance and observable enforcement',
     searchQuery: 'OWASP rate limiting authentication API retry after',
   },
   {
@@ -1115,7 +1126,8 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     artifact: 'scripts/infrastructure.mjs',
     system: 'project-owned Docker Compose services',
     risk: 'a port match alone can reuse or stop infrastructure owned by another checkout',
-    outcome: 'reuse only after project, service, configuration, and health all match',
+    outcome:
+      'reuse only after project, service, configuration, and health all match',
     searchQuery: 'Docker Compose project labels config hash healthcheck',
   },
   {
@@ -1126,7 +1138,8 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     artifact: 'apps/api/src/db/schema.ts',
     system: 'the production PostgreSQL datastore',
     risk: 'a successful backup command does not prove that messages, ownership, and ordering can be restored',
-    outcome: 'a rehearsed restore with integrity checks and an explicit recovery objective',
+    outcome:
+      'a rehearsed restore with integrity checks and an explicit recovery objective',
     searchQuery: 'PostgreSQL backup restore verification pg_dump official',
   },
   {
@@ -1137,7 +1150,8 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     artifact: 'apps/web/src/features/chat',
     system: 'the feature-based frontend architecture',
     risk: 'page-owned state and transport logic make behavior hard to test and reuse',
-    outcome: 'pages compose features while hooks and services own interaction and data flow',
+    outcome:
+      'pages compose features while hooks and services own interaction and data flow',
     searchQuery: 'React feature based architecture hooks service boundaries',
   },
   {
@@ -1145,10 +1159,12 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     title: 'Reduce the Markdown bundle',
     daysAgo: 12,
     subject: 'the rich Markdown renderer bundle',
-    artifact: 'apps/web/src/features/chat/components/messages/markdown-response.tsx',
+    artifact:
+      'apps/web/src/features/chat/components/messages/markdown-response.tsx',
     system: 'the Vite production build and lazy response renderer',
     risk: 'syntax highlighting and math support can dominate the initial chat payload',
-    outcome: 'rich completed responses without delaying the first usable workspace render',
+    outcome:
+      'rich completed responses without delaying the first usable workspace render',
     searchQuery: 'Vite code splitting dynamic import chunk optimization',
   },
   {
@@ -1159,8 +1175,10 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     artifact: 'apps/api/tests/conversations.integration.test.ts',
     system: 'the PostgreSQL-backed API test suite',
     risk: 'timing-based assertions can hide a real concurrency defect or create noise unrelated to behavior',
-    outcome: 'a deterministic barrier-based test that proves the intended transaction boundary',
-    searchQuery: 'PostgreSQL concurrent transaction integration test deterministic barrier',
+    outcome:
+      'a deterministic barrier-based test that proves the intended transaction boundary',
+    searchQuery:
+      'PostgreSQL concurrent transaction integration test deterministic barrier',
   },
   {
     key: 'pull-request-review',
@@ -1170,8 +1188,10 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     artifact: 'the current Git diff and verification output',
     system: 'the repository review workflow',
     risk: 'mixing unrelated edits or overstating verification increases review cost and weakens trust',
-    outcome: 'a scoped diff, evidence-backed summary, and explicit remaining risk',
-    searchQuery: 'GitHub pull request review small focused changes best practices',
+    outcome:
+      'a scoped diff, evidence-backed summary, and explicit remaining risk',
+    searchQuery:
+      'GitHub pull request review small focused changes best practices',
   },
   {
     key: 'keyboard-navigation',
@@ -1181,7 +1201,8 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     artifact: 'apps/web/src/features/chat/components',
     system: 'the composer, sidebar, menus, and process disclosure',
     risk: 'custom interaction states can trap focus or expose unlabeled icon-only controls',
-    outcome: 'logical tab order, visible focus, semantic labels, and predictable disclosure behavior',
+    outcome:
+      'logical tab order, visible focus, semantic labels, and predictable disclosure behavior',
     searchQuery: 'WAI ARIA disclosure pattern keyboard focus visible',
   },
   {
@@ -1192,7 +1213,8 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     artifact: 'apps/web/src/features/chat/hooks/use-conversations.ts',
     system: 'the client cache and conversation API',
     risk: 'optimistic updates and background refresh can reorder or overwrite a newer local state',
-    outcome: 'one cache identity with explicit mutation, reconciliation, and invalidation rules',
+    outcome:
+      'one cache identity with explicit mutation, reconciliation, and invalidation rules',
     searchQuery: 'SWR mutation optimistic update race condition rollback',
   },
   {
@@ -1203,8 +1225,10 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     artifact: 'apps/api/src/modules/conversations.ts',
     system: 'browser, API, AI service, and PostgreSQL request boundaries',
     risk: 'logs without shared identifiers cannot distinguish queue, model, network, and persistence latency',
-    outcome: 'privacy-safe structured events correlated by one application turn ID',
-    searchQuery: 'OpenTelemetry trace context HTTP streaming spans semantic conventions',
+    outcome:
+      'privacy-safe structured events correlated by one application turn ID',
+    searchQuery:
+      'OpenTelemetry trace context HTTP streaming spans semantic conventions',
   },
   {
     key: 'tool-approval-flow',
@@ -1214,7 +1238,8 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     artifact: 'apps/web/src/features/chat/components/tools/tool-approval.tsx',
     system: 'the agent response event model',
     risk: 'an ambiguous approval can authorize a broader action than the user intended',
-    outcome: 'specific scope, clear consequences, durable decision state, and safe retry behavior',
+    outcome:
+      'specific scope, clear consequences, durable decision state, and safe retry behavior',
     searchQuery: 'human in the loop tool approval UX security scope',
   },
   {
@@ -1225,7 +1250,8 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     artifact: 'apps/api/src/modules/attachments.ts',
     system: 'the web composer, object storage, and conversation database',
     risk: 'trusting names or MIME headers can expose unsafe content or orphan storage objects',
-    outcome: 'validated uploads with explicit ownership, lifecycle, and rendering contracts',
+    outcome:
+      'validated uploads with explicit ownership, lifecycle, and rendering contracts',
     searchQuery: 'OWASP file upload cheat sheet content type validation',
   },
   {
@@ -1236,7 +1262,8 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     artifact: 'apps/ai/src/my_bot_ai/features/agent/service.py',
     system: 'the provider-neutral AI boundary',
     risk: 'silent routing changes can alter latency, cost, and answer quality without a product decision',
-    outcome: 'explicit model selection with measured defaults and preserved user intent',
+    outcome:
+      'explicit model selection with measured defaults and preserved user intent',
     searchQuery: 'LLM routing evaluation latency cost quality methodology',
   },
   {
@@ -1247,19 +1274,23 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     artifact: 'apps/api/src/modules/session.ts',
     system: 'the browser and Node authentication boundary',
     risk: 'long-lived or unrotated credentials increase the impact of token disclosure',
-    outcome: 'revocable server-side sessions with narrow cookie scope and explicit expiration',
+    outcome:
+      'revocable server-side sessions with narrow cookie scope and explicit expiration',
     searchQuery: 'OWASP session management cookie rotation expiration',
   },
   {
     key: 'incident-postmortem',
     title: 'Write a streaming incident review',
     daysAgo: 75,
-    subject: 'a production incident that left assistant turns in a streaming state',
+    subject:
+      'a production incident that left assistant turns in a streaming state',
     artifact: 'incident notes, API logs, and affected database rows',
     system: 'the complete conversation delivery path',
     risk: 'a narrative focused on one symptom can miss the retry and cleanup conditions that made impact persist',
-    outcome: 'a blameless timeline, verified causes, repair owners, and measurable prevention work',
-    searchQuery: 'site reliability incident postmortem timeline corrective actions',
+    outcome:
+      'a blameless timeline, verified causes, repair owners, and measurable prevention work',
+    searchQuery:
+      'site reliability incident postmortem timeline corrective actions',
   },
   {
     key: 'dependency-upgrade',
@@ -1269,22 +1300,27 @@ const workflowBlueprints: WorkflowBlueprint[] = [
     artifact: 'package.json and package-lock.json',
     system: 'the JavaScript workspace and Turborepo task graph',
     risk: 'upgrading by version number alone can miss migrations, peer constraints, and changed runtime behavior',
-    outcome: 'a staged upgrade justified by official guidance and verified through product flows',
+    outcome:
+      'a staged upgrade justified by official guidance and verified through product flows',
     searchQuery: 'Vite React Elysia migration guide latest stable release',
   },
 ]
 
 const longReasoningSummary = (
-  blueprint: Pick<WorkflowBlueprint, 'title' | 'subject' | 'system' | 'risk' | 'outcome'>,
+  blueprint: Pick<
+    WorkflowBlueprint,
+    'title' | 'subject' | 'system' | 'risk' | 'outcome'
+  >,
   phase: string,
   evidence: string,
-) => markdown(
-  `I started by treating ${blueprint.subject} as part of ${blueprint.system}, not as an isolated component. For the ${phase} phase, I mapped the visible symptom to the state and ownership boundaries that can actually produce it, then separated confirmed evidence from assumptions that still need a direct check.`,
-  '',
-  `The main failure mode is that ${blueprint.risk}. I therefore followed the data and interaction path in both directions, checked the relevant artifact, and compared the happy path with cancellation, retry, stale state, and narrow-width behavior. ${evidence}`,
-  '',
-  `The response is organized around a verifiable outcome: ${blueprint.outcome}. I kept the recommendation bounded to the current architecture, called out the decision points explicitly, and ended with checks that another engineer can reproduce without relying on hidden context.`,
-)
+) =>
+  markdown(
+    `I started by treating ${blueprint.subject} as part of ${blueprint.system}, not as an isolated component. For the ${phase} phase, I mapped the visible symptom to the state and ownership boundaries that can actually produce it, then separated confirmed evidence from assumptions that still need a direct check.`,
+    '',
+    `The main failure mode is that ${blueprint.risk}. I therefore followed the data and interaction path in both directions, checked the relevant artifact, and compared the happy path with cancellation, retry, stale state, and narrow-width behavior. ${evidence}`,
+    '',
+    `The response is organized around a verifiable outcome: ${blueprint.outcome}. I kept the recommendation bounded to the current architecture, called out the decision points explicitly, and ended with checks that another engineer can reproduce without relying on hidden context.`,
+  )
 
 const processActivities = (
   blueprint: WorkflowBlueprint,
@@ -1292,70 +1328,305 @@ const processActivities = (
   index: number,
 ): Record<string, unknown>[] => {
   const prefix = `${blueprint.key}-${phase}`
-  const activities: Record<string, unknown>[] = [
-    {
-      id: `${prefix}-trace-request`,
-      type: 'trace',
-      kind: 'request',
-      label: `Mapped ${blueprint.subject}`,
-      detail: blueprint.system,
-    },
-    {
-      id: `${prefix}-read`,
-      type: 'tool',
-      action: 'Read',
-      target: blueprint.artifact,
-    },
-    {
-      id: `${prefix}-state`,
-      type: 'step',
-      label: 'Compared persisted and rendered state',
-      status: 'complete',
-    },
-    {
-      id: `${prefix}-risk`,
-      type: 'text',
-      content: `The critical edge is that ${blueprint.risk}. I kept that boundary visible while narrowing the change.`,
-    },
-    {
-      id: `${prefix}-contract`,
-      type: 'trace',
-      kind: 'architecture',
-      label: 'Followed the owning contract end to end',
-      detail: blueprint.outcome,
-    },
-    {
-      id: `${prefix}-edit`,
-      type: 'tool',
-      action: index < 2 ? 'Inspected' : index < 4 ? 'Updated' : 'Verified',
-      target: blueprint.artifact,
-      ...(index === 2 ? { additions: 42, deletions: 17 } : {}),
-    },
-    {
-      id: `${prefix}-edge`,
-      type: 'step',
-      label: 'Checked cancellation, retry, and stale-state edges',
-      status: 'complete',
-    },
-    {
-      id: `${prefix}-result`,
-      type: 'step',
-      label: index === 5 ? 'Prepared the final handoff' : 'Recorded the next verifiable result',
-      status: 'complete',
-      meta: blueprint.outcome,
-    },
-  ]
+  const artifact =
+    blueprint.artifact.startsWith('apps/') ||
+    blueprint.artifact.startsWith('packages/') ||
+    blueprint.artifact.startsWith('scripts/') ||
+    blueprint.artifact === 'package.json'
+      ? `/workspace/${blueprint.artifact}`
+      : '/workspace'
+  const activity = (
+    suffix: string,
+    value: Record<string, unknown>,
+  ): Record<string, unknown> => ({
+    id: `${prefix}-${suffix}`,
+    ...value,
+  })
+  const context = activity('request', {
+    type: 'trace',
+    kind: 'request',
+    label: `Mapped ${blueprint.subject}`,
+    detail: blueprint.system,
+  })
+  const risk = activity('reasoning', {
+    type: 'text',
+    content: `The critical edge is that ${blueprint.risk}. I kept that boundary visible while narrowing the change.`,
+  })
+  const result = activity('result', {
+    type: 'step',
+    label:
+      index === 5
+        ? 'Prepared the final handoff'
+        : 'Recorded the next verifiable result',
+    status: 'complete',
+    meta: blueprint.outcome,
+  })
 
-  if (index === 0 || index === 4) {
-    activities.splice(3, 0, {
-      id: `${prefix}-search`,
-      type: 'search',
-      query: blueprint.searchQuery,
-      moreCount: index === 0 ? 3 : 1,
-    })
+  if (index === 0) {
+    return [
+      context,
+      activity('delegate', {
+        type: 'trace',
+        kind: 'child',
+        label: 'Delegated repository discovery',
+        detail:
+          'A focused agent mapped the relevant files and ownership boundaries',
+        status: 'completed',
+      }),
+      activity('list-feature', {
+        type: 'tool',
+        action: 'filesystem_list',
+        target:
+          artifact === '/workspace'
+            ? artifact
+            : artifact.slice(0, artifact.lastIndexOf('/')),
+        status: 'completed',
+      }),
+      activity('list-root', {
+        type: 'tool',
+        action: 'filesystem_list',
+        target: '/workspace',
+        status: 'completed',
+      }),
+      activity('read-owner', {
+        type: 'tool',
+        action: 'filesystem_read',
+        target: artifact,
+        status: 'completed',
+      }),
+      activity('read-contract', {
+        type: 'tool',
+        action: 'filesystem_read',
+        target: '/workspace/package.json',
+        status: 'completed',
+      }),
+      risk,
+      activity('search-contract', {
+        type: 'search',
+        query: blueprint.searchQuery,
+        status: 'completed',
+        moreCount: 3,
+      }),
+      activity('search-edge', {
+        type: 'search',
+        query: `${blueprint.subject} cancellation retry edge cases`,
+        status: 'completed',
+        moreCount: 1,
+      }),
+      result,
+    ]
   }
 
-  return activities
+  if (index === 1) {
+    return [
+      context,
+      risk,
+      activity('question', {
+        type: 'tool',
+        action: 'ask_user',
+        target: 'Confirm the implementation boundary',
+        status: 'completed',
+      }),
+      activity('constraint-owner', {
+        type: 'trace',
+        kind: 'architecture',
+        label: 'Preserved the owning boundary',
+        detail: blueprint.system,
+      }),
+      activity('read-owner', {
+        type: 'tool',
+        action: 'filesystem_read',
+        target: artifact,
+        status: 'completed',
+      }),
+      activity('read-guidance', {
+        type: 'tool',
+        action: 'filesystem_read',
+        target: '/workspace/AGENTS.md',
+        status: 'completed',
+      }),
+      activity('decision', {
+        type: 'step',
+        label: 'Requested approval before implementation',
+        status: 'complete',
+      }),
+      result,
+    ]
+  }
+
+  if (index === 2) {
+    return [
+      context,
+      activity('approval', {
+        type: 'trace',
+        kind: 'approval',
+        label: 'Received approval for the scoped implementation',
+        detail: 'Implementation and focused validation only',
+      }),
+      activity('write-owner', {
+        type: 'tool',
+        action: 'filesystem_write',
+        target: artifact,
+        status: 'completed',
+        additions: 42,
+        deletions: 17,
+      }),
+      activity('write-test', {
+        type: 'tool',
+        action: 'filesystem_write',
+        target: '/workspace/apps/api/tests/seed.test.ts',
+        status: 'completed',
+        additions: 28,
+        deletions: 4,
+      }),
+      risk,
+      activity('format', {
+        type: 'tool',
+        action: 'shell_exec',
+        target:
+          'npm exec prettier -- --write apps/api/src/db/seed-data.ts apps/api/tests/seed.test.ts',
+        status: 'completed',
+      }),
+      activity('diff-check', {
+        type: 'tool',
+        action: 'shell_exec',
+        target: 'git diff --check',
+        status: 'completed',
+      }),
+      result,
+    ]
+  }
+
+  if (index === 3) {
+    return [
+      context,
+      activity('seed-test', {
+        type: 'tool',
+        action: 'shell_exec',
+        target: 'npm run test --workspace=@my-bot/api -- seed.test.ts',
+        status: 'completed',
+      }),
+      activity('web-test', {
+        type: 'tool',
+        action: 'shell_exec',
+        target:
+          'npm run test --workspace=@my-bot/web-rebuild -- response-process.test.ts',
+        status: 'completed',
+      }),
+      activity('typecheck', {
+        type: 'tool',
+        action: 'shell_exec',
+        target: 'npm run typecheck --workspace=@my-bot/web-rebuild',
+        status: 'completed',
+      }),
+      risk,
+      activity('browser-open', {
+        type: 'tool',
+        action: 'browser_open',
+        target: 'http://localhost:5173/conversations/seed',
+        status: 'completed',
+      }),
+      activity('browser-snapshot', {
+        type: 'tool',
+        action: 'browser_snapshot',
+        status: 'completed',
+      }),
+      activity('browser-click', {
+        type: 'tool',
+        action: 'browser_click',
+        target: 'Process disclosure',
+        status: 'completed',
+      }),
+      activity('browser-close', {
+        type: 'tool',
+        action: 'browser_close',
+        status: 'completed',
+      }),
+      result,
+    ]
+  }
+
+  if (index === 4) {
+    return [
+      context,
+      activity('browser-open-failed', {
+        type: 'tool',
+        action: 'browser_open',
+        target: 'http://localhost:5173/conversations/seed',
+        status: 'failed',
+      }),
+      activity('browser-snapshot-failed', {
+        type: 'tool',
+        action: 'browser_snapshot',
+        status: 'failed',
+      }),
+      risk,
+      activity('browser-open', {
+        type: 'tool',
+        action: 'browser_open',
+        target: 'http://localhost:5173/conversations/seed',
+        status: 'completed',
+      }),
+      activity('browser-snapshot', {
+        type: 'tool',
+        action: 'browser_snapshot',
+        status: 'completed',
+      }),
+      activity('browser-close', {
+        type: 'tool',
+        action: 'browser_close',
+        status: 'completed',
+      }),
+      activity('search-recovery', {
+        type: 'search',
+        query: `${blueprint.subject} recovery strategy`,
+        status: 'completed',
+      }),
+      activity('search-concurrency', {
+        type: 'search',
+        query: `${blueprint.subject} concurrent state ownership`,
+        status: 'completed',
+      }),
+      result,
+    ]
+  }
+
+  return [
+    context,
+    activity('read-owner', {
+      type: 'tool',
+      action: 'filesystem_read',
+      target: artifact,
+      status: 'completed',
+    }),
+    activity('read-test', {
+      type: 'tool',
+      action: 'filesystem_read',
+      target: '/workspace/apps/api/tests/seed.test.ts',
+      status: 'completed',
+    }),
+    activity('status', {
+      type: 'tool',
+      action: 'shell_exec',
+      target: 'git status --short',
+      status: 'completed',
+    }),
+    activity('focused-checks', {
+      type: 'tool',
+      action: 'shell_exec',
+      target: 'npm run test --workspace=@my-bot/api -- seed.test.ts',
+      status: 'completed',
+    }),
+    activity('review', {
+      type: 'trace',
+      kind: 'child',
+      label: 'Delegated a focused verification pass',
+      detail: 'Checked the seed contract and process-family coverage',
+      status: 'completed',
+    }),
+    risk,
+    result,
+  ]
 }
 
 const assistantMessage = (
@@ -1372,13 +1643,16 @@ const assistantMessage = (
   activities: processActivities(blueprint, phase, index),
   content,
   model: index === 1 || index === 4 ? 'gpt-5.6-luna' : 'gpt-5.6-sol',
-  reasoningEffort: index === 0 ? 'high' : index === 2 || index === 4 ? 'xhigh' : 'medium',
+  reasoningEffort:
+    index === 0 ? 'high' : index === 2 || index === 4 ? 'xhigh' : 'medium',
   speed: index === 1 || index === 4 ? 'fast' : 'standard',
   durationSeconds: [74, 48, 126, 91, 163, 58][index],
   minuteOffset,
 })
 
-const buildWorkflowConversation = (blueprint: WorkflowBlueprint): SeedConversation => ({
+const buildWorkflowConversation = (
+  blueprint: WorkflowBlueprint,
+): SeedConversation => ({
   key: blueprint.key,
   title: blueprint.title,
   daysAgo: blueprint.daysAgo,
@@ -1419,7 +1693,8 @@ const buildWorkflowConversation = (blueprint: WorkflowBlueprint): SeedConversati
     {
       key: `${blueprint.key}-constraints-request`,
       role: 'user',
-      content: 'Before changing anything, list the constraints you will preserve and the tradeoffs that need an explicit decision.',
+      content:
+        'Before changing anything, list the constraints you will preserve and the tradeoffs that need an explicit decision.',
       minuteOffset: 6,
     },
     assistantMessage(
@@ -1441,6 +1716,8 @@ const buildWorkflowConversation = (blueprint: WorkflowBlueprint): SeedConversati
         '### Explicit tradeoff',
         '',
         `The simplest implementation is acceptable only if it still produces ${blueprint.outcome}. If that requires changing retention, authentication, provider storage, or a public contract, I will stop at the decision boundary instead of choosing silently.`,
+        '',
+        '**Approval needed:** should I proceed with the scoped implementation and focused checks, while leaving publication and external changes untouched?',
       ),
       8,
       'I converted the diagnosis into constraints that can reject an attractive but incomplete fix before implementation begins.',
@@ -1448,7 +1725,8 @@ const buildWorkflowConversation = (blueprint: WorkflowBlueprint): SeedConversati
     {
       key: `${blueprint.key}-implement-request`,
       role: 'user',
-      content: 'Implement the smallest durable solution now. Keep the code consistent with the repository and show me what changed.',
+      content:
+        'Yes. Proceed with the scoped implementation and focused checks. Keep publication and external changes out of scope, and show me what changed.',
       minuteOffset: 13,
     },
     assistantMessage(
@@ -1457,6 +1735,8 @@ const buildWorkflowConversation = (blueprint: WorkflowBlueprint): SeedConversati
       'implementation',
       markdown(
         '## Implementation',
+        '',
+        'I used your approval as a narrow boundary: implementation and focused checks are authorized; publication and unrelated changes are not.',
         '',
         `I changed the owning path in \`${blueprint.artifact}\` so ${blueprint.outcome}. The implementation keeps state transitions explicit and leaves unrelated product behavior untouched.`,
         '',
@@ -1483,7 +1763,8 @@ const buildWorkflowConversation = (blueprint: WorkflowBlueprint): SeedConversati
     {
       key: `${blueprint.key}-verify-request`,
       role: 'user',
-      content: 'Do not stop at static checks. Verify the complete behavior, including persistence or rendered state where relevant.',
+      content:
+        'Do not stop at static checks. Verify the complete behavior, including persistence or rendered state where relevant.',
       minuteOffset: 22,
     },
     assistantMessage(
@@ -1514,7 +1795,8 @@ const buildWorkflowConversation = (blueprint: WorkflowBlueprint): SeedConversati
     {
       key: `${blueprint.key}-edges-request`,
       role: 'user',
-      content: 'Push on the edge cases. What would still break under cancellation, concurrency, stale data, or a narrow viewport?',
+      content:
+        'Push on the edge cases. What would still break under cancellation, concurrency, stale data, or a narrow viewport?',
       minuteOffset: 33,
     },
     assistantMessage(
@@ -1544,7 +1826,8 @@ const buildWorkflowConversation = (blueprint: WorkflowBlueprint): SeedConversati
     {
       key: `${blueprint.key}-handoff-request`,
       role: 'user',
-      content: 'Give me the final handoff: outcome, evidence, remaining risk, and the next safe action.',
+      content:
+        'Give me the final handoff: outcome, evidence, remaining risk, and the next safe action.',
       minuteOffset: 44,
     },
     assistantMessage(
@@ -1580,63 +1863,34 @@ const enrichCuratedConversation = (
   conversation: SeedConversation,
 ): SeedConversation => ({
   ...conversation,
-  messages: conversation.messages.map((message, index, messages) => {
+  messages: conversation.messages.map((message, index) => {
     if (message.role !== 'assistant') return message
-    const request = messages[index - 1]?.content ?? conversation.title
     const phase = `turn-${Math.floor(index / 2) + 1}`
     const blueprint = {
+      key: conversation.key,
+      daysAgo: conversation.daysAgo,
+      artifact: 'apps/api/src/db/seed-data.ts',
+      searchQuery: `${conversation.title} implementation guidance`,
       title: conversation.title,
       subject: conversation.title.toLowerCase(),
       system: 'the persisted chat fixture and response renderer',
       risk: 'a short happy-path fixture can hide ordering, overflow, grouping, and continuation regressions',
-      outcome: 'a dense, realistic conversation that remains stable after seeding and reload',
+      outcome:
+        'a dense, realistic conversation that remains stable after seeding and reload',
     }
-    const baselineActivities: Record<string, unknown>[] = [
-      {
-        id: `${conversation.key}-${phase}-read-context`,
-        type: 'tool',
-        action: 'Read',
-        target: 'Relevant application context',
-      },
-      {
-        id: `${conversation.key}-${phase}-map-request`,
-        type: 'trace',
-        kind: 'request',
-        label: 'Mapped the request to the owning boundary',
-        detail: request.slice(0, 120),
-      },
-      {
-        id: `${conversation.key}-${phase}-inspect-state`,
-        type: 'step',
-        label: 'Inspected persisted and rendered state',
-        status: 'complete',
-      },
-      {
-        id: `${conversation.key}-${phase}-compare-edges`,
-        type: 'step',
-        label: 'Compared happy path, cancellation, and reload',
-        status: 'complete',
-      },
-      {
-        id: `${conversation.key}-${phase}-verify-output`,
-        type: 'tool',
-        action: 'Verified',
-        target: conversation.title,
-      },
-      {
-        id: `${conversation.key}-${phase}-record-result`,
-        type: 'step',
-        label: 'Recorded the durable result',
-        status: 'complete',
-      },
-    ]
+    const baselineActivities = processActivities(
+      blueprint,
+      phase,
+      [0, 3, 4][Math.floor(index / 2)] ?? 5,
+    )
 
     return {
       ...message,
       reasoning: longReasoningSummary(
         blueprint,
         phase,
-        message.reasoning ?? 'The original fixture did not include a reasoning summary.',
+        message.reasoning ??
+          'The original fixture did not include a reasoning summary.',
       ),
       activities: [...baselineActivities, ...(message.activities ?? [])],
       durationSeconds: Math.max(message.durationSeconds ?? 1, 32 + index * 7),

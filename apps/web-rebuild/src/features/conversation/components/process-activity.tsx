@@ -106,6 +106,11 @@ function ToolIcon({ action }: { action: string }) {
   return <WrenchIcon />
 }
 
+const isCommandAction = (action: string) =>
+  ["executed", "run", "shell_exec"].includes(
+    action.toLowerCase().replace(/[.\s-]+/g, "_")
+  )
+
 function GroupIcon({ family }: { family: ProcessActivityFamily }) {
   if (["files-inspected", "files-read"].includes(family)) {
     return <FileTextIcon />
@@ -122,6 +127,50 @@ function TraceIcon({ kind }: { kind: string }) {
   if (kind === "run") return <SquareTerminalIcon />
   if (kind === "read") return <FileTextIcon />
   return <WaypointsIcon />
+}
+
+function CommandActivity({
+  activity,
+}: {
+  activity: Extract<ProcessActivity, { type: "tool" }>
+}) {
+  const copy = processToolCopy(activity)
+  const command = activity.target?.trim()
+
+  if (!command) {
+    return (
+      <ActivityRow
+        icon={<SquareTerminalIcon />}
+        label={copy.label}
+        title={copy.label}
+      />
+    )
+  }
+
+  const summary = command.split("\n", 1)[0]
+
+  return (
+    <Collapsible className="flex min-w-0 flex-col">
+      <CollapsibleTrigger className="group/command -ms-1 flex min-h-6 max-w-full min-w-0 items-center gap-2 rounded-md px-1 text-start leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background data-[panel-open]:[&_.command-chevron]:rotate-90">
+        <ActivityIcon>
+          <SquareTerminalIcon />
+        </ActivityIcon>
+        <span className="shrink-0 text-muted-foreground">{copy.label}</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+          {summary}
+        </span>
+        <ChevronRightIcon
+          aria-hidden="true"
+          className="command-chevron size-3.5 shrink-0 text-muted-foreground motion-safe:transition-transform"
+        />
+      </CollapsibleTrigger>
+      <CollapsibleContent hiddenUntilFound className="ps-5.5 pt-1">
+        <pre className="max-w-full overflow-x-auto rounded-lg border border-border/60 bg-muted/40 px-3 py-2 font-mono text-xs leading-5 text-foreground">
+          <code>{command}</code>
+        </pre>
+      </CollapsibleContent>
+    </Collapsible>
+  )
 }
 
 function ProcessActivityRow({ activity }: { activity: ProcessActivity }) {
@@ -206,6 +255,10 @@ function ProcessActivityRow({ activity }: { activity: ProcessActivity }) {
   }
 
   if (activity.type === "tool") {
+    if (isCommandAction(activity.action)) {
+      return <CommandActivity activity={activity} />
+    }
+
     const copy = processToolCopy(activity)
     const hasChanges =
       typeof activity.additions === "number" ||
