@@ -15,6 +15,7 @@ export type ProviderConnection = {
     reached: boolean
   } | null
   login_mode: "browser" | "device"
+  active: boolean
 }
 
 export type LoginStart =
@@ -35,27 +36,50 @@ export type LoginStatus =
   | { status: "connected"; connection?: ProviderConnection }
   | { status: "failed"; message?: string }
 
-export const providerConnectionsApi = {
-  get: () =>
-    apiRequest<ProviderConnection>("/provider-connections/openai-codex", {
-      cache: "no-store",
-    }),
-  startLogin: () =>
-    apiRequest<LoginStart>("/provider-connections/openai-codex/logins", {
-      method: "POST",
-    }),
-  getLoginStatus: (loginId: string) =>
-    apiRequest<LoginStatus>(
-      `/provider-connections/openai-codex/logins/${encodeURIComponent(loginId)}`,
-      { cache: "no-store" }
-    ),
-  cancelLogin: (loginId: string) =>
-    apiRequest<void>(
-      `/provider-connections/openai-codex/logins/${encodeURIComponent(loginId)}`,
-      { method: "DELETE" }
-    ),
-  disconnect: () =>
-    apiRequest<void>("/provider-connections/openai-codex", {
-      method: "DELETE",
-    }),
+export type ProviderConnectionApi = {
+  get: () => Promise<ProviderConnection>
+  startLogin: () => Promise<LoginStart>
+  getLoginStatus: (loginId: string) => Promise<LoginStatus>
+  cancelLogin: (loginId: string) => Promise<void>
+  disconnect: () => Promise<void>
+  setActive: (active: boolean) => Promise<ProviderConnection>
 }
+
+export function createProviderConnectionApi(
+  connectionId: string
+): ProviderConnectionApi {
+  const connectionPath = `/provider-connections/${encodeURIComponent(connectionId)}`
+
+  return {
+    get: () =>
+      apiRequest<ProviderConnection>(connectionPath, {
+        cache: "no-store",
+      }),
+    startLogin: () =>
+      apiRequest<LoginStart>(`${connectionPath}/logins`, {
+        method: "POST",
+      }),
+    getLoginStatus: (loginId: string) =>
+      apiRequest<LoginStatus>(
+        `${connectionPath}/logins/${encodeURIComponent(loginId)}`,
+        { cache: "no-store" }
+      ),
+    cancelLogin: (loginId: string) =>
+      apiRequest<void>(
+        `${connectionPath}/logins/${encodeURIComponent(loginId)}`,
+        { method: "DELETE" }
+      ),
+    disconnect: () =>
+      apiRequest<void>(connectionPath, {
+        method: "DELETE",
+      }),
+    setActive: (active: boolean) =>
+      apiRequest<ProviderConnection>(connectionPath, {
+        method: "PATCH",
+        body: JSON.stringify({ active }),
+      }),
+  }
+}
+
+export const openAiCodexConnectionApi =
+  createProviderConnectionApi("openai-codex")

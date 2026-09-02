@@ -8,6 +8,7 @@ import {
   messages,
   oauthIdentities,
   projects,
+  providerConnections,
   sessions,
   users,
 } from './schema.js'
@@ -182,6 +183,47 @@ export class AuthRepository {
 
   async revokeSession(id: string) {
     await this.db.update(sessions).set({ revokedAt: new Date() }).where(and(eq(sessions.id, id), isNull(sessions.revokedAt)))
+  }
+}
+
+export class ProviderConnectionRepository {
+  constructor(readonly db: Db) {}
+
+  async isActive(userId: string, provider: string) {
+    const [connection] = await this.db
+      .select({ active: providerConnections.active })
+      .from(providerConnections)
+      .where(and(
+        eq(providerConnections.userId, userId),
+        eq(providerConnections.provider, provider),
+      ))
+    return connection?.active ?? true
+  }
+
+  async activeStates(userId: string, providers: readonly string[]) {
+    if (providers.length === 0) return new Map<string, boolean>()
+    const rows = await this.db
+      .select({ provider: providerConnections.provider, active: providerConnections.active })
+      .from(providerConnections)
+      .where(and(
+        eq(providerConnections.userId, userId),
+        inArray(providerConnections.provider, [...providers]),
+      ))
+    const stored = new Map(rows.map((row) => [row.provider, row.active]))
+    return new Map(providers.map((provider) => [provider, stored.get(provider) ?? true]))
+  }
+
+  async setActive(userId: string, provider: string, active: boolean) {
+    const now = new Date()
+    const [connection] = await this.db
+      .insert(providerConnections)
+      .values({ userId, provider, active, updatedAt: now })
+      .onConflictDoUpdate({
+        target: [providerConnections.userId, providerConnections.provider],
+        set: { active, updatedAt: now },
+      })
+      .returning({ active: providerConnections.active })
+    return connection?.active ?? active
   }
 }
 

@@ -19,6 +19,7 @@ import { seedConversations } from '../src/db/seed-data.js'
 import { SessionManager } from '../src/modules/auth/sessions.js'
 import { AgentRunExecutor } from '../src/modules/agent-control-plane.js'
 import type { AiClient, TitleClient } from '../src/modules/conversations.js'
+import { DatabaseProviderConnectionSettings } from '../src/modules/provider-connections.js'
 
 const settings = loadSettings({ ...process.env, ENVIRONMENT: 'test' })
 const pool = new Pool({
@@ -987,12 +988,14 @@ describe('PostgreSQL conversation flow', () => {
         headers: { 'content-type': 'text/event-stream' },
       })
     }
+    const providerConnections = new DatabaseProviderConnectionSettings(database)
     const app = createApp(settings, {
       database,
       sessions: new SessionManager(settings),
       ai: v2Ai,
       otp: {} as never,
       google: {} as never,
+      providerConnectionSettings: providerConnections,
     })
     const request = (path: string, init: RequestInit = {}) => app.handle(new Request(
       `http://localhost${path}`,
@@ -1011,6 +1014,43 @@ describe('PostgreSQL conversation flow', () => {
           { id: 'grok-4.3', provider: 'xai' },
           { id: 'glm-5.2', provider: 'openrouter' },
         ],
+      })
+
+      expect(await providerConnections.setActive(owner.id, 'openai', false))
+        .toBe(false)
+      const disabledCatalog = await request('/models')
+      expect(await disabledCatalog.json()).toMatchObject({
+        models: [
+          { id: 'gpt-5.6-sol', provider: 'openai', active: false },
+          { id: 'gpt-5.6-terra', provider: 'openai', active: false },
+          { id: 'gpt-5.6-luna', provider: 'openai', active: false },
+          { id: 'grok-4.6', provider: 'xai', active: true },
+          { id: 'grok-4.3', provider: 'xai', active: true },
+          { id: 'glm-5.2', provider: 'openrouter', active: true },
+        ],
+      })
+
+      const inactivePreference = await request('/preferences/model', {
+        method: 'PATCH',
+        headers: { origin: settings.webOrigin, 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'gpt-5.6-sol' }),
+      })
+      expect(inactivePreference.status).toBe(409)
+
+      const inactive = await request('/conversations/turns', {
+        method: 'POST',
+        headers: { origin: settings.webOrigin, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          message: 'Must not use a disabled provider', model: 'gpt-5.6-sol',
+          reasoning_effort: 'medium', speed: 'standard',
+        }),
+      })
+      expect(inactive.status).toBe(409)
+      expect(await inactive.json()).toEqual({
+        detail: {
+          code: 'provider_inactive',
+          message: 'Enable the selected model provider before using this model.',
+        },
       })
 
       const invalid = await request('/conversations/turns', {

@@ -67,12 +67,13 @@ export type ModelProvider = ModelDefinition['provider']
 export type ReasoningEffort = ModelDefinition['reasoningEfforts'][number]
 export type ProcessingMode = ModelDefinition['processingModes'][number]
 
-export const publicModelCatalog = () => ({
+export const publicModelCatalog = (activeStates = new Map<string, boolean>()) => ({
   models: modelCatalog.map((model) => ({
     id: model.id,
     provider: model.provider,
     company: model.company,
     label: model.label,
+    active: activeStates.get(model.provider) ?? true,
     reasoning_efforts: {
       options: [...model.reasoningEfforts],
       default: model.defaultReasoningEffort,

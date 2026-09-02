@@ -66,7 +66,24 @@ function services(withCodex = true) {
       startRecoverySweeper: vi.fn(),
       close: vi.fn().mockResolvedValue(undefined),
     },
-    ...(withCodex ? { codex } : {}),
+    providerConnectionSettings: {
+      isActive: vi.fn().mockResolvedValue(true),
+      activeStates: vi.fn().mockImplementation(
+        async (_userId: string, providers: string[]) =>
+          new Map(providers.map((provider) => [provider, true])),
+      ),
+      setActive: vi.fn().mockImplementation(
+        async (_userId: string, _provider: string, active: boolean) => active,
+      ),
+    },
+    providerConnectionAdapters: {
+      'openai-codex': {
+        provider: 'openai',
+        loginMode: 'browser',
+        ...(withCodex ? { adapter: codex } : {}),
+      },
+    },
+    codex,
   } as any
 }
 
@@ -83,6 +100,7 @@ describe('OpenAI Codex provider connection routes', () => {
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(await response.json()).toEqual({
       status: 'connected',
+      active: true,
       login_mode: 'browser',
       account: { email: user.email, plan_type: 'plus' },
       limits: {
@@ -94,6 +112,24 @@ describe('OpenAI Codex provider connection routes', () => {
         secondary: null,
         reached: false,
       },
+    })
+  })
+
+  it('lists registered connections through the provider-agnostic collection', async () => {
+    const app = createApp(settings, services())
+    const response = await app.handle(
+      new Request('http://localhost/provider-connections'),
+    )
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(await response.json()).toMatchObject({
+      connections: [{
+        connection_id: 'openai-codex',
+        provider: 'openai',
+        status: 'connected',
+        active: true,
+      }],
     })
   })
 
@@ -199,6 +235,40 @@ describe('OpenAI Codex provider connection routes', () => {
     )
     expect(disconnected.status).toBe(204)
     expect(dependencies.codex.disconnect).toHaveBeenCalledWith(user.id)
+    expect(dependencies.providerConnectionSettings.setActive).toHaveBeenCalledWith(
+      user.id,
+      'openai',
+      false,
+    )
+  })
+
+  it('enables and disables a connected provider without removing its credentials', async () => {
+    const dependencies = services()
+    const app = createApp(settings, dependencies)
+
+    const response = await app.handle(
+      new Request('http://localhost/provider-connections/openai-codex', {
+        method: 'PATCH',
+        headers: {
+          origin: settings.webOrigin,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ active: false }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      status: 'connected',
+      active: false,
+      account: { email: user.email },
+    })
+    expect(dependencies.providerConnectionSettings.setActive).toHaveBeenCalledWith(
+      user.id,
+      'openai',
+      false,
+    )
+    expect(dependencies.codex.disconnect).not.toHaveBeenCalled()
   })
 
   it('fails closed when the Codex runtime is not configured', async () => {
@@ -208,6 +278,7 @@ describe('OpenAI Codex provider connection routes', () => {
     )
     expect(await status.json()).toEqual({
       status: 'unavailable',
+      active: false,
       login_mode: 'browser',
       account: null,
       limits: null,
@@ -222,9 +293,53 @@ describe('OpenAI Codex provider connection routes', () => {
     expect(start.status).toBe(503)
     expect(await start.json()).toEqual({
       detail: {
-        code: 'codex_unavailable',
-        message: 'OpenAI connection is not configured on this server.',
+        code: 'provider_connection_unavailable',
+        message: 'This provider connection is not configured on this server.',
       },
     })
+  })
+
+  it('rejects connection ids that are not present in the adapter registry', async () => {
+    const app = createApp(settings, services())
+    const response = await app.handle(
+      new Request('http://localhost/provider-connections/unknown-provider'),
+    )
+
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({
+      detail: { code: 'not_found', message: 'Not Found' },
+    })
+  })
+
+  it('dispatches any registered connection id through the common adapter contract', async () => {
+    const dependencies = services()
+    const alternativeAdapter = {
+      ...dependencies.codex,
+      connection: vi.fn().mockResolvedValue({
+        ...connected,
+        account: { email: 'other@example.com', planType: 'custom' },
+      }),
+    }
+    dependencies.providerConnectionAdapters['alternative-console'] = {
+      provider: 'alternative',
+      loginMode: 'device',
+      adapter: alternativeAdapter,
+    }
+    const app = createApp(settings, dependencies)
+
+    const response = await app.handle(
+      new Request('http://localhost/provider-connections/alternative-console'),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      status: 'connected',
+      active: true,
+      account: { email: 'other@example.com', plan_type: 'custom' },
+    })
+    expect(dependencies.providerConnectionSettings.isActive).toHaveBeenCalledWith(
+      user.id,
+      'alternative',
+    )
   })
 })

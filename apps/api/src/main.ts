@@ -7,6 +7,7 @@ import { GoogleOAuthService } from './modules/auth/oauth.js'
 import { OtpService } from './modules/auth/otp.js'
 import { SessionManager } from './modules/auth/sessions.js'
 import { CodexAppServerManager } from './modules/codex-app-server.js'
+import { DatabaseProviderConnectionSettings } from './modules/provider-connections.js'
 import { createLogger, safeError } from './logger.js'
 import { AgentRunExecutor, RedisAgentEventFanout } from './modules/agent-control-plane.js'
 import { createAiClient, createTitleClient } from './modules/conversations.js'
@@ -45,7 +46,14 @@ const app = createApp(
     sessions: new SessionManager(settings),
     google: new GoogleOAuthService(redis, settings),
     agentRuns,
-    codex,
+    providerConnectionAdapters: {
+      'openai-codex': {
+        provider: 'openai',
+        loginMode: settings.codexLoginMode,
+        adapter: codex,
+      },
+    },
+    providerConnectionSettings: new DatabaseProviderConnectionSettings(database),
   },
   nodeSocketPeer,
 )

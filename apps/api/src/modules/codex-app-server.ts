@@ -3,60 +3,36 @@ import { access, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import {
+  ProviderConnectionError,
+  type ProviderConnection,
+  type ProviderConnectionAdapter,
+  type ProviderLogin,
+  type ProviderLoginStatus,
+  type ProviderRateLimitWindow,
+} from './provider-connections.js'
 
 type JsonObject = Record<string, unknown>
 
-export type CodexRateLimitWindow = {
-  usedPercent: number
-  windowDurationMinutes: number | null
-  resetsAt: string | null
-}
-
-export type CodexConnection = {
-  status: 'unavailable' | 'disconnected' | 'connecting' | 'connected'
-  loginMode: 'browser' | 'device'
-  account: { email: string | null; planType: string } | null
-  limits: {
-    primary: CodexRateLimitWindow | null
-    secondary: CodexRateLimitWindow | null
-    reached: boolean
-  } | null
-}
-
-export type CodexLogin =
-  | { type: 'browser'; loginId: string; authUrl: string }
-  | {
-      type: 'device_code'
-      loginId: string
-      verificationUrl: string
-      userCode: string
-    }
+export type CodexRateLimitWindow = ProviderRateLimitWindow
+export type CodexConnection = ProviderConnection
+export type CodexLogin = ProviderLogin
 
 export type CodexDeviceCodeLogin = Extract<CodexLogin, { type: 'device_code' }>
 export type CodexBrowserLogin = Extract<CodexLogin, { type: 'browser' }>
 
-export type CodexLoginStatus =
-  | { status: 'pending' }
-  | { status: 'connected'; connection: CodexConnection }
-  | { status: 'failed'; message: string }
+export type CodexLoginStatus = ProviderLoginStatus
 
-export interface CodexConnectionService {
-  connection(userId: string): Promise<CodexConnection>
-  startLogin(userId: string): Promise<CodexLogin>
-  loginStatus(userId: string, loginId: string): Promise<CodexLoginStatus>
-  cancelLogin(userId: string, loginId: string): Promise<void>
-  disconnect(userId: string): Promise<void>
-  close(): Promise<void>
-}
+export interface CodexConnectionService extends ProviderConnectionAdapter {}
 
-export class CodexConnectionError extends Error {
+export class CodexConnectionError extends ProviderConnectionError {
   constructor(
     readonly code:
       'codex_unavailable' | 'codex_already_connected' | 'codex_login_not_found',
     message: string,
     readonly status: number,
   ) {
-    super(message)
+    super(code, message, status)
     this.name = 'CodexConnectionError'
   }
 }

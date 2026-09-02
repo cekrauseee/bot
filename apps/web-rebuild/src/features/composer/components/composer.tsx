@@ -65,6 +65,7 @@ type ComposerProps = {
   models: ComposerModel[]
   modelContextKey: string
   modelDisabled?: boolean
+  providerDisabled?: boolean
   modelScope: "conversation" | "default"
   onModelChange: (model: string) => Promise<void>
   onSubmit?: (
@@ -78,6 +79,7 @@ export function Composer({
   models,
   modelContextKey,
   modelDisabled = false,
+  providerDisabled = false,
   modelScope,
   onModelChange,
   onSubmit,
@@ -224,7 +226,8 @@ export function Composer({
       !onSubmit ||
       submittingRef.current ||
       modelChangingRef.current ||
-      modelDisabled
+      modelDisabled ||
+      providerDisabled
     ) {
       return
     }
@@ -366,8 +369,10 @@ export function Composer({
                               }
                             >
                               {models
-                                .filter((item) =>
-                                  SELECTABLE_MODEL_IDS.has(item.id)
+                                .filter(
+                                  (item) =>
+                                    item.active &&
+                                    SELECTABLE_MODEL_IDS.has(item.id)
                                 )
                                 .map((item) => (
                                   <DropdownMenuRadioItem
@@ -450,7 +455,8 @@ export function Composer({
                     !message.trim() ||
                     submitting ||
                     modelChanging ||
-                    modelDisabled
+                    modelDisabled ||
+                    providerDisabled
                   }
                 >
                   {submitting ? (

@@ -13,7 +13,7 @@ The repository contains independently managed product services under `apps/` and
 | `apps/ai` | Python service boundary for model providers and AI workloads |
 | `apps/runtime` | Private filesystem, process, browser, and sandbox boundary |
 | `packages/email` | React Email components, local previews, and the consumable email package |
-| PostgreSQL | Users, sessions, conversations, messages, agent runs, checkpoints, and durable events |
+| PostgreSQL | Users, sessions, provider activation, conversations, messages, agent runs, checkpoints, and durable events |
 | Redis | Short-lived auth state plus cross-instance agent event and browser-frame fanout |
 | Root workspace | Shared commands, repository rules, and canonical documentation |
 
@@ -21,7 +21,7 @@ The web application uses React Router Data Mode. The router is created outside t
 
 The chat feature is application-owned under `apps/web/src/features/chat`. Its public entrypoint re-exports the feature container and route-path helper. The URL is the only active conversation identity; project slugs are canonical path metadata. `useConversationController` owns catalog loading, keyed detail and turn operations, a route-independent registry of active-run subscriptions, cancellation, resume input, and mutations. Its pure reducer stores the catalog independently from conversation records, guards every detail and turn write, and atomically moves a new optimistic turn to the server conversation ID as soon as `turn.started` exposes its durable identity. The React-free transport service owns credentialed HTTP, SSE v2 and WebSocket validation, bigint cursors, and persisted-message projections.
 
-The application API uses an Elysia application factory with the official Node.js adapter, typed runtime schemas, and OpenAPI documentation. It is the only browser-facing backend. It authenticates users and owns conversations, projects, workspaces, runs, messages, plans, and append-only events in PostgreSQL. It also mediates per-user ChatGPT login through an isolated Codex app-server process without exposing provider credentials to the browser. Its leased executor continues work after the initiating HTTP response disconnects, publishes transient updates through Redis, and fences every durable write.
+The application API uses an Elysia application factory with the official Node.js adapter, typed runtime schemas, and OpenAPI documentation. It is the only browser-facing backend. It authenticates users and owns conversations, projects, provider activation, workspaces, runs, messages, plans, and append-only events in PostgreSQL. A provider-connection registry maps each allowlisted connection method to a model provider and a provider-specific adapter. Common dynamic routes own the lifecycle; the OpenAI Codex adapter mediates per-user ChatGPT login through an isolated app-server process without exposing credentials to the browser. The leased executor continues work after the initiating HTTP response disconnects, publishes transient updates through Redis, and fences every durable write.
 
 The AI service uses a FastAPI application factory in `my_bot_ai.main`. It accepts only bearer-authenticated service requests from the application API. LangGraph checkpoints own resumable orchestration; OpenAI, xAI, and OpenRouter adapters expose provider-aware models. The service normalizes agent, tool, child, plan, question, browser, and terminal events. It calls the runtime with a separate bearer token and does not own browser authentication or product persistence.
 
@@ -42,7 +42,7 @@ Google login uses Authorization Code, PKCE, state, nonce, and the `openid email 
 
 The API runs on its own subdomain and does not add an `/api` path prefix. Credentialed CORS accepts only the configured web origin. State-changing browser requests validate that origin.
 
-The Codex subscription connection flow is separate from application login. `CODEX_LOGIN_MODE` is explicitly validated as `browser` or `device`; it defaults to browser outside production and device in production, with no silent fallback. Browser mode uses the official app-server ChatGPT browser login and loopback callback and is suitable when the browser reaches the same host, such as local or desktop use. Device mode returns a verification URL and one-time user code for cloud or headless use. Both modes start and poll the same authenticated, owned login attempt through Elysia. The API runs Codex app-server over `stdio` with one HMAC-derived `CODEX_HOME` per user. Codex persists and refreshes its own credentials there; PostgreSQL, Redis, browser responses, and logs never receive those tokens.
+Provider connections are separate from application login. Elysia exposes one collection and dynamic routes keyed by an allowlisted `connectionId`. The common layer dispatches to the registered adapter and persists activation by user and model provider. Inactive providers remain connected but cannot be selected or start a run. The Codex adapter validates `CODEX_LOGIN_MODE` as `browser` or `device`; it defaults to browser outside production and device in production, with no silent fallback. Browser mode uses the official app-server ChatGPT browser login and loopback callback and is suitable when the browser reaches the same host, such as local or desktop use. Device mode returns a verification URL and one-time user code for cloud or headless use. Both modes start and poll the same authenticated, owned login attempt through Elysia. The API runs Codex app-server over `stdio` with one HMAC-derived `CODEX_HOME` per user. Codex persists and refreshes its own credentials there; PostgreSQL, Redis, browser responses, and logs never receive those tokens.
 
 The conversation flow is:
 
@@ -71,6 +71,7 @@ Failures add an allowlisted category, code, fixed human-readable summary, and re
 - beUI source enters the repository only through the shadcn CLI.
 - Theme-aware components use semantic tokens that resolve in both appearances.
 - API behavior is exposed through routers and covered by tests.
+- Provider-connection routes dispatch only through the allowlisted adapter registry; vendor-specific login and credential behavior stays inside its adapter.
 - Product routes, authentication, and relational data remain owned by `apps/api`.
 - Model-provider integrations and AI execution remain owned by `apps/ai`.
 - The browser never receives model-provider credentials or provider-native event payloads.

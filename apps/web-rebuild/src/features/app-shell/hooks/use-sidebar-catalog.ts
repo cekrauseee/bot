@@ -84,6 +84,17 @@ export function useSidebarCatalog(enabled: boolean) {
     }
   }, [enabled, refresh])
 
+  useEffect(() => {
+    if (!enabled) return
+    const refreshProviders = () => void refresh({ preserveActionError: true })
+    window.addEventListener("provider-connections:changed", refreshProviders)
+    return () =>
+      window.removeEventListener(
+        "provider-connections:changed",
+        refreshProviders
+      )
+  }, [enabled, refresh])
+
   const runMutation = useCallback(
     async <T>(
       key: string,

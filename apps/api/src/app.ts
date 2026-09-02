@@ -15,15 +15,17 @@ import {
   type AgentRun,
   type User,
 } from './db/repository.js'
-import type { Database } from './db/database.js'
+import type { Database, Db } from './db/database.js'
 import { GoogleOAuthService } from './modules/auth/oauth.js'
 import { OtpService } from './modules/auth/otp.js'
 import { SessionManager } from './modules/auth/sessions.js'
 import {
-  CodexConnectionError,
-  type CodexConnection,
-  type CodexConnectionService,
-} from './modules/codex-app-server.js'
+  ProviderConnectionError,
+  type ProviderConnection,
+  type ProviderConnectionAdapter,
+  type ProviderConnectionRegistry,
+  type ProviderConnectionSettings,
+} from './modules/provider-connections.js'
 import { signValue, verifySignedValue } from './security.js'
 import {
   conversationTitle,
@@ -67,7 +69,8 @@ export type Services = {
   google: GoogleOAuthService
   ai?: AiClient
   agentRuns?: AgentRunExecutor
-  codex?: CodexConnectionService
+  providerConnectionAdapters?: ProviderConnectionRegistry
+  providerConnectionSettings?: ProviderConnectionSettings
 }
 
 export type PeerResolver = (request: Request) => string | undefined
@@ -119,12 +122,12 @@ const userSchema = t.Object({
   avatar_url: t.Union([t.String(), t.Null()]),
   default_model: t.String(),
 })
-const codexLimitWindowSchema = t.Object({
+const providerLimitWindowSchema = t.Object({
   used_percent: t.Number({ minimum: 0, maximum: 100 }),
   window_duration_minutes: t.Union([t.Number(), t.Null()]),
   resets_at: t.Union([t.String(), t.Null()]),
 })
-const codexConnectionSchema = t.Object({
+const providerConnectionSchema = t.Object({
   status: t.Union([
     t.Literal('unavailable'),
     t.Literal('disconnected'),
@@ -140,15 +143,44 @@ const codexConnectionSchema = t.Object({
   ]),
   limits: t.Union([
     t.Object({
-      primary: t.Union([codexLimitWindowSchema, t.Null()]),
-      secondary: t.Union([codexLimitWindowSchema, t.Null()]),
+      primary: t.Union([providerLimitWindowSchema, t.Null()]),
+      secondary: t.Union([providerLimitWindowSchema, t.Null()]),
       reached: t.Boolean(),
     }),
     t.Null(),
   ]),
   login_mode: t.Union([t.Literal('browser'), t.Literal('device')]),
+  active: t.Boolean(),
 })
-const codexLoginSchema = t.Union([
+const providerConnectionStateBody = t.Object({ active: t.Boolean() })
+const providerConnectionSummarySchema = t.Object({
+  connection_id: t.String(),
+  provider: t.String(),
+  status: t.Union([
+    t.Literal('unavailable'),
+    t.Literal('disconnected'),
+    t.Literal('connecting'),
+    t.Literal('connected'),
+  ]),
+  account: t.Union([
+    t.Object({
+      email: t.Union([t.String(), t.Null()]),
+      plan_type: t.String(),
+    }),
+    t.Null(),
+  ]),
+  limits: t.Union([
+    t.Object({
+      primary: t.Union([providerLimitWindowSchema, t.Null()]),
+      secondary: t.Union([providerLimitWindowSchema, t.Null()]),
+      reached: t.Boolean(),
+    }),
+    t.Null(),
+  ]),
+  login_mode: t.Union([t.Literal('browser'), t.Literal('device')]),
+  active: t.Boolean(),
+})
+const providerLoginSchema = t.Union([
   t.Object({
     type: t.Literal('browser'),
     login_id: t.String(),
@@ -161,13 +193,13 @@ const codexLoginSchema = t.Union([
     user_code: t.String(),
   }),
 ])
-const codexLoginStatusSchema = t.Object({
+const providerLoginStatusSchema = t.Object({
   status: t.Union([
     t.Literal('pending'),
     t.Literal('connected'),
     t.Literal('failed'),
   ]),
-  connection: t.Optional(codexConnectionSchema),
+  connection: t.Optional(providerConnectionSchema),
   message: t.Optional(t.String()),
 })
 const otpRequestBody = t.Object({ email: t.String({ format: 'email' }) })
@@ -457,7 +489,7 @@ const userResponse = (user: Pick<User, 'id' | 'email' | 'firstName' | 'lastName'
   default_model: user.defaultModel,
 })
 
-const publicCodexConnection = (connection: CodexConnection) => ({
+const publicProviderConnection = (connection: ProviderConnection, active: boolean) => ({
   status: connection.status,
   account: connection.account
     ? {
@@ -487,6 +519,7 @@ const publicCodexConnection = (connection: CodexConnection) => ({
       }
     : null,
   login_mode: connection.loginMode,
+  active,
 })
 
 export function createApp(settings: Settings, services: Services, peerResolver: PeerResolver = nodeSocketPeer) {
@@ -580,7 +613,10 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     .onStop(() =>
       Promise.allSettled([
         agentExecutor.close(),
-        services.codex?.close() ?? Promise.resolve(),
+        ...Object.values(services.providerConnectionAdapters ?? {})
+          .map((registration) => registration.adapter)
+          .filter((adapter): adapter is ProviderConnectionAdapter => adapter !== undefined)
+          .map((adapter) => adapter.close()),
       ]),
     )
 
@@ -758,25 +794,66 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       return active.user!
     })
   }
-  const codex = () => {
-    if (!services.codex) {
+  const providerConnectionRegistration = (connectionId: string) => {
+    const registrations = services.providerConnectionAdapters ?? {}
+    if (!Object.hasOwn(registrations, connectionId)) {
+      throw new AuthError('not_found', 'Not Found', 404)
+    }
+    return registrations[connectionId]!
+  }
+  const providerConnectionAdapter = (connectionId: string) => {
+    const registration = providerConnectionRegistration(connectionId)
+    if (!registration.adapter) {
       throw new AuthError(
-        'codex_unavailable',
-        'OpenAI connection is not configured on this server.',
+        'provider_connection_unavailable',
+        'This provider connection is not configured on this server.',
         503,
       )
     }
-    return services.codex
+    return registration.adapter
   }
-  const codexCall = async <T>(operation: () => Promise<T>) => {
+  const providerConnectionCall = async <T>(operation: () => Promise<T>) => {
     try {
       return await operation()
     } catch (error) {
-      if (error instanceof CodexConnectionError) {
+      if (error instanceof ProviderConnectionError) {
         throw new AuthError(error.code, error.message, error.status)
       }
       throw error
     }
+  }
+  const requireActiveProvider = async (
+    userId: string,
+    provider: string,
+    db?: Db,
+  ) => {
+    const active = await services.providerConnectionSettings?.isActive(userId, provider, db) ?? true
+    if (!active) {
+      throw new AuthError(
+        'provider_inactive',
+        'Enable the selected model provider before using this model.',
+        409,
+      )
+    }
+  }
+  const resolvedProviderConnection = async (
+    userId: string,
+    registration: ProviderConnectionRegistry[string],
+  ) => {
+    if (!registration.adapter) {
+      return publicProviderConnection({
+        status: 'unavailable',
+        loginMode: registration.loginMode,
+        account: null,
+        limits: null,
+      }, false)
+    }
+    const connection = await providerConnectionCall(() =>
+      registration.adapter!.connection(userId))
+    const active = connection.status === 'connected'
+      ? await services.providerConnectionSettings?.isActive(userId, registration.provider) ?? true
+      : false
+    return publicProviderConnection(connection, active)
   }
 
   const publicRun = (run: AgentRun) => ({
@@ -816,45 +893,76 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   })
 
   app.get('/models', async ({ request }) => {
-    await sessionUser(request)
-    return publicModelCatalog()
+    const user = await sessionUser(request)
+    const providers = [...new Set(modelCatalog.map((model) => model.provider))]
+    const activeStates = services.providerConnectionSettings
+      ? await services.providerConnectionSettings.activeStates(user.id, providers)
+      : new Map<string, boolean>()
+    return publicModelCatalog(activeStates)
   })
 
   app.patch('/preferences/model', async ({ request, body }) => {
     browserOrigin(request)
     const user = await sessionUser(request)
-    const updated = await services.database.transaction((db) =>
-      new AuthRepository(db).updateDefaultModel(user.id, body.model))
+    const updated = await services.database.transaction(async (db) => {
+      const definition = modelDefinition(body.model)!
+      await requireActiveProvider(user.id, definition.provider, db)
+      return new AuthRepository(db).updateDefaultModel(user.id, body.model)
+    })
     if (!updated) throw new AuthError('not_found', 'Not Found', 404)
     return userResponse(updated)
   }, { body: modelPreferenceBody })
 
+  const connectionParams = t.Object({
+    connectionId: t.String({ minLength: 1, maxLength: 100 }),
+  })
+  const connectionLoginParams = t.Object({
+    connectionId: t.String({ minLength: 1, maxLength: 100 }),
+    loginId: t.String({ minLength: 1, maxLength: 200 }),
+  })
+
   app.get(
-    '/provider-connections/openai-codex',
+    '/provider-connections',
     async ({ request, set }) => {
       set.headers['cache-control'] = 'no-store'
       const user = await sessionUser(request)
-      if (!services.codex) {
-        return publicCodexConnection({
-          status: 'unavailable',
-          loginMode: settings.codexLoginMode,
-          account: null,
-          limits: null,
-        })
-      }
-      return publicCodexConnection(
-        await codexCall(() => services.codex!.connection(user.id)),
-      )
+      const registrations = Object.entries(services.providerConnectionAdapters ?? {})
+      const connections = await Promise.all(registrations.map(async ([connectionId, registration]) => ({
+        connection_id: connectionId,
+        provider: registration.provider,
+        ...await resolvedProviderConnection(user.id, registration),
+      })))
+      return { connections }
     },
-    { response: { 200: codexConnectionSchema, 401: detailSchema } },
+    {
+      response: {
+        200: t.Object({ connections: t.Array(providerConnectionSummarySchema) }),
+        401: detailSchema,
+      },
+    },
+  )
+
+  app.get(
+    '/provider-connections/:connectionId',
+    async ({ request, params, set }) => {
+      set.headers['cache-control'] = 'no-store'
+      const user = await sessionUser(request)
+      const registration = providerConnectionRegistration(params.connectionId)
+      return resolvedProviderConnection(user.id, registration)
+    },
+    {
+      params: connectionParams,
+      response: { 200: providerConnectionSchema, 401: detailSchema, 404: detailSchema },
+    },
   )
 
   app.post(
-    '/provider-connections/openai-codex/logins',
-    async ({ request, set }) => {
+    '/provider-connections/:connectionId/logins',
+    async ({ request, params, set }) => {
       browserOrigin(request)
       const user = await sessionUser(request)
-      const login = await codexCall(() => codex().startLogin(user.id))
+      const adapter = providerConnectionAdapter(params.connectionId)
+      const login = await providerConnectionCall(() => adapter.startLogin(user.id))
       set.status = 202
       set.headers['cache-control'] = 'no-store'
       return login.type === 'browser'
@@ -867,8 +975,9 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
           }
     },
     {
+      params: connectionParams,
       response: {
-        202: codexLoginSchema,
+        202: providerLoginSchema,
         401: detailSchema,
         403: detailSchema,
         409: detailSchema,
@@ -878,17 +987,21 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   )
 
   app.get(
-    '/provider-connections/openai-codex/logins/:loginId',
+    '/provider-connections/:connectionId/logins/:loginId',
     async ({ request, params, set }) => {
       set.headers['cache-control'] = 'no-store'
       const user = await sessionUser(request)
-      const result = await codexCall(() =>
-        codex().loginStatus(user.id, params.loginId),
+      const registration = providerConnectionRegistration(params.connectionId)
+      const adapter = providerConnectionAdapter(params.connectionId)
+      const result = await providerConnectionCall(() =>
+        adapter.loginStatus(user.id, params.loginId),
       )
       if (result.status === 'connected') {
+        const active = await services.providerConnectionSettings
+          ?.setActive(user.id, registration.provider, true) ?? true
         return {
           status: result.status,
-          connection: publicCodexConnection(result.connection),
+          connection: publicProviderConnection(result.connection, active),
         }
       }
       if (result.status === 'failed')
@@ -896,9 +1009,9 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       return { status: result.status }
     },
     {
-      params: t.Object({ loginId: t.String({ minLength: 1, maxLength: 200 }) }),
+      params: connectionLoginParams,
       response: {
-        200: codexLoginStatusSchema,
+        200: providerLoginStatusSchema,
         401: detailSchema,
         404: detailSchema,
         503: detailSchema,
@@ -907,15 +1020,16 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   )
 
   app.delete(
-    '/provider-connections/openai-codex/logins/:loginId',
+    '/provider-connections/:connectionId/logins/:loginId',
     async ({ request, params }) => {
       browserOrigin(request)
       const user = await sessionUser(request)
-      await codexCall(() => codex().cancelLogin(user.id, params.loginId))
+      const adapter = providerConnectionAdapter(params.connectionId)
+      await providerConnectionCall(() => adapter.cancelLogin(user.id, params.loginId))
       return new Response(null, { status: 204 })
     },
     {
-      params: t.Object({ loginId: t.String({ minLength: 1, maxLength: 200 }) }),
+      params: connectionLoginParams,
       response: {
         204: t.Void(),
         401: detailSchema,
@@ -927,18 +1041,61 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   )
 
   app.delete(
-    '/provider-connections/openai-codex',
-    async ({ request }) => {
+    '/provider-connections/:connectionId',
+    async ({ request, params }) => {
       browserOrigin(request)
       const user = await sessionUser(request)
-      await codexCall(() => codex().disconnect(user.id))
+      const registration = providerConnectionRegistration(params.connectionId)
+      const adapter = providerConnectionAdapter(params.connectionId)
+      await providerConnectionCall(() => adapter.disconnect(user.id))
+      await services.providerConnectionSettings?.setActive(user.id, registration.provider, false)
       return new Response(null, { status: 204 })
     },
     {
+      params: connectionParams,
       response: {
         204: t.Void(),
         401: detailSchema,
         403: detailSchema,
+        503: detailSchema,
+      },
+    },
+  )
+
+  app.patch(
+    '/provider-connections/:connectionId',
+    async ({ request, params, body }) => {
+      browserOrigin(request)
+      const user = await sessionUser(request)
+      const registration = providerConnectionRegistration(params.connectionId)
+      const adapter = providerConnectionAdapter(params.connectionId)
+      const connection = await providerConnectionCall(() => adapter.connection(user.id))
+      if (connection.status !== 'connected') {
+        throw new AuthError(
+          'provider_not_connected',
+          'Connect this provider before changing its active state.',
+          409,
+        )
+      }
+      if (!services.providerConnectionSettings) {
+        throw new AuthError(
+          'provider_settings_unavailable',
+          'Provider settings are unavailable on this server.',
+          503,
+        )
+      }
+      const active = await services.providerConnectionSettings
+        .setActive(user.id, registration.provider, body.active)
+      return publicProviderConnection(connection, active)
+    },
+    {
+      body: providerConnectionStateBody,
+      params: connectionParams,
+      response: {
+        200: providerConnectionSchema,
+        401: detailSchema,
+        403: detailSchema,
+        409: detailSchema,
         503: detailSchema,
       },
     },
@@ -1107,6 +1264,8 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       const owned = await repository.lockOwned(user.id, params.conversationId)
       if (!owned) return undefined
       if (owned.model === body.model) return owned
+      const definition = modelDefinition(body.model)!
+      await requireActiveProvider(user.id, definition.provider, db)
       return repository.updateModel(user.id, owned, body.model)
     })
     if (!conversation) {
@@ -1239,6 +1398,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
             400,
           )
         }
+        await requireActiveProvider(user.id, definition.provider, db)
         if (!conversationId) {
           conversation = await repository.create(user.id, conversationTitle(message), definition.id)
           if (user.defaultModel !== definition.id) {

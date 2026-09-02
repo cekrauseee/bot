@@ -41,4 +41,20 @@ describe('application-owned model catalog', () => {
     expect(validModelSelection('glm-5.2', 'high', 'fast')).toBe(false)
     expect(validModelSelection('unknown', 'medium', 'standard')).toBe(false)
   })
+
+  it('projects provider activation onto every model owned by that provider', () => {
+    const catalog = publicModelCatalog(new Map([
+      ['openai', false],
+      ['xai', true],
+    ]))
+
+    expect(catalog.models.filter((model) => model.provider === 'openai'))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 'gpt-5.6-sol', active: false }),
+        expect.objectContaining({ id: 'gpt-5.6-terra', active: false }),
+        expect.objectContaining({ id: 'gpt-5.6-luna', active: false }),
+      ]))
+    expect(catalog.models.find((model) => model.provider === 'xai')?.active).toBe(true)
+    expect(catalog.models.find((model) => model.provider === 'openrouter')?.active).toBe(true)
+  })
 })
