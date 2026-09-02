@@ -184,7 +184,7 @@ export function CodexProviderCard({
   }
 
   return (
-    <Collapsible defaultOpen={connection.status === "connected"}>
+    <Collapsible defaultOpen={false}>
       <Card className="gap-0 py-0 ring-0">
         <CardHeader className="flex items-center gap-1 p-0">
           <CollapsibleTrigger className="group/provider flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">

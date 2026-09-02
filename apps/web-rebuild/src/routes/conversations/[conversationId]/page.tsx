@@ -14,11 +14,6 @@ export default function ConversationPage() {
     consumeTurnSpacerAnchor,
     loadConversation,
   } = useAppShell()
-  const previewConversationSkeleton =
-    import.meta.env.DEV &&
-    new URLSearchParams(window.location.search).get("preview") ===
-      "conversation-skeleton"
-
   useEffect(() => {
     if (activeConversation) void loadConversation(activeConversation.id)
   }, [activeConversation, loadConversation])
@@ -32,10 +27,6 @@ export default function ConversationPage() {
     },
     [activeConversationId, consumeTurnSpacerAnchor]
   )
-
-  if (previewConversationSkeleton) {
-    return <ConversationSkeleton />
-  }
 
   if (catalogLoading && !activeConversation) {
     return <ConversationSkeleton />

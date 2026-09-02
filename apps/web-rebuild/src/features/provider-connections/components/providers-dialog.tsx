@@ -10,7 +10,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Separator } from "@/components/ui/separator"
-import { Spinner } from "@/components/ui/spinner"
+import { ProviderConnectionSkeleton } from "@/features/provider-connections/components/provider-connection-skeleton"
 import { useProviderConnection } from "@/features/provider-connections/hooks/use-provider-connection"
 import {
   providerUiRegistry,
@@ -68,10 +68,7 @@ function ProviderConnectionEntry({
           onActiveChange={(active) => void setActive(active)}
         />
       ) : (
-        <div className="flex items-center gap-3 p-4 text-sm text-muted-foreground">
-          <Spinner aria-hidden="true" />
-          Loading provider status
-        </div>
+        <ProviderConnectionSkeleton />
       )}
     </div>
   )

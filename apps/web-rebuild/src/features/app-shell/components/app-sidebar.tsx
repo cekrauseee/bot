@@ -274,7 +274,7 @@ export function AppSidebar({
               </SidebarGroup>
             )}
 
-            <SidebarGroup>
+            <SidebarGroup className="group-data-[collapsible=icon]:hidden">
               <SidebarGroupLabel>Projects</SidebarGroupLabel>
               <SidebarCreateProjectDialog onCreate={catalog.createProject} />
               <SidebarGroupContent>
