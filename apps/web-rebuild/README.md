@@ -3,6 +3,30 @@
 This is the authenticated web application rebuild, built with React, TypeScript,
 Vite, and shadcn/ui.
 
+## Application structure
+
+The application uses React Router in Declarative Mode. `src/main.tsx` mounts
+`AppRouter` directly; there is no application wrapper component.
+
+Route modules live under `src/routes` and mirror their URL segments:
+
+| Route module                                     | URL                              | Responsibility                |
+| ------------------------------------------------ | -------------------------------- | ----------------------------- |
+| `routes/page.tsx`                                | `/`                              | New conversation page         |
+| `routes/conversations/[conversationId]/page.tsx` | `/conversations/:conversationId` | Addressable conversation page |
+| `routes/sign/page.tsx`                           | `/sign`                          | Public sign-in page           |
+| `routes/login/page.tsx`                          | `/login`                         | Legacy sign-in redirect       |
+
+`routes/layout.tsx` owns application-wide providers and the lazy-route fallback.
+`routes/_authenticated/layout.tsx` protects signed-in routes and composes the
+persistent application shell. Page modules stay small and compose capabilities
+from `src/features`; reusable product state and interactions remain inside their
+own feature folders. Shared, domain-neutral components remain under
+`src/components`.
+
+The active conversation is derived from the URL. Sidebar navigation changes the
+route instead of maintaining a second local conversation identity.
+
 ## Interface boundary
 
 - Build the interface exclusively with official shadcn/ui components and the

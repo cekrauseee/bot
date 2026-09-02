@@ -4,6 +4,7 @@ import {
   ArrowUpIcon,
   EllipsisIcon,
   FolderIcon,
+  FolderOpenIcon,
   PencilIcon,
   Trash2Icon,
 } from "lucide-react"
@@ -26,7 +27,6 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSub,
-  SidebarMenuSubItem,
 } from "@/components/ui/sidebar"
 import type { ProjectSummary } from "@/features/app-shell/api"
 import { SidebarDeleteDialog } from "@/features/app-shell/components/sidebar-delete-dialog"
@@ -82,7 +82,11 @@ export function SidebarProjectRow({
             <SidebarMenuButton tooltip={project.name} disabled={pending} />
           }
         >
-          <FolderIcon aria-hidden="true" />
+          {open ? (
+            <FolderOpenIcon aria-hidden="true" />
+          ) : (
+            <FolderIcon aria-hidden="true" />
+          )}
           <span className="font-normal">{project.name}</span>
         </CollapsibleTrigger>
 
@@ -145,17 +149,13 @@ export function SidebarProjectRow({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <CollapsibleContent>
-          <SidebarMenuSub>
-            {conversationCount > 0 ? (
-              children
-            ) : (
-              <SidebarMenuSubItem className="px-2 py-1 text-xs text-muted-foreground">
-                Move conversations here
-              </SidebarMenuSubItem>
-            )}
-          </SidebarMenuSub>
-        </CollapsibleContent>
+        {conversationCount > 0 ? (
+          <CollapsibleContent>
+            <SidebarMenuSub className="mx-0 w-full translate-x-0 border-0 px-0">
+              {children}
+            </SidebarMenuSub>
+          </CollapsibleContent>
+        ) : null}
       </Collapsible>
 
       <SidebarDeleteDialog

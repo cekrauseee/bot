@@ -90,13 +90,14 @@ test('web development reads the canonical origin and refuses port fallback', asy
   const vite = await readFile(path.join(projectRoot, 'apps/web/vite.config.ts'), 'utf8')
   assert.match(vite, /WEB_BASE_URL/)
   assert.match(vite, /loadEnv\(mode, envDir, ''\)/)
+  assert.match(vite, /port: 5174/)
   assert.match(vite, /strictPort:\s*true/)
   const webTurbo = await jsonFile('apps/web/turbo.json')
   assert.deepEqual(webTurbo.extends, ['//'])
   assert.match(vite, /\benvDir,/)
 
   const rebuildVite = await readFile(path.join(projectRoot, 'apps/web-rebuild/vite.config.ts'), 'utf8')
-  assert.match(rebuildVite, /port: 5174/)
+  assert.match(rebuildVite, /port: 5173/)
   assert.match(rebuildVite, /strictPort:\s*true/)
 
   const turbo = await jsonFile('turbo.json')

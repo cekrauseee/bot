@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/input-otp"
 import { Spinner } from "@/components/ui/spinner"
 import { authApi, AuthApiError, type OtpChallenge } from "@/features/auth/api"
+import { consumeAuthDestination } from "@/features/auth/session-destination"
 import { cn } from "@/lib/utils"
 
 type PendingAction = "request" | "verify" | "resend" | null
@@ -45,7 +46,7 @@ function requestErrorMessage(error: unknown) {
 function verificationErrorMessage(error: unknown) {
   if (error instanceof AuthApiError) {
     if (error.code === "invalid_code") {
-      return "That code is incorrect or has expired. Request a new code and try again."
+      return "Check the code and enter it again. Request a new code only if it has expired."
     }
     if (error.code === "code_attempts_exhausted") {
       return "Too many attempts. Request a new code to continue."
@@ -55,6 +56,11 @@ function verificationErrorMessage(error: unknown) {
     }
   }
   return "We couldn’t verify the code. Check your connection and try again."
+}
+
+function expiryMessage(expiresInSeconds: number) {
+  const minutes = Math.ceil(expiresInSeconds / 60)
+  return `This code is valid for ${minutes} minute${minutes === 1 ? "" : "s"}.`
 }
 
 export function SignInCard({ googleError = false }: { googleError?: boolean }) {
@@ -134,7 +140,7 @@ export function SignInCard({ googleError = false }: { googleError?: boolean }) {
     setCodeError("")
     try {
       await authApi.verifyOtp(challenge.challenge_id, code)
-      navigate("/", { replace: true })
+      navigate(consumeAuthDestination(), { replace: true })
     } catch (error) {
       setCodeError(verificationErrorMessage(error))
       otpInputRef.current?.focus()
@@ -165,9 +171,14 @@ export function SignInCard({ googleError = false }: { googleError?: boolean }) {
           <h1>Sign in to myBot</h1>
         </CardTitle>
         <CardDescription>
-          {challenge
-            ? `Enter the code sent to ${email.trim()}.`
-            : "Use Google or your email address."}
+          {challenge ? (
+            <>
+              Enter the code sent to{" "}
+              <bdi className="wrap-anywhere">{email.trim()}</bdi>.
+            </>
+          ) : (
+            "Use Google or your email address."
+          )}
         </CardDescription>
       </CardHeader>
 
@@ -207,8 +218,7 @@ export function SignInCard({ googleError = false }: { googleError?: boolean }) {
                   <FieldError id="sign-code-error">{codeError}</FieldError>
                 ) : (
                   <FieldDescription id="sign-code-description">
-                    The code expires in{" "}
-                    {Math.ceil(challenge.expires_in_seconds / 60)} minutes.
+                    {expiryMessage(challenge.expires_in_seconds)}
                   </FieldDescription>
                 )}
               </Field>
@@ -239,9 +249,18 @@ export function SignInCard({ googleError = false }: { googleError?: boolean }) {
             <a
               href={authApi.googleStartUrl}
               className={cn(buttonVariants({ variant: "outline" }), "w-full")}
+              autoFocus={googleError}
+              aria-describedby={
+                googleError ? "google-sign-in-error" : undefined
+              }
             >
               Continue with Google
             </a>
+            {googleError && (
+              <FieldError id="google-sign-in-error">
+                Google sign-in didn’t work. Please try again.
+              </FieldError>
+            )}
             <FieldSeparator>or</FieldSeparator>
             <form
               onSubmit={handleEmailSubmit}
@@ -260,7 +279,7 @@ export function SignInCard({ googleError = false }: { googleError?: boolean }) {
                     onChange={(event) => handleEmailChange(event.target.value)}
                     placeholder="name@example.com"
                     autoComplete="email"
-                    autoFocus
+                    autoFocus={!googleError}
                     spellCheck={false}
                     required
                     disabled={pendingAction !== null}
@@ -281,11 +300,6 @@ export function SignInCard({ googleError = false }: { googleError?: boolean }) {
                 </Button>
               </FieldGroup>
             </form>
-            {googleError && (
-              <FieldError>
-                Google sign-in didn’t work. Please try again.
-              </FieldError>
-            )}
           </FieldGroup>
         )}
       </CardContent>

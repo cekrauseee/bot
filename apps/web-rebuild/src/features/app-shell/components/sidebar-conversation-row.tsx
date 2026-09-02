@@ -35,6 +35,7 @@ import type {
 } from "@/features/app-shell/api"
 import { SidebarDeleteDialog } from "@/features/app-shell/components/sidebar-delete-dialog"
 import { SidebarInlineRename } from "@/features/app-shell/components/sidebar-inline-rename"
+import { cn } from "@/lib/utils"
 
 type SidebarConversationRowProps = {
   active: boolean
@@ -48,6 +49,7 @@ type SidebarConversationRowProps = {
   onSetPinned: (pinned: boolean) => Promise<unknown>
   pending: boolean
   projects: ProjectSummary[]
+  nested?: boolean
 }
 
 export function SidebarConversationRow({
@@ -62,6 +64,7 @@ export function SidebarConversationRow({
   onSetPinned,
   pending,
   projects,
+  nested = false,
 }: SidebarConversationRowProps) {
   const { isMobile, setOpenMobile } = useSidebar()
   const [editing, setEditing] = useState(false)
@@ -91,7 +94,10 @@ export function SidebarConversationRow({
   return (
     <SidebarMenuItem className="group-data-[collapsible=icon]:hidden">
       <SidebarMenuButton
-        className="group-has-data-[sidebar=menu-action]/menu-item:pr-14"
+        className={cn(
+          "group-has-data-[sidebar=menu-action]/menu-item:pr-14",
+          nested && "ps-8",
+        )}
         tooltip={conversation.title}
         isActive={active}
         disabled={pending}
@@ -104,7 +110,7 @@ export function SidebarConversationRow({
       </SidebarMenuButton>
 
       <SidebarMenuAction
-        showOnHover={!pinned}
+        showOnHover
         disabled={pending}
         className="right-7"
         aria-label={`${pinned ? "Unpin" : "Pin"} ${conversation.title}`}

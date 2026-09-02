@@ -26,6 +26,29 @@ export const apiBaseUrl = (
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000"
 ).replace(/\/$/, "")
 
+export async function apiErrorFromResponse(
+  response: Response,
+  fallback: string
+) {
+  let body: ApiErrorBody | undefined
+  try {
+    body = (await response.json()) as ApiErrorBody
+  } catch {
+    body = undefined
+  }
+
+  const detail = Array.isArray(body?.detail) ? undefined : body?.detail
+  const validationMessage = Array.isArray(body?.detail)
+    ? body.detail[0]?.msg
+    : undefined
+
+  return new ApiError(
+    detail?.message ?? validationMessage ?? fallback,
+    response.status,
+    detail
+  )
+}
+
 export async function apiRequest<T>(
   path: string,
   init?: RequestInit
@@ -43,24 +66,9 @@ export async function apiRequest<T>(
     return (await response.json()) as T
   }
 
-  let body: ApiErrorBody | undefined
-  try {
-    body = (await response.json()) as ApiErrorBody
-  } catch {
-    body = undefined
-  }
-
-  const detail = Array.isArray(body?.detail) ? undefined : body?.detail
-  const validationMessage = Array.isArray(body?.detail)
-    ? body.detail[0]?.msg
-    : undefined
-
-  throw new ApiError(
-    detail?.message ??
-      validationMessage ??
-      "The request could not be completed.",
-    response.status,
-    detail
+  throw await apiErrorFromResponse(
+    response,
+    "The request could not be completed."
   )
 }
 

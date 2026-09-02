@@ -22,14 +22,38 @@ export type ProjectSummary = {
   order_updated_at: string | null
 }
 
+export type ActiveTitleRun = {
+  conversation_id: string
+  id: string
+}
+
+function parseActiveTitleRun(value: unknown): ActiveTitleRun {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("The active run catalog was invalid.")
+  }
+
+  const run = value as Record<string, unknown>
+  if (typeof run.id !== "string" || typeof run.conversation_id !== "string") {
+    throw new Error("The active run catalog was invalid.")
+  }
+
+  return {
+    conversation_id: run.conversation_id,
+    id: run.id,
+  }
+}
+
 export const appShellApi = {
   catalog: async () => {
-    const [conversationResult, projectResult] = await Promise.all([
-      apiRequest<{ conversations: ConversationSummary[] }>("/conversations"),
-      apiRequest<{ projects: ProjectSummary[] }>("/projects"),
-    ])
+    const [conversationResult, projectResult, activeRunResult] =
+      await Promise.all([
+        apiRequest<{ conversations: ConversationSummary[] }>("/conversations"),
+        apiRequest<{ projects: ProjectSummary[] }>("/projects"),
+        apiRequest<{ runs: unknown[] }>("/agent-runs"),
+      ])
 
     return {
+      activeRuns: activeRunResult.runs.map(parseActiveTitleRun),
       conversations: conversationResult.conversations,
       projects: projectResult.projects,
     }

@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react"
 import {
-  BotIcon,
   ChevronDownIcon,
   LogOutIcon,
   RefreshCwIcon,
@@ -157,6 +156,7 @@ export function AppSidebar({
   const conversationRow = (
     conversation: ConversationSummary,
     reorder?: {
+      nested?: boolean
       onMoveDown?: () => Promise<unknown>
       onMoveUp?: () => Promise<unknown>
     }
@@ -174,6 +174,7 @@ export function AppSidebar({
         catalog.setConversationPinned(conversation.id, pinned)
       }
       onMove={(projectId) => moveConversation(conversation.id, projectId)}
+      nested={reorder?.nested}
       onMoveUp={reorder?.onMoveUp}
       onMoveDown={reorder?.onMoveDown}
     />
@@ -186,10 +187,6 @@ export function AppSidebar({
     <Sidebar collapsible="icon" aria-label="Application navigation">
       <SidebarHeader>
         <div className="flex h-8 items-center gap-2 px-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
-          <BotIcon
-            aria-hidden="true"
-            className="size-4 shrink-0 group-data-[collapsible=icon]:hidden"
-          />
           <span className="truncate text-sm font-semibold group-data-[collapsible=icon]:hidden">
             myBot
           </span>
@@ -356,14 +353,16 @@ export function AppSidebar({
                           }
                         >
                           {conversations.map((conversation) =>
-                            conversationRow(conversation)
+                            conversationRow(conversation, { nested: true })
                           )}
                         </SidebarProjectRow>
                       )
                     })
                   ) : (
-                    <SidebarMenuItem className="px-2 py-1 text-xs text-muted-foreground">
-                      No projects yet
+                    <SidebarMenuItem className="flex min-h-8 items-center px-2 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
+                      <span className="min-w-0 flex-1 truncate">
+                        No projects yet
+                      </span>
                     </SidebarMenuItem>
                   )}
                 </SidebarMenu>
@@ -379,8 +378,10 @@ export function AppSidebar({
                       conversationRow(conversation)
                     )
                   ) : (
-                    <SidebarMenuItem className="px-2 py-1 text-xs text-muted-foreground">
-                      No recent conversations
+                    <SidebarMenuItem className="flex min-h-8 items-center px-2 text-xs text-muted-foreground">
+                      <span className="min-w-0 flex-1 truncate">
+                        No recent conversations
+                      </span>
                     </SidebarMenuItem>
                   )}
                 </SidebarMenu>

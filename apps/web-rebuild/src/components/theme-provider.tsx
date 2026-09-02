@@ -141,7 +141,7 @@ export function ThemeProvider({
 
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.repeat) {
+      if (event.defaultPrevented || event.repeat) {
         return
       }
 
@@ -149,7 +149,10 @@ export function ThemeProvider({
         return
       }
 
-      if (isEditableTarget(event.target)) {
+      if (
+        isEditableTarget(event.target) ||
+        isEditableTarget(document.activeElement)
+      ) {
         return
       }
 

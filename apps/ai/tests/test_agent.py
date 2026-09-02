@@ -658,7 +658,9 @@ def test_request_validates_provider_capabilities(model, effort, speed) -> None:
 
 
 def test_missing_xai_provider_is_safe() -> None:
-    application = create_app(Settings(environment="test", ai_service_token="test-token"))
+    application = create_app(
+        Settings(environment="test", ai_service_token="test-token", xai_api_key="")
+    )
     response = TestClient(application).post(
         "/agent/stream",
         json={**PAYLOAD, "model": "grok-4.6", "reasoning_effort": "high"},
@@ -674,7 +676,13 @@ def test_missing_xai_provider_is_safe() -> None:
 
 
 def test_missing_openrouter_provider_is_safe() -> None:
-    application = create_app(Settings(environment="test", ai_service_token="test-token"))
+    application = create_app(
+        Settings(
+            environment="test",
+            ai_service_token="test-token",
+            openrouter_api_key="",
+        )
+    )
     response = TestClient(application).post(
         "/agent/stream",
         json={**PAYLOAD, "model": "glm-5.2", "reasoning_effort": "high"},

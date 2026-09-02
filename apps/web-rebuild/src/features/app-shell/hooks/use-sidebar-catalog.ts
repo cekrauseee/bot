@@ -2,17 +2,24 @@ import { useCallback, useEffect, useRef, useState } from "react"
 
 import {
   appShellApi,
+  type ActiveTitleRun,
   type ConversationSummary,
   type ProjectSummary,
 } from "@/features/app-shell/api"
+import {
+  mergeConversationCatalog,
+  mergeConversationTitle,
+} from "@/features/app-shell/conversation-metadata"
 import { apiErrorMessage } from "@/lib/api"
 
 type SidebarCatalog = {
+  activeRuns: ActiveTitleRun[]
   conversations: ConversationSummary[]
   projects: ProjectSummary[]
 }
 
 const emptyCatalog: SidebarCatalog = {
+  activeRuns: [],
   conversations: [],
   projects: [],
 }
@@ -35,7 +42,16 @@ export function useSidebarCatalog(enabled: boolean) {
 
       try {
         const nextCatalog = await appShellApi.catalog()
-        if (currentRequest === requestId.current) setCatalog(nextCatalog)
+        if (currentRequest === requestId.current) {
+          setCatalog((current) => ({
+            activeRuns: nextCatalog.activeRuns,
+            conversations: mergeConversationCatalog(
+              current.conversations,
+              nextCatalog.conversations
+            ),
+            projects: nextCatalog.projects,
+          }))
+        }
       } catch (error) {
         if (currentRequest === requestId.current) {
           setCatalogError(
@@ -99,9 +115,30 @@ export function useSidebarCatalog(enabled: boolean) {
     setCatalog((current) => ({
       ...current,
       conversations: current.conversations.map((conversation) =>
-        conversation.id === next.id ? next : conversation
+        conversation.id === next.id
+          ? mergeConversationTitle(conversation, next)
+          : conversation
       ),
     }))
+  }, [])
+
+  const upsertConversation = useCallback((next: ConversationSummary) => {
+    setCatalog((current) => {
+      const exists = current.conversations.some(
+        (conversation) => conversation.id === next.id
+      )
+
+      return {
+        ...current,
+        conversations: exists
+          ? current.conversations.map((conversation) =>
+              conversation.id === next.id
+                ? mergeConversationTitle(conversation, next)
+                : conversation
+            )
+          : [next, ...current.conversations],
+      }
+    })
   }, [])
 
   const replaceProject = useCallback((next: ProjectSummary) => {
@@ -155,6 +192,7 @@ export function useSidebarCatalog(enabled: boolean) {
         () => appShellApi.deleteProject(projectId),
         () =>
           setCatalog((current) => ({
+            ...current,
             conversations: current.conversations.map((conversation) =>
               conversation.project_id === projectId
                 ? { ...conversation, project_id: null }
@@ -241,9 +279,13 @@ export function useSidebarCatalog(enabled: boolean) {
             )
             setCatalog((current) => ({
               ...current,
-              conversations: current.conversations.map(
-                (conversation) =>
-                  replacements.get(conversation.id) ?? conversation
+              conversations: current.conversations.map((conversation) =>
+                replacements.has(conversation.id)
+                  ? mergeConversationTitle(
+                      conversation,
+                      replacements.get(conversation.id)!
+                    )
+                  : conversation
               ),
             }))
           }
@@ -297,6 +339,7 @@ export function useSidebarCatalog(enabled: boolean) {
     reorderPinnedConversations,
     reorderProjects,
     setConversationPinned,
+    upsertConversation,
   }
 }
 

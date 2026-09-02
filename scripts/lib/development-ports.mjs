@@ -30,8 +30,8 @@ export async function developmentServices(root = projectRoot, env = process.env)
     throw new Error('RUNTIME_PORT must match RUNTIME_BASE_URL')
   }
   return [
-    { label: 'Web', port: port(webOrigin), hosts: ['127.0.0.1', '::1'] },
-    { label: 'Web rebuild', port: 5174, hosts: ['127.0.0.1', '::1'] },
+    { label: 'Web rebuild', port: port(webOrigin), hosts: ['127.0.0.1', '::1'] },
+    { label: 'Legacy web', port: 5174, hosts: ['127.0.0.1', '::1'] },
     { label: 'API', port: port(apiOrigin), hosts: ['0.0.0.0', '::'] },
     { label: 'AI', port: port(aiOrigin), hosts: ['127.0.0.1'] },
     { label: 'Runtime', port: runtimePort, hosts: ['0.0.0.0', '::'] },
