@@ -11,7 +11,12 @@ export function createApplication(env: NodeJS.ProcessEnv = process.env) {
   return {
     config,
     service,
-    server: createRuntimeServer({ service, serviceToken: config.serviceToken, isReady: () => config.providerReady }),
+    server: createRuntimeServer({
+      service,
+      serviceToken: config.serviceToken,
+      isReady: () => config.providerReady,
+      unavailableReason: () => config.providerUnavailableReason,
+    }),
   }
 }
 
@@ -21,4 +26,18 @@ if (isEntryPoint) {
   application.server.listen(application.config.port, '0.0.0.0', () => {
     runtimeLogger({ event: 'runtime_started', port: application.config.port }, 'runtime_started')
   })
+  let shuttingDown = false
+  const shutdown = async () => {
+    if (shuttingDown) return
+    shuttingDown = true
+    await new Promise<void>((resolve, reject) => {
+      application.server.close((error) => error ? reject(error) : resolve())
+    })
+    await application.service.dispose()
+  }
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.once(signal, () => {
+      void shutdown().catch(() => { process.exitCode = 1 })
+    })
+  }
 }

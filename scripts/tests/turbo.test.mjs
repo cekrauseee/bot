@@ -36,6 +36,7 @@ test('Turbo keeps internal builds topological and external tasks uncached', asyn
   assert.ok(turbo.tasks.test.env.includes('DATABASE_URL'))
   assert.ok(turbo.tasks.dev.env.includes('RUNTIME_BASE_URL'))
   assert.ok(turbo.tasks.dev.env.includes('RUNTIME_PORT'))
+  assert.ok(turbo.tasks.dev.env.includes('RUNTIME_PROVIDER'))
   assert.ok(turbo.tasks.dev.passThroughEnv.includes('RUNTIME_SERVICE_TOKEN'))
   assert.ok(turbo.tasks.dev.passThroughEnv.includes('VERCEL_OIDC_TOKEN'))
   assert.ok(turbo.tasks['db:check'].passThroughEnv.includes('ENVIRONMENT'))

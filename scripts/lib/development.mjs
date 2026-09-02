@@ -6,6 +6,7 @@ import { prepareEnvironment, printEnvironmentSummary } from './environment.mjs'
 import { infrastructurePortError, inspectInfrastructurePorts } from './infrastructure.mjs'
 import { npmCommand, projectRoot } from './project.mjs'
 import { commandIsAvailable, run } from './process.mjs'
+import { buildDevelopmentRuntimeImage } from './runtime-image.mjs'
 
 async function pathExists(target) {
   try {
@@ -157,6 +158,7 @@ export async function prepareDevelopment({ dependencies = 'if-missing', environm
     await installDependencies()
   }
 
+  await buildDevelopmentRuntimeImage()
   await buildEmailPackage()
   await startInfrastructure()
   await migrateDatabase()

@@ -1,0 +1,25 @@
+FROM node:24-bookworm-slim
+
+ARG AGENT_BROWSER_VERSION=0.36.0
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    chromium \
+    fonts-liberation \
+    fonts-noto-color-emoji \
+  && rm -rf /var/lib/apt/lists/* \
+  && npm install -g --allow-scripts=agent-browser "agent-browser@${AGENT_BROWSER_VERSION}" \
+  && useradd --create-home --uid 10001 --shell /usr/sbin/nologin mybot-agent \
+  && install -d -m 0700 -o mybot-agent -g mybot-agent /workspace \
+  && install -d -m 0700 -o root -g root /var/lib/mybot/runtime/operations
+
+ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV AGENT_BROWSER_ARGS="--no-sandbox,--disable-dev-shm-usage,--disable-gpu"
+ENV AGENT_BROWSER_DEFAULT_TIMEOUT=25000
+ENV AGENT_BROWSER_SOCKET_DIR=/home/mybot-agent/.agent-browser
+ENV HOME=/home/mybot-agent
+
+USER mybot-agent
+WORKDIR /workspace
+
+CMD ["sleep", "infinity"]

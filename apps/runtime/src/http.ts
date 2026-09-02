@@ -14,6 +14,7 @@ export interface RuntimeHttpOptions {
   readonly service: RuntimeService
   readonly serviceToken?: string
   readonly isReady?: () => boolean
+  readonly unavailableReason?: () => string
 }
 
 export function createRuntimeServer(options: RuntimeHttpOptions): Server {
@@ -93,7 +94,7 @@ async function route(
     sendJson(response, ready ? 200 : 503, {
       status: ready ? 'ready' : 'unavailable',
       service: 'runtime',
-      ...(ready ? {} : { reason: 'provider_credentials_missing' }),
+      ...(ready ? {} : { reason: options.unavailableReason?.() ?? 'provider_credentials_missing' }),
     })
     return
   }
