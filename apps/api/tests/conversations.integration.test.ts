@@ -937,6 +937,44 @@ describe('PostgreSQL conversation flow', () => {
     }
   })
 
+  it('uses the API-backed OpenAI path when the optional Codex connection is disabled', async () => {
+    const owner = await authenticatedUser('codex-api-fallback-owner')
+    const providerConnections = new DatabaseProviderConnectionSettings(database)
+    const executor = new AgentRunExecutor(database, ai)
+    const app = createApp(settings, {
+      database,
+      sessions: new SessionManager(settings),
+      agentRuns: executor,
+      otp: {} as never,
+      google: {} as never,
+      providerConnectionSettings: providerConnections,
+    })
+    const request = (path: string, init: RequestInit = {}) => app.handle(new Request(
+      `http://localhost${path}`,
+      { ...init, headers: { cookie: owner.cookie, ...init.headers } },
+    ))
+
+    try {
+      expect(await providerConnections.setActive(owner.id, 'openai', false))
+        .toBe(false)
+
+      const response = await request('/conversations/turns', {
+        method: 'POST',
+        headers: { origin: settings.webOrigin, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          message: 'Use the API fallback', model: 'gpt-5.6-sol',
+          reasoning_effort: 'medium', speed: 'standard',
+        }),
+      })
+
+      expect(response.status).toBe(200)
+      expect((await parseEvents(response)).map((event) => event.type)).toContain('turn.completed')
+    } finally {
+      await executor.close()
+      await pool.query('delete from users where id = $1', [owner.id])
+    }
+  })
+
   it('validates model capabilities and durably pauses, replays, and resumes an AI v2 run', async () => {
     const owner = await authenticatedUser('agent-run-owner')
     const calls: Record<string, unknown>[] = []
@@ -1021,37 +1059,21 @@ describe('PostgreSQL conversation flow', () => {
       const disabledCatalog = await request('/models')
       expect(await disabledCatalog.json()).toMatchObject({
         models: [
-          { id: 'gpt-5.6-sol', provider: 'openai', active: false },
-          { id: 'gpt-5.6-terra', provider: 'openai', active: false },
-          { id: 'gpt-5.6-luna', provider: 'openai', active: false },
+          { id: 'gpt-5.6-sol', provider: 'openai', active: true },
+          { id: 'gpt-5.6-terra', provider: 'openai', active: true },
+          { id: 'gpt-5.6-luna', provider: 'openai', active: true },
           { id: 'grok-4.6', provider: 'xai', active: true },
           { id: 'grok-4.3', provider: 'xai', active: true },
           { id: 'glm-5.2', provider: 'openrouter', active: true },
         ],
       })
 
-      const inactivePreference = await request('/preferences/model', {
+      const fallbackPreference = await request('/preferences/model', {
         method: 'PATCH',
         headers: { origin: settings.webOrigin, 'content-type': 'application/json' },
         body: JSON.stringify({ model: 'gpt-5.6-sol' }),
       })
-      expect(inactivePreference.status).toBe(409)
-
-      const inactive = await request('/conversations/turns', {
-        method: 'POST',
-        headers: { origin: settings.webOrigin, 'content-type': 'application/json' },
-        body: JSON.stringify({
-          message: 'Must not use a disabled provider', model: 'gpt-5.6-sol',
-          reasoning_effort: 'medium', speed: 'standard',
-        }),
-      })
-      expect(inactive.status).toBe(409)
-      expect(await inactive.json()).toEqual({
-        detail: {
-          code: 'provider_inactive',
-          message: 'Enable the selected model provider before using this model.',
-        },
-      })
+      expect(fallbackPreference.status).toBe(200)
 
       const invalid = await request('/conversations/turns', {
         method: 'POST',

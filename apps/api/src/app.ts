@@ -15,7 +15,7 @@ import {
   type AgentRun,
   type User,
 } from './db/repository.js'
-import type { Database, Db } from './db/database.js'
+import type { Database } from './db/database.js'
 import { GoogleOAuthService } from './modules/auth/oauth.js'
 import { OtpService } from './modules/auth/otp.js'
 import { SessionManager } from './modules/auth/sessions.js'
@@ -822,20 +822,6 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       throw error
     }
   }
-  const requireActiveProvider = async (
-    userId: string,
-    provider: string,
-    db?: Db,
-  ) => {
-    const active = await services.providerConnectionSettings?.isActive(userId, provider, db) ?? true
-    if (!active) {
-      throw new AuthError(
-        'provider_inactive',
-        'Enable the selected model provider before using this model.',
-        409,
-      )
-    }
-  }
   const resolvedProviderConnection = async (
     userId: string,
     registration: ProviderConnectionRegistry[string],
@@ -893,20 +879,14 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   })
 
   app.get('/models', async ({ request }) => {
-    const user = await sessionUser(request)
-    const providers = [...new Set(modelCatalog.map((model) => model.provider))]
-    const activeStates = services.providerConnectionSettings
-      ? await services.providerConnectionSettings.activeStates(user.id, providers)
-      : new Map<string, boolean>()
-    return publicModelCatalog(activeStates)
+    await sessionUser(request)
+    return publicModelCatalog()
   })
 
   app.patch('/preferences/model', async ({ request, body }) => {
     browserOrigin(request)
     const user = await sessionUser(request)
     const updated = await services.database.transaction(async (db) => {
-      const definition = modelDefinition(body.model)!
-      await requireActiveProvider(user.id, definition.provider, db)
       return new AuthRepository(db).updateDefaultModel(user.id, body.model)
     })
     if (!updated) throw new AuthError('not_found', 'Not Found', 404)
@@ -1264,8 +1244,6 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       const owned = await repository.lockOwned(user.id, params.conversationId)
       if (!owned) return undefined
       if (owned.model === body.model) return owned
-      const definition = modelDefinition(body.model)!
-      await requireActiveProvider(user.id, definition.provider, db)
       return repository.updateModel(user.id, owned, body.model)
     })
     if (!conversation) {
@@ -1398,7 +1376,6 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
             400,
           )
         }
-        await requireActiveProvider(user.id, definition.provider, db)
         if (!conversationId) {
           conversation = await repository.create(user.id, conversationTitle(message), definition.id)
           if (user.defaultModel !== definition.id) {
