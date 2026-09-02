@@ -25,7 +25,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarMenuSkeleton,
   SidebarRail,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
@@ -34,6 +33,7 @@ import type { ConversationSummary } from "@/features/app-shell/api"
 import { SidebarConversationRow } from "@/features/app-shell/components/sidebar-conversation-row"
 import { SidebarCreateProjectDialog } from "@/features/app-shell/components/sidebar-create-project-dialog"
 import { SidebarProjectRow } from "@/features/app-shell/components/sidebar-project-row"
+import { SidebarSkeleton } from "@/features/app-shell/components/sidebar-skeleton"
 import type { SidebarCatalogController } from "@/features/app-shell/hooks/use-sidebar-catalog"
 import type { User } from "@/features/auth/api"
 
@@ -209,19 +209,9 @@ export function AppSidebar({
         </SidebarMenu>
       </SidebarHeader>
 
-      <SidebarContent>
+      <SidebarContent aria-busy={catalog.loading}>
         {catalog.loading && !hasCatalog ? (
-          <SidebarGroup>
-            <SidebarGroupContent>
-              <SidebarMenu aria-label="Loading conversations and projects">
-                {Array.from({ length: 6 }, (_, index) => (
-                  <SidebarMenuItem key={index}>
-                    <SidebarMenuSkeleton showIcon />
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+          <SidebarSkeleton />
         ) : catalog.catalogError && !hasCatalog ? (
           <SidebarGroup>
             <SidebarGroupLabel>Unable to load</SidebarGroupLabel>
@@ -406,23 +396,25 @@ export function AppSidebar({
               <DropdownMenuTrigger
                 render={
                   <SidebarMenuButton
-                    tooltip="Account"
+                    tooltip={userName}
                     className="data-open:bg-sidebar-accent"
                   />
                 }
               >
-                <Avatar size="sm">
-                  {user.avatar_url && (
-                    <AvatarImage src={user.avatar_url} alt="" />
-                  )}
-                  <AvatarFallback>{getUserInitials(user)}</AvatarFallback>
-                </Avatar>
-                <span className="min-w-0 flex-1 truncate text-left">
+                <span className="relative grid size-4 shrink-0 place-items-center">
+                  <Avatar size="sm" className="absolute size-6 rounded-md">
+                    {user.avatar_url && (
+                      <AvatarImage src={user.avatar_url} alt="" className="rounded-md" />
+                    )}
+                    <AvatarFallback className="rounded-md">{getUserInitials(user)}</AvatarFallback>
+                  </Avatar>
+                </span>
+                <span className="min-w-0 flex-1 truncate text-left group-data-[collapsible=icon]:hidden">
                   {userName}
                 </span>
                 <ChevronDownIcon
                   aria-hidden="true"
-                  className="ml-auto transition-transform duration-150 group-data-open/menu-button:rotate-180 motion-reduce:transition-none"
+                  className="ml-auto transition-transform duration-150 group-data-[collapsible=icon]:hidden group-data-open/menu-button:rotate-180 motion-reduce:transition-none"
                 />
               </DropdownMenuTrigger>
               <DropdownMenuContent

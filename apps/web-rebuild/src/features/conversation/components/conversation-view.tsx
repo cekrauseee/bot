@@ -7,6 +7,7 @@ import {
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller"
 import { ConversationMessage } from "@/features/conversation/components/conversation-message"
+import { useTurnSpacer } from "@/features/conversation/hooks/use-turn-spacer"
 import type { ConversationMessageData } from "@/features/conversation/model"
 import type { CSSProperties } from "react"
 
@@ -19,19 +20,31 @@ const composerScrollMask = {
 
 export function ConversationView({
   messages,
+  onTurnSpacerAnchorConsumed,
+  turnSpacerAnchorId,
 }: {
   messages: readonly ConversationMessageData[]
+  onTurnSpacerAnchorConsumed?: (anchorId: string) => void
+  turnSpacerAnchorId?: string
 }) {
+  const { clearSpacer, contentRef, handleScroll, viewportRef } = useTurnSpacer(
+    turnSpacerAnchorId,
+    onTurnSpacerAnchorConsumed
+  )
+
   return (
     <section aria-labelledby="conversation-title" className="size-full min-h-0">
-      <MessageScrollerProvider defaultScrollPosition="start">
+      <MessageScrollerProvider defaultScrollPosition="end">
         <MessageScroller>
           <MessageScrollerViewport
+            ref={viewportRef}
             preserveScrollOnPrepend={false}
+            onScroll={handleScroll}
             className="px-4 [overflow-anchor:none]"
             style={composerScrollMask}
           >
             <MessageScrollerContent
+              ref={contentRef}
               role="list"
               aria-label="Messages"
               className="mx-auto w-full max-w-3xl gap-1 pt-8 pb-[calc(var(--composer-dock-height,4rem)+2rem)] sm:pt-10 sm:pb-[calc(var(--composer-dock-height,4rem)+2.5rem)]"
@@ -48,7 +61,10 @@ export function ConversationView({
               ))}
             </MessageScrollerContent>
           </MessageScrollerViewport>
-          <MessageScrollerButton className="data-[direction=end]:bottom-[calc(var(--composer-dock-height,4rem)+1rem)]" />
+          <MessageScrollerButton
+            onClick={clearSpacer}
+            className="data-[direction=end]:bottom-[calc(var(--composer-dock-height,4rem)+1rem)]"
+          />
         </MessageScroller>
       </MessageScrollerProvider>
     </section>

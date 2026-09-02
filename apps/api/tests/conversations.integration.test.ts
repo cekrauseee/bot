@@ -62,15 +62,26 @@ const ai: AiClient = async (input) => {
         sources: [{ title: 'Example', url: 'https://example.com/source' }],
       },
     }),
-    providerFrame(runId, turnId, 5, 'browser.frame', {
+    providerFrame(runId, turnId, 5, 'tool.started', {
+      tool: {
+        id: 'file-1', name: 'filesystem_read', label: 'Reading files',
+        status: 'in_progress', target: '/workspace/package.json',
+      },
+    }),
+    providerFrame(runId, turnId, 6, 'tool.completed', {
+      tool: {
+        id: 'file-1', name: 'filesystem_read', label: 'Read files', status: 'completed',
+      },
+    }),
+    providerFrame(runId, turnId, 7, 'browser.frame', {
       frame: {
         base64: 'cG5n', mime_type: 'image/png', captured_at: '2026-08-30T17:00:00Z',
       },
     }),
-    providerFrame(runId, turnId, 6, 'text.delta', {
+    providerFrame(runId, turnId, 8, 'text.delta', {
       delta: 'A **streamed** answer.\n\n```ts\nconst ready = true\n```',
     }),
-    providerFrame(runId, turnId, 7, 'turn.completed', { model: input.model }),
+    providerFrame(runId, turnId, 9, 'turn.completed', { model: input.model }),
   ].join(''), { headers: { 'content-type': 'text/event-stream' } })
 }
 
@@ -162,6 +173,100 @@ describe('PostgreSQL conversation flow', () => {
     }
   })
 
+  it('keeps a backend default for new conversations and an isolated model per conversation', async () => {
+    const owner = await authenticatedUser('model-preference-owner')
+    const other = await authenticatedUser('model-preference-other')
+    const app = createApp(settings, {
+      database,
+      sessions: new SessionManager(settings),
+      ai,
+      otp: {} as never,
+      google: {} as never,
+    })
+    const request = (path: string, method = 'GET', body?: object, cookie = owner.cookie) =>
+      app.handle(
+        new Request(`http://localhost${path}`, {
+          method,
+          headers: {
+            cookie,
+            ...(method === 'GET'
+              ? {}
+              : {
+                  origin: settings.webOrigin,
+                  'content-type': 'application/json',
+                }),
+          },
+          ...(body ? { body: JSON.stringify(body) } : {}),
+        }),
+      )
+    const turn = {
+      message: 'Use the persisted model',
+      reasoning_effort: 'medium',
+      speed: 'standard',
+    }
+
+    try {
+      expect(await (await request('/auth/session')).json()).toMatchObject({
+        default_model: 'gpt-5.6-sol',
+      })
+
+      const preference = await request('/preferences/model', 'PATCH', {
+        model: 'gpt-5.6-luna',
+      })
+      expect(preference.status).toBe(200)
+      expect(await preference.json()).toMatchObject({
+        default_model: 'gpt-5.6-luna',
+      })
+
+      const firstEvents = await parseEvents(await request('/conversations/turns', 'POST', turn))
+      const first = firstEvents[0].data.conversation as {
+        id: string
+        model: string
+      }
+      expect(first.model).toBe('gpt-5.6-luna')
+      expect(firstEvents[0].data.assistant_message).toMatchObject({
+        model: 'gpt-5.6-luna',
+      })
+
+      expect(
+        (await request(`/conversations/${first.id}/model`, 'PATCH', { model: 'gpt-5.6-terra' }, other.cookie)).status,
+      ).toBe(404)
+      const changed = await request(`/conversations/${first.id}/model`, 'PATCH', { model: 'gpt-5.6-terra' })
+      expect(await changed.json()).toMatchObject({
+        id: first.id,
+        model: 'gpt-5.6-terra',
+      })
+
+      const continuedEvents = await parseEvents(
+        await request(`/conversations/${first.id}/turns`, 'POST', {
+          ...turn,
+          message: 'Continue without sending a model',
+        }),
+      )
+      expect(continuedEvents[0].data.conversation).toMatchObject({
+        model: 'gpt-5.6-terra',
+      })
+      expect(continuedEvents[0].data.assistant_message).toMatchObject({
+        model: 'gpt-5.6-terra',
+      })
+
+      expect(await (await request('/auth/session')).json()).toMatchObject({
+        default_model: 'gpt-5.6-luna',
+      })
+      const secondEvents = await parseEvents(
+        await request('/conversations/turns', 'POST', {
+          ...turn,
+          message: 'Start from the global default',
+        }),
+      )
+      expect(secondEvents[0].data.conversation).toMatchObject({
+        model: 'gpt-5.6-luna',
+      })
+    } finally {
+      await pool.query('delete from users where id = any($1::uuid[])', [[owner.id, other.id]])
+    }
+  })
+
   it('persists, reloads, protects, and deletes a streamed conversation', async () => {
     const owner = await authenticatedUser('conversation-owner')
     const other = await authenticatedUser('conversation-other')
@@ -199,6 +304,8 @@ describe('PostgreSQL conversation flow', () => {
         'reasoning.delta',
         'step.started',
         'step.completed',
+        'tool.started',
+        'tool.completed',
         'text.delta',
         'turn.completed',
       ])
@@ -248,7 +355,16 @@ describe('PostgreSQL conversation flow', () => {
             id: 'search-1',
             type: 'search',
             query: 'current source',
+            status: 'completed',
             results: [{ title: 'Example', domain: 'example.com' }],
+          },
+          {
+            id: 'file-1',
+            name: 'filesystem_read',
+            label: 'Read files',
+            status: 'completed',
+            target: '/workspace/package.json',
+            event_type: 'tool.completed',
           },
         ],
       })
@@ -1153,12 +1269,12 @@ describe('PostgreSQL conversation flow', () => {
       const conversations = new ConversationRepository(db)
       const projects = new ProjectRepository(db)
       const project = await projects.create(owner.id, 'Pinned project', 'pinned-project')
-      const first = await conversations.create(owner.id, 'First pinned')
-      const second = await conversations.create(owner.id, 'Second pinned')
-      const third = await conversations.create(owner.id, 'Third pinned')
-      const fourth = await conversations.create(owner.id, 'Fourth pinned')
+      const first = await conversations.create(owner.id, 'First pinned', 'gpt-5.6-sol')
+      const second = await conversations.create(owner.id, 'Second pinned', 'gpt-5.6-sol')
+      const third = await conversations.create(owner.id, 'Third pinned', 'gpt-5.6-sol')
+      const fourth = await conversations.create(owner.id, 'Fourth pinned', 'gpt-5.6-sol')
       const foreignUser = await new AuthRepository(db).findUserByEmail(other.email)
-      const foreign = await conversations.create(foreignUser!.id, 'Foreign conversation')
+      const foreign = await conversations.create(foreignUser!.id, 'Foreign conversation', 'gpt-5.6-sol')
       await conversations.assignProject(owner.id, first.id, project!.id)
       return { first, second, third, fourth, foreign, project: project! }
     })
@@ -1228,7 +1344,7 @@ describe('PostgreSQL conversation flow', () => {
       const conversations = new ConversationRepository(db)
       const projects = new ProjectRepository(db)
       const project = await projects.create(owner.id, 'Rename project', 'rename-project')
-      const conversation = await conversations.create(owner.id, 'Original title')
+      const conversation = await conversations.create(owner.id, 'Original title', 'gpt-5.6-sol')
       await conversations.assignProject(owner.id, conversation.id, project!.id)
       return { conversation, project: project! }
     })

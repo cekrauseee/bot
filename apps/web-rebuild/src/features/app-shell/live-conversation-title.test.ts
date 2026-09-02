@@ -15,6 +15,8 @@ function conversation(): ConversationSummary {
   return {
     id: conversationId,
     title: "Generated title",
+    model: "gpt-5.6-sol",
+    model_updated_at: "2026-09-02T10:00:00.000Z",
     project_id: null,
     pinned_order: null,
     pin_updated_at: null,

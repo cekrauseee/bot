@@ -1,8 +1,11 @@
 import { apiRequest } from "@/lib/api"
+import type { ComposerModel } from "@/features/composer/model-catalog"
 
 export type ConversationSummary = {
   id: string
   title: string
+  model: string
+  model_updated_at: string
   project_id: string | null
   pinned_order: number | null
   pin_updated_at: string | null
@@ -45,16 +48,18 @@ function parseActiveTitleRun(value: unknown): ActiveTitleRun {
 
 export const appShellApi = {
   catalog: async () => {
-    const [conversationResult, projectResult, activeRunResult] =
+    const [conversationResult, projectResult, activeRunResult, modelResult] =
       await Promise.all([
         apiRequest<{ conversations: ConversationSummary[] }>("/conversations"),
         apiRequest<{ projects: ProjectSummary[] }>("/projects"),
         apiRequest<{ runs: unknown[] }>("/agent-runs"),
+        apiRequest<{ models: ComposerModel[] }>("/models"),
       ])
 
     return {
       activeRuns: activeRunResult.runs.map(parseActiveTitleRun),
       conversations: conversationResult.conversations,
+      models: modelResult.models,
       projects: projectResult.projects,
     }
   },
@@ -80,6 +85,14 @@ export const appShellApi = {
       method: "PATCH",
       body: JSON.stringify({ title }),
     }),
+  setConversationModel: (conversationId: string, model: string) =>
+    apiRequest<ConversationSummary>(
+      `/conversations/${conversationId}/model`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ model }),
+      }
+    ),
   renameProject: (projectId: string, name: string) =>
     apiRequest<ProjectSummary>(`/projects/${projectId}`, {
       method: "PATCH",

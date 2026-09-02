@@ -33,6 +33,7 @@ const columns: Record<string, ColumnContract[]> = {
     { name: 'email_verified_at', type: 'timestamp with time zone', length: null, nullable: true, defaultValue: null },
     { name: 'created_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
     { name: 'updated_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
+    { name: 'default_model', type: 'character varying', length: 32, nullable: false, defaultValue: "'gpt-5.6-sol'::character varying" },
   ],
   oauth_identities: [
     { name: 'id', type: 'uuid', length: null, nullable: false, defaultValue: 'gen_random_uuid()' },
@@ -73,6 +74,8 @@ const columns: Record<string, ColumnContract[]> = {
     { name: 'pinned_order', type: 'integer', length: null, nullable: true, defaultValue: null },
     { name: 'pin_updated_at', type: 'timestamp with time zone', length: null, nullable: true, defaultValue: null },
     { name: 'title_updated_at', type: 'timestamp with time zone', length: null, nullable: true, defaultValue: null },
+    { name: 'model', type: 'character varying', length: 32, nullable: false, defaultValue: null },
+    { name: 'model_updated_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
   ],
   messages: [
     { name: 'id', type: 'uuid', length: null, nullable: false, defaultValue: 'gen_random_uuid()' },

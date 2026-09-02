@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import type { TurnStreamEvent } from "@/features/composer/api"
 import {
   applyTurnEvent,
+  consumeTurnSpacerAnchor,
   emptyConversationRecord,
   mapApiMessage,
 } from "@/features/conversation/conversation-state"
@@ -57,8 +58,10 @@ describe("conversation state", () => {
         {
           id: "tool-1",
           event_type: "tool.completed",
-          label: "Read file",
-          name: "read",
+          label: "Read files",
+          name: "filesystem_read",
+          status: "completed",
+          target: "/workspace/package.json",
         },
       ],
     })
@@ -68,8 +71,9 @@ describe("conversation state", () => {
       {
         id: "tool-1",
         type: "tool",
-        action: "read",
-        target: "Read file",
+        action: "filesystem_read",
+        status: "completed",
+        target: "/workspace/package.json",
       },
     ])
   })
@@ -97,30 +101,58 @@ describe("conversation state", () => {
     state = applyTurnEvent(
       state,
       event(3, "tool.started", {
-        tool: { id: "tool", name: "read", label: "Read package.json" },
+        tool: {
+          id: "tool",
+          name: "filesystem_read",
+          label: "Reading files",
+          status: "in_progress",
+          target: "/workspace/package.json",
+        },
       }),
       Date.parse("2026-09-02T00:00:03.000Z")
     )
     state = applyTurnEvent(
       state,
-      event(4, "reasoning.delta", { delta: "After search." }),
+      event(4, "tool.completed", {
+        tool: {
+          id: "tool",
+          name: "filesystem_read",
+          label: "Read files",
+          status: "completed",
+        },
+      }),
       Date.parse("2026-09-02T00:00:04.000Z")
     )
     state = applyTurnEvent(
       state,
-      event(5, "text.delta", { delta: "Final answer." }),
+      event(5, "reasoning.delta", { delta: "After search." }),
       Date.parse("2026-09-02T00:00:05.000Z")
+    )
+    state = applyTurnEvent(
+      state,
+      event(6, "text.delta", { delta: "Final answer." }),
+      Date.parse("2026-09-02T00:00:06.000Z")
     )
 
     const assistant = state.messages.find(
       (message) => message.id === "assistant"
     )
+    expect(state.turnSpacerAnchorId).toBe("user")
     expect(assistant?.content).toBe("Final answer.")
     expect(assistant?.process?.status).toBe("processed")
     expect(assistant?.process?.activities).toEqual([
       expect.objectContaining({ type: "text", content: "Before search." }),
-      expect.objectContaining({ type: "tool", action: "read" }),
+      expect.objectContaining({
+        type: "tool",
+        action: "filesystem_read",
+        status: "completed",
+        target: "/workspace/package.json",
+      }),
       expect.objectContaining({ type: "text", content: "After search." }),
     ])
+
+    const consumed = consumeTurnSpacerAnchor(state, "user")
+    expect(consumed.turnSpacerAnchorId).toBeUndefined()
+    expect(consumed.messages).toBe(state.messages)
   })
 })

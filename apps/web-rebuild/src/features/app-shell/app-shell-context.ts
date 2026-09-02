@@ -8,6 +8,7 @@ export type AppShellContextValue = {
   activeConversationRecord: ConversationRecord | null
   catalogFailed: boolean
   catalogLoading: boolean
+  consumeTurnSpacerAnchor: (conversationId: string, anchorId: string) => void
   loadConversation: (conversationId: string) => Promise<void>
 }
 

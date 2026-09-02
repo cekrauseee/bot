@@ -6,6 +6,7 @@ export type User = {
   first_name: string | null
   last_name: string | null
   avatar_url: string | null
+  default_model: string
 }
 
 export type OtpChallenge = {
@@ -20,6 +21,11 @@ export { ApiError as AuthApiError }
 export const authApi = {
   googleStartUrl: `${apiBaseUrl}/auth/google/start`,
   session: () => apiRequest<User>("/auth/session"),
+  setDefaultModel: (model: string) =>
+    apiRequest<User>("/preferences/model", {
+      method: "PATCH",
+      body: JSON.stringify({ model }),
+    }),
   requestOtp: (email: string) =>
     apiRequest<OtpChallenge>("/auth/otp/request", {
       method: "POST",

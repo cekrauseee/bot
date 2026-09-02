@@ -77,7 +77,7 @@ export function ResponseProcess({
   if (!hasDisclosure) {
     return (
       <div className="flex w-full min-w-0 flex-col gap-4">
-        <div className="-ms-1 flex h-7 max-w-[37em] min-w-0 items-center px-1">
+        <div className="-ms-1 flex h-7 w-full min-w-0 items-center px-1">
           <ProcessLabel duration={duration} process={process} />
         </div>
         {process.status === "processed" && hasResponse ? <Separator /> : null}
@@ -92,7 +92,7 @@ export function ResponseProcess({
         onOpenChange={(open) => setDisclosure({ open, status: process.status })}
         className="flex w-full min-w-0 flex-col gap-4"
       >
-        <div className="max-w-[37em] min-w-0">
+        <div className="w-full min-w-0">
           <CollapsibleTrigger className="group/process-trigger -ms-1 flex h-7 max-w-full items-center gap-1 rounded-md px-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background data-[panel-open]:[&_svg]:rotate-90">
             <ProcessLabel duration={duration} process={process} />
             <ChevronRightIcon
@@ -105,7 +105,8 @@ export function ResponseProcess({
         <CollapsibleContent>
           <ProcessActivityList
             activities={process.activities}
-            className="max-w-[37em]"
+            className="w-full"
+            defaultGroupsOpen={process.status === "processing"}
           />
         </CollapsibleContent>
       </Collapsible>

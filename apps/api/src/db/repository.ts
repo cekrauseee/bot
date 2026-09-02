@@ -35,6 +35,15 @@ export class AuthRepository {
     return user
   }
 
+  async updateDefaultModel(userId: string, model: string) {
+    const [user] = await this.db
+      .update(users)
+      .set({ defaultModel: model, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning()
+    return user
+  }
+
   async getOrCreateEmailUser(
     email: string,
     profile: Partial<Pick<User, 'firstName' | 'lastName' | 'avatarUrl' | 'emailVerifiedAt'>> = {},
@@ -283,8 +292,20 @@ export class ConversationRepository {
       .where(eq(users.id, userId)).for('update')
     return user
   }
-  async create(userId: string, title: string) {
-    const [row] = await this.db.insert(conversations).values({ userId, title }).returning()
+  async create(userId: string, title: string, model: string) {
+    const [row] = await this.db.insert(conversations).values({ userId, title, model }).returning()
+    return row
+  }
+
+  async updateModel(userId: string, conversation: Conversation, model: string) {
+    const modelUpdatedAt = new Date(Math.max(
+      Date.now(),
+      conversation.modelUpdatedAt.getTime() + 1,
+    ))
+    const [row] = await this.db.update(conversations)
+      .set({ model, modelUpdatedAt })
+      .where(and(eq(conversations.id, conversation.id), eq(conversations.userId, userId)))
+      .returning()
     return row
   }
   async delete(userId: string, id: string) {
