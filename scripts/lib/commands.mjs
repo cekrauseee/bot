@@ -4,7 +4,7 @@ export const commandSections = [
     commands: [
       ['help', 'Show this command guide'],
       ['setup', 'Prepare a fresh development environment'],
-      ['dev', 'Run the web, API, AI, and runtime services together'],
+      ['dev', 'Run the web, desktop, API, AI, and runtime applications together'],
     ],
   },
   {

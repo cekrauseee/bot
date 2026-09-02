@@ -5,7 +5,15 @@ module.exports = {
   packagerConfig: {
     asar: true,
     appBundleId: 'eu.cekrause.mybot',
-    osxSign: { identity: '-', identityValidation: false },
+    osxSign: {
+      identity: '-',
+      identityValidation: false,
+      // Ad hoc signatures have no stable Team ID, so macOS library validation
+      // cannot establish that Electron Framework belongs to the host app.
+      // Release builds must replace this with Developer ID signing and keep
+      // Hardened Runtime enabled for notarization.
+      optionsForFile: () => ({ hardenedRuntime: false }),
+    },
     prune: false,
     icon: path.resolve(__dirname, 'assets/icon'),
     // Electron Packager accepts source paths here (not electron-builder's

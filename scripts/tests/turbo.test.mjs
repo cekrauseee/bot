@@ -85,6 +85,7 @@ test('development uses the Turbo TUI for runnable apps after the shared prefligh
   assert.ok(source.indexOf('await prepareEnvironment()') < source.indexOf('await assertDevelopmentPortsAvailable()'))
   assert.ok(source.indexOf('await prepareDevelopment({ environment })') < source.indexOf("'run', 'dev', '--ui=tui'"))
   assert.match(source, /'--filter=\.\/apps\/\*'/)
+  assert.doesNotMatch(source, /--filter=!@my-bot\/desktop/)
   const rootPackage = await jsonFile('package.json')
   assert.equal(rootPackage.scripts['web:dev'], 'turbo run dev --filter=@my-bot/web')
   assert.doesNotMatch(source, /detached:/)

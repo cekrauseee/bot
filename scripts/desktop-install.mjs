@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { access, cp, mkdir, readdir, rename } from 'node:fs/promises'
+import { access, cp, mkdir, readdir, rename, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -28,7 +28,20 @@ for (const candidate of candidates) {
 if (!source) throw new Error(`No packaged ${appName} found under apps/desktop/out`)
 await mkdir(applications, { recursive: true })
 const staging = path.join(applications, `.myBot.install-${process.pid}`)
-await cp(source, staging, { recursive: true, errorOnExist: true })
+await cp(source, staging, {
+  recursive: true,
+  errorOnExist: true,
+  // macOS framework bundles use relative symlinks. Resolving them while
+  // copying makes the installed app point back into apps/desktop/out and
+  // invalidates its code signature.
+  verbatimSymlinks: true,
+})
+try {
+  execFileSync('codesign', ['--verify', '--deep', '--strict', staging], { stdio: 'pipe' })
+} catch (error) {
+  await rm(staging, { recursive: true, force: true })
+  throw new Error(`Refusing to install an invalid application bundle: ${error.stderr?.toString().trim() || error.message}`)
+}
 if (await access(destination).then(() => true, () => false)) {
   const backup = `${destination}.backup-${new Date().toISOString().replace(/[:.]/g, '-')}`
   await rename(destination, backup)

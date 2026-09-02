@@ -18,8 +18,8 @@ npm run setup
 npm run dev
 ```
 
-Use `npm run help` for the current command guide. `npm run check` runs repository lint, typecheck, tests, and builds; `npm run verify` adds integration checks. Turbo owns JavaScript/TypeScript tasks and `uv` owns Python dependencies.
+Use `npm run help` for the current command guide. `npm run dev` starts the browser application and the Electron application together with their services. `npm run check` runs repository lint, typecheck, tests, and builds; `npm run verify` adds integration checks. Turbo owns JavaScript/TypeScript tasks and `uv` owns Python dependencies.
 
-Build the unsigned desktop package with `npm run desktop:package`. The build reads only the public `WEB_BASE_URL` and `VITE_API_BASE_URL` origins from the root environment and embeds them in a small packaged config; secrets are never embedded. `npm run desktop:install` is macOS-only, stages a fresh `myBot.app`, and retains a recoverable backup before replacing the current-user installation. Signing and notarization remain release concerns.
+Build the ad hoc signed desktop package with `npm run desktop:package`. The build reads only the public `WEB_BASE_URL` and `VITE_API_BASE_URL` origins from the root environment and embeds them in a small packaged config; secrets are never embedded. `npm run desktop:install` is macOS-only, stages and validates a fresh `myBot.app`, and retains a recoverable backup before replacing the current-user installation. Developer ID signing, Hardened Runtime, and notarization remain release concerns.
 
 See [developer documentation](docs/index.md) for architecture, setup, and module boundaries.
