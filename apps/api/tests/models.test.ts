@@ -41,4 +41,10 @@ describe('application-owned model catalog', () => {
     expect(validModelSelection('glm-5.2', 'high', 'fast')).toBe(false)
     expect(validModelSelection('unknown', 'medium', 'standard')).toBe(false)
   })
+
+  it('keeps API-backed models active independently of optional account connections', () => {
+    const catalog = publicModelCatalog()
+
+    expect(catalog.models.every((model) => model.active)).toBe(true)
+  })
 })

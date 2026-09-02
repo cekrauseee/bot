@@ -1,6 +1,8 @@
 export type ComposerModel = {
   id: string
   label: string
+  provider: string
+  active: boolean
   reasoning_efforts: {
     default: string
     options: string[]

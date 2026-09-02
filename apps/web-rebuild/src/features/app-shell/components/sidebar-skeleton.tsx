@@ -47,7 +47,7 @@ function SkeletonRow({ icon, width }: { icon?: boolean; width: string }) {
 export function SidebarSkeleton() {
   return (
     <div aria-hidden="true">
-      <SidebarGroup>
+      <SidebarGroup className="group-data-[collapsible=icon]:hidden">
         <SidebarGroupLabel>
           <SkeletonLabel width="3.5rem" />
         </SidebarGroupLabel>

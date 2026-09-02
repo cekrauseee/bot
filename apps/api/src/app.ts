@@ -19,6 +19,13 @@ import type { Database } from './db/database.js'
 import { GoogleOAuthService } from './modules/auth/oauth.js'
 import { OtpService } from './modules/auth/otp.js'
 import { SessionManager } from './modules/auth/sessions.js'
+import {
+  ProviderConnectionError,
+  type ProviderConnection,
+  type ProviderConnectionAdapter,
+  type ProviderConnectionRegistry,
+  type ProviderConnectionSettings,
+} from './modules/provider-connections.js'
 import { signValue, verifySignedValue } from './security.js'
 import {
   conversationTitle,
@@ -62,6 +69,8 @@ export type Services = {
   google: GoogleOAuthService
   ai?: AiClient
   agentRuns?: AgentRunExecutor
+  providerConnectionAdapters?: ProviderConnectionRegistry
+  providerConnectionSettings?: ProviderConnectionSettings
 }
 
 export type PeerResolver = (request: Request) => string | undefined
@@ -112,6 +121,86 @@ const userSchema = t.Object({
   last_name: t.Union([t.String(), t.Null()]),
   avatar_url: t.Union([t.String(), t.Null()]),
   default_model: t.String(),
+})
+const providerLimitWindowSchema = t.Object({
+  used_percent: t.Number({ minimum: 0, maximum: 100 }),
+  window_duration_minutes: t.Union([t.Number(), t.Null()]),
+  resets_at: t.Union([t.String(), t.Null()]),
+})
+const providerConnectionSchema = t.Object({
+  status: t.Union([
+    t.Literal('unavailable'),
+    t.Literal('disconnected'),
+    t.Literal('connecting'),
+    t.Literal('connected'),
+  ]),
+  account: t.Union([
+    t.Object({
+      email: t.Union([t.String(), t.Null()]),
+      plan_type: t.String(),
+    }),
+    t.Null(),
+  ]),
+  limits: t.Union([
+    t.Object({
+      primary: t.Union([providerLimitWindowSchema, t.Null()]),
+      secondary: t.Union([providerLimitWindowSchema, t.Null()]),
+      reached: t.Boolean(),
+    }),
+    t.Null(),
+  ]),
+  login_mode: t.Union([t.Literal('browser'), t.Literal('device')]),
+  active: t.Boolean(),
+})
+const providerConnectionStateBody = t.Object({ active: t.Boolean() })
+const providerConnectionSummarySchema = t.Object({
+  connection_id: t.String(),
+  provider: t.String(),
+  status: t.Union([
+    t.Literal('unavailable'),
+    t.Literal('disconnected'),
+    t.Literal('connecting'),
+    t.Literal('connected'),
+  ]),
+  account: t.Union([
+    t.Object({
+      email: t.Union([t.String(), t.Null()]),
+      plan_type: t.String(),
+    }),
+    t.Null(),
+  ]),
+  limits: t.Union([
+    t.Object({
+      primary: t.Union([providerLimitWindowSchema, t.Null()]),
+      secondary: t.Union([providerLimitWindowSchema, t.Null()]),
+      reached: t.Boolean(),
+    }),
+    t.Null(),
+  ]),
+  login_mode: t.Union([t.Literal('browser'), t.Literal('device')]),
+  active: t.Boolean(),
+})
+const providerLoginSchema = t.Union([
+  t.Object({
+    type: t.Literal('browser'),
+    login_id: t.String(),
+    auth_url: t.String({ format: 'uri' }),
+  }),
+  t.Object({
+    type: t.Literal('device_code'),
+    login_id: t.String(),
+    verification_url: t.String({ format: 'uri' }),
+    user_code: t.String(),
+  }),
+])
+const providerLoginStatusSchema = t.Object({
+  status: t.Union([
+    t.Literal('pending'),
+    t.Literal('connected'),
+    t.Literal('failed'),
+  ]),
+  connection: t.Optional(providerConnectionSchema),
+  message: t.Optional(t.String()),
 })
 const otpRequestBody = t.Object({ email: t.String({ format: 'email' }) })
 const otpVerifyBody = t.Object({
@@ -400,6 +489,39 @@ const userResponse = (user: Pick<User, 'id' | 'email' | 'firstName' | 'lastName'
   default_model: user.defaultModel,
 })
 
+const publicProviderConnection = (connection: ProviderConnection, active: boolean) => ({
+  status: connection.status,
+  account: connection.account
+    ? {
+        email: connection.account.email,
+        plan_type: connection.account.planType,
+      }
+    : null,
+  limits: connection.limits
+    ? {
+        primary: connection.limits.primary
+          ? {
+              used_percent: connection.limits.primary.usedPercent,
+              window_duration_minutes:
+                connection.limits.primary.windowDurationMinutes,
+              resets_at: connection.limits.primary.resetsAt,
+            }
+          : null,
+        secondary: connection.limits.secondary
+          ? {
+              used_percent: connection.limits.secondary.usedPercent,
+              window_duration_minutes:
+                connection.limits.secondary.windowDurationMinutes,
+              resets_at: connection.limits.secondary.resetsAt,
+            }
+          : null,
+        reached: connection.limits.reached,
+      }
+    : null,
+  login_mode: connection.loginMode,
+  active,
+})
+
 export function createApp(settings: Settings, services: Services, peerResolver: PeerResolver = nodeSocketPeer) {
   const requestBodyProfiles = new WeakMap<Request, JsonBodyProfile>()
   const requestContexts = new WeakMap<Request, RequestContext>()
@@ -441,10 +563,10 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       exposeHeaders: ['X-Request-Id', 'X-Correlation-Id'],
     }))
     .use(openapi({ documentation: { info: { title: 'myBot API', version: '0.1.0' } } }))
-    .onError(({ error, request, set }) => {
+    .onError(({ error, request, route, set }) => {
       const context = requestContexts.get(request)
       if (context) {
-        context.httpRoute = new URL(request.url).pathname
+        context.httpRoute = typeof route === 'string' && route ? route : new URL(request.url).pathname
         context.error = safeError(error, error instanceof AuthError ? error.statusCode : error instanceof ValidationError || error instanceof ParseError ? 422 : undefined)
         logger.warn({ ...requestLogFields(context), event: 'request_error' }, 'request_error')
         Object.assign(set.headers, requestHeaders(context))
@@ -488,7 +610,15 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       complete(statusCode, context.completed ? 'success' : statusCode >= 400 ? 'error' : 'success')
       return response
     })
-    .onStop(() => agentExecutor.close())
+    .onStop(() =>
+      Promise.allSettled([
+        agentExecutor.close(),
+        ...Object.values(services.providerConnectionAdapters ?? {})
+          .map((registration) => registration.adapter)
+          .filter((adapter): adapter is ProviderConnectionAdapter => adapter !== undefined)
+          .map((adapter) => adapter.close()),
+      ]),
+    )
 
   const browserOrigin = (request: Request) => {
     const origin = request.headers.get('origin')
@@ -664,6 +794,53 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       return active.user!
     })
   }
+  const providerConnectionRegistration = (connectionId: string) => {
+    const registrations = services.providerConnectionAdapters ?? {}
+    if (!Object.hasOwn(registrations, connectionId)) {
+      throw new AuthError('not_found', 'Not Found', 404)
+    }
+    return registrations[connectionId]!
+  }
+  const providerConnectionAdapter = (connectionId: string) => {
+    const registration = providerConnectionRegistration(connectionId)
+    if (!registration.adapter) {
+      throw new AuthError(
+        'provider_connection_unavailable',
+        'This provider connection is not configured on this server.',
+        503,
+      )
+    }
+    return registration.adapter
+  }
+  const providerConnectionCall = async <T>(operation: () => Promise<T>) => {
+    try {
+      return await operation()
+    } catch (error) {
+      if (error instanceof ProviderConnectionError) {
+        throw new AuthError(error.code, error.message, error.status)
+      }
+      throw error
+    }
+  }
+  const resolvedProviderConnection = async (
+    userId: string,
+    registration: ProviderConnectionRegistry[string],
+  ) => {
+    if (!registration.adapter) {
+      return publicProviderConnection({
+        status: 'unavailable',
+        loginMode: registration.loginMode,
+        account: null,
+        limits: null,
+      }, false)
+    }
+    const connection = await providerConnectionCall(() =>
+      registration.adapter!.connection(userId))
+    const active = connection.status === 'connected'
+      ? await services.providerConnectionSettings?.isActive(userId, registration.provider) ?? true
+      : false
+    return publicProviderConnection(connection, active)
+  }
 
   const publicRun = (run: AgentRun) => ({
     id: run.id,
@@ -709,11 +886,200 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   app.patch('/preferences/model', async ({ request, body }) => {
     browserOrigin(request)
     const user = await sessionUser(request)
-    const updated = await services.database.transaction((db) =>
-      new AuthRepository(db).updateDefaultModel(user.id, body.model))
+    const updated = await services.database.transaction(async (db) => {
+      return new AuthRepository(db).updateDefaultModel(user.id, body.model)
+    })
     if (!updated) throw new AuthError('not_found', 'Not Found', 404)
     return userResponse(updated)
   }, { body: modelPreferenceBody })
+
+  const connectionParams = t.Object({
+    connectionId: t.String({ minLength: 1, maxLength: 100 }),
+  })
+  const connectionLoginParams = t.Object({
+    connectionId: t.String({ minLength: 1, maxLength: 100 }),
+    loginId: t.String({ minLength: 1, maxLength: 200 }),
+  })
+
+  app.get(
+    '/provider-connections',
+    async ({ request, set }) => {
+      set.headers['cache-control'] = 'no-store'
+      const user = await sessionUser(request)
+      const registrations = Object.entries(services.providerConnectionAdapters ?? {})
+      const connections = await Promise.all(registrations.map(async ([connectionId, registration]) => ({
+        connection_id: connectionId,
+        provider: registration.provider,
+        ...await resolvedProviderConnection(user.id, registration),
+      })))
+      return { connections }
+    },
+    {
+      response: {
+        200: t.Object({ connections: t.Array(providerConnectionSummarySchema) }),
+        401: detailSchema,
+      },
+    },
+  )
+
+  app.get(
+    '/provider-connections/:connectionId',
+    async ({ request, params, set }) => {
+      set.headers['cache-control'] = 'no-store'
+      const user = await sessionUser(request)
+      const registration = providerConnectionRegistration(params.connectionId)
+      return resolvedProviderConnection(user.id, registration)
+    },
+    {
+      params: connectionParams,
+      response: { 200: providerConnectionSchema, 401: detailSchema, 404: detailSchema },
+    },
+  )
+
+  app.post(
+    '/provider-connections/:connectionId/logins',
+    async ({ request, params, set }) => {
+      browserOrigin(request)
+      const user = await sessionUser(request)
+      const adapter = providerConnectionAdapter(params.connectionId)
+      const login = await providerConnectionCall(() => adapter.startLogin(user.id))
+      set.status = 202
+      set.headers['cache-control'] = 'no-store'
+      return login.type === 'browser'
+        ? { type: login.type, login_id: login.loginId, auth_url: login.authUrl }
+        : {
+            type: login.type,
+            login_id: login.loginId,
+            verification_url: login.verificationUrl,
+            user_code: login.userCode,
+          }
+    },
+    {
+      params: connectionParams,
+      response: {
+        202: providerLoginSchema,
+        401: detailSchema,
+        403: detailSchema,
+        409: detailSchema,
+        503: detailSchema,
+      },
+    },
+  )
+
+  app.get(
+    '/provider-connections/:connectionId/logins/:loginId',
+    async ({ request, params, set }) => {
+      set.headers['cache-control'] = 'no-store'
+      const user = await sessionUser(request)
+      const registration = providerConnectionRegistration(params.connectionId)
+      const adapter = providerConnectionAdapter(params.connectionId)
+      const result = await providerConnectionCall(() =>
+        adapter.loginStatus(user.id, params.loginId),
+      )
+      if (result.status === 'connected') {
+        const active = await services.providerConnectionSettings
+          ?.setActive(user.id, registration.provider, true) ?? true
+        return {
+          status: result.status,
+          connection: publicProviderConnection(result.connection, active),
+        }
+      }
+      if (result.status === 'failed')
+        return { status: result.status, message: result.message }
+      return { status: result.status }
+    },
+    {
+      params: connectionLoginParams,
+      response: {
+        200: providerLoginStatusSchema,
+        401: detailSchema,
+        404: detailSchema,
+        503: detailSchema,
+      },
+    },
+  )
+
+  app.delete(
+    '/provider-connections/:connectionId/logins/:loginId',
+    async ({ request, params }) => {
+      browserOrigin(request)
+      const user = await sessionUser(request)
+      const adapter = providerConnectionAdapter(params.connectionId)
+      await providerConnectionCall(() => adapter.cancelLogin(user.id, params.loginId))
+      return new Response(null, { status: 204 })
+    },
+    {
+      params: connectionLoginParams,
+      response: {
+        204: t.Void(),
+        401: detailSchema,
+        403: detailSchema,
+        404: detailSchema,
+        503: detailSchema,
+      },
+    },
+  )
+
+  app.delete(
+    '/provider-connections/:connectionId',
+    async ({ request, params }) => {
+      browserOrigin(request)
+      const user = await sessionUser(request)
+      const registration = providerConnectionRegistration(params.connectionId)
+      const adapter = providerConnectionAdapter(params.connectionId)
+      await providerConnectionCall(() => adapter.disconnect(user.id))
+      await services.providerConnectionSettings?.setActive(user.id, registration.provider, false)
+      return new Response(null, { status: 204 })
+    },
+    {
+      params: connectionParams,
+      response: {
+        204: t.Void(),
+        401: detailSchema,
+        403: detailSchema,
+        503: detailSchema,
+      },
+    },
+  )
+
+  app.patch(
+    '/provider-connections/:connectionId',
+    async ({ request, params, body }) => {
+      browserOrigin(request)
+      const user = await sessionUser(request)
+      const registration = providerConnectionRegistration(params.connectionId)
+      const adapter = providerConnectionAdapter(params.connectionId)
+      const connection = await providerConnectionCall(() => adapter.connection(user.id))
+      if (connection.status !== 'connected') {
+        throw new AuthError(
+          'provider_not_connected',
+          'Connect this provider before changing its active state.',
+          409,
+        )
+      }
+      if (!services.providerConnectionSettings) {
+        throw new AuthError(
+          'provider_settings_unavailable',
+          'Provider settings are unavailable on this server.',
+          503,
+        )
+      }
+      const active = await services.providerConnectionSettings
+        .setActive(user.id, registration.provider, body.active)
+      return publicProviderConnection(connection, active)
+    },
+    {
+      body: providerConnectionStateBody,
+      params: connectionParams,
+      response: {
+        200: providerConnectionSchema,
+        401: detailSchema,
+        403: detailSchema,
+        409: detailSchema,
+        503: detailSchema,
+      },
+    },
+  )
 
   app.get('/projects', async ({ request }) => {
     const user = await sessionUser(request)

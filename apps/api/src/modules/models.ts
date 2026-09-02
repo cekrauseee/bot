@@ -73,6 +73,7 @@ export const publicModelCatalog = () => ({
     provider: model.provider,
     company: model.company,
     label: model.label,
+    active: true,
     reasoning_efforts: {
       options: [...model.reasoningEfforts],
       default: model.defaultReasoningEffort,

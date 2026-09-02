@@ -3,6 +3,9 @@ import { loadSettings, repositoryEnvPath } from '../src/config.js'
 import { databaseDriverFor } from '../src/db/database.js'
 
 const base = { ...process.env, ENVIRONMENT: 'test' }
+delete base.CODEX_LOGIN_MODE
+delete base.CODEX_HOME_ROOT
+delete base.CODEX_BINARY
 
 describe('configuration', () => {
   it('selects Neon only for production and node-postgres otherwise', () => {
@@ -45,6 +48,15 @@ describe('configuration', () => {
     expect(() => loadSettings({ ...base, WEB_BASE_URL: 'http://localhost:5173/app' })).toThrow()
   })
 
+  it('uses isolated temporary Codex storage outside production and requires absolute configured paths', () => {
+    const development = loadSettings({ ...base, ENVIRONMENT: 'development', CODEX_HOME_ROOT: '' })
+    expect(development.codexBinary).toBe('codex')
+    expect(development.codexLoginMode).toBe('browser')
+    expect(development.codexHomeRoot).toContain('my-bot-codex')
+    expect(() => loadSettings({ ...base, CODEX_HOME_ROOT: 'relative/codex' }))
+      .toThrow(/CODEX_HOME_ROOT/)
+  })
+
   it('requires complete HTTPS production guardrails', () => {
     const production = {
       ...base,
@@ -62,12 +74,20 @@ describe('configuration', () => {
       RESEND_API_KEY: 're_live_valid-key',
       RESEND_FROM: 'myBot <auth@example.com>',
     }
-    expect(loadSettings(production).secureCookies).toBe(true)
+    expect(loadSettings(production)).toMatchObject({ secureCookies: true, codexHomeRoot: null, codexLoginMode: 'device' })
+    expect(loadSettings({ ...production, CODEX_LOGIN_MODE: 'browser' }).codexLoginMode).toBe('browser')
+    expect(loadSettings({ ...production, CODEX_HOME_ROOT: '/var/lib/my-bot/codex' }).codexHomeRoot)
+      .toBe('/var/lib/my-bot/codex')
     expect(() => loadSettings({ ...production, DATABASE_URL: 'postgresql://user:password@db.example.com/mybot' }))
       .toThrow(/must target a Neon host/)
     expect(() => loadSettings({ ...production, GOOGLE_REDIRECT_URI: 'https://other.example.com/auth/google/callback' })).toThrow()
     expect(() => loadSettings({ ...production, RESEND_FROM: '' })).toThrow()
     expect(() => loadSettings({ ...production, AI_SERVICE_TOKEN: 'replace-with-token' }))
       .toThrow(/AI_SERVICE_TOKEN/)
+  })
+
+  it('validates explicit Codex login modes', () => {
+    expect(loadSettings({ ...base, CODEX_LOGIN_MODE: 'device' }).codexLoginMode).toBe('device')
+    expect(() => loadSettings({ ...base, CODEX_LOGIN_MODE: 'invalid' })).toThrow(/CODEX_LOGIN_MODE/)
   })
 })

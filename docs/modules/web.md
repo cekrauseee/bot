@@ -41,6 +41,8 @@ The `/sign` route lazy-loads the public login page. Vite reads the canonical roo
 
 The `/` and `/conversations/:conversationId` routes are protected by a server session check. Their shared signed-in layout exposes the real Sign out action. An HTTP 401 redirects to `/sign`; an unavailable API keeps a recoverable error state instead of treating the user as signed out. Sign out uses the beUI StatefulButton with a stable leading icon column, loading feedback, and a retry state styled with semantic destructive colors, without a separate error label. A successful request navigates directly to `/sign` without an intermediate success state.
 
+The current `apps/web-rebuild` account dropdown owns the provider-connection surface. A UI registry maps each concrete `connectionId` to the shared connection client and hook plus an optional provider-specific card. The client builds the dynamic `/provider-connections/:connectionId` routes; the hook owns the common connect, poll, cancel, activate, and disconnect lifecycle. The OpenAI Codex card supplies only its identity, browser/device login presentation, account details, and limits. Its switch changes the persisted provider activation without removing credentials, while Disconnect removes the connection. The browser never receives or stores ChatGPT access or refresh tokens.
+
 ## Interface motion
 
 Page entrances, conversation titles, and loaded-message reveals share `src/lib/interface-motion.ts`: a 12 px upward entrance, opacity, and the existing ease-out curve. Conversation reveals use a 450 ms completion window with stagger starts capped at 120 ms. Reduced motion removes displacement and stagger and uses a 120 ms opacity transition. Layout resizing is immediate under reduced motion.

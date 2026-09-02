@@ -39,6 +39,13 @@ test('Turbo keeps internal builds topological and external tasks uncached', asyn
   assert.ok(turbo.tasks.dev.env.includes('RUNTIME_PROVIDER'))
   assert.ok(turbo.tasks.dev.passThroughEnv.includes('RUNTIME_SERVICE_TOKEN'))
   assert.ok(turbo.tasks.dev.passThroughEnv.includes('VERCEL_OIDC_TOKEN'))
+  const apiTurbo = await jsonFile('apps/api/turbo.json')
+  assert.deepEqual(apiTurbo.extends, ['//'])
+  assert.deepEqual(apiTurbo.tasks.dev.passThroughEnv, [
+    'CODEX_BINARY',
+    'CODEX_HOME_ROOT',
+    'CODEX_LOGIN_MODE',
+  ])
   assert.ok(turbo.tasks['db:check'].passThroughEnv.includes('ENVIRONMENT'))
   assert.ok(turbo.tasks['db:check'].passThroughEnv.includes('DATABASE_URL'))
   assert.ok(turbo.tasks['db:seed'].passThroughEnv.includes('MYBOT_SEED_USER_EMAIL'))

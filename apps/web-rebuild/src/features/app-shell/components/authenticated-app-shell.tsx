@@ -270,6 +270,12 @@ export function AuthenticatedAppShell({
                   catalog.models.length === 0 ||
                   (activeConversationId !== null && activeConversation === null)
                 }
+                providerDisabled={
+                  catalog.models.find(
+                    (item) =>
+                      item.id === (activeConversation?.model ?? defaultModel)
+                  )?.active === false
+                }
                 modelScope={activeConversationId ? "conversation" : "default"}
                 onModelChange={handleModelChange}
                 onSubmit={handleComposerSubmit}

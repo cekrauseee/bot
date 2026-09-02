@@ -6,6 +6,8 @@ import { ResendOtpEmailSender } from './email.js'
 import { GoogleOAuthService } from './modules/auth/oauth.js'
 import { OtpService } from './modules/auth/otp.js'
 import { SessionManager } from './modules/auth/sessions.js'
+import { CodexAppServerManager } from './modules/codex-app-server.js'
+import { DatabaseProviderConnectionSettings } from './modules/provider-connections.js'
 import { createLogger, safeError } from './logger.js'
 import { AgentRunExecutor, RedisAgentEventFanout } from './modules/agent-control-plane.js'
 import { createAiClient, createTitleClient } from './modules/conversations.js'
@@ -27,6 +29,14 @@ const agentRuns = new AgentRunExecutor(
   eventFanout,
   createTitleClient(settings),
 )
+const codex = settings.codexHomeRoot
+  ? new CodexAppServerManager({
+      binary: settings.codexBinary,
+      homeRoot: settings.codexHomeRoot,
+      identityKey: settings.sessionSecret,
+      loginMode: settings.codexLoginMode,
+    })
+  : undefined
 
 const app = createApp(
   settings,
@@ -36,6 +46,14 @@ const app = createApp(
     sessions: new SessionManager(settings),
     google: new GoogleOAuthService(redis, settings),
     agentRuns,
+    providerConnectionAdapters: {
+      'openai-codex': {
+        provider: 'openai',
+        loginMode: settings.codexLoginMode,
+        adapter: codex,
+      },
+    },
+    providerConnectionSettings: new DatabaseProviderConnectionSettings(database),
   },
   nodeSocketPeer,
 )
@@ -46,6 +64,7 @@ const shutdown = createShutdown({
   stopServer: () => app.server ? app.stop(true) : undefined,
   closeResources: [async () => {
     await agentRuns.close()
+    await codex?.close()
     await eventFanout.close()
     await redis.quit()
     await database.close()

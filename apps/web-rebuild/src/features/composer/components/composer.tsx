@@ -65,6 +65,7 @@ type ComposerProps = {
   models: ComposerModel[]
   modelContextKey: string
   modelDisabled?: boolean
+  providerDisabled?: boolean
   modelScope: "conversation" | "default"
   onModelChange: (model: string) => Promise<void>
   onSubmit?: (
@@ -78,6 +79,7 @@ export function Composer({
   models,
   modelContextKey,
   modelDisabled = false,
+  providerDisabled = false,
   modelScope,
   onModelChange,
   onSubmit,
@@ -224,7 +226,8 @@ export function Composer({
       !onSubmit ||
       submittingRef.current ||
       modelChangingRef.current ||
-      modelDisabled
+      modelDisabled ||
+      providerDisabled
     ) {
       return
     }
@@ -268,7 +271,7 @@ export function Composer({
           </FieldLabel>
           <InputGroup
             ref={composerSurfaceRef}
-            className="rounded-2xl shadow-sm [--composer-inset:--spacing(2.5)]"
+            className="rounded-2xl border-border/80 bg-muted/80 shadow-sm [--composer-inset:--spacing(2.5)] dark:bg-muted"
           >
             <InputGroupTextarea
               ref={textareaRef}
@@ -366,8 +369,10 @@ export function Composer({
                               }
                             >
                               {models
-                                .filter((item) =>
-                                  SELECTABLE_MODEL_IDS.has(item.id)
+                                .filter(
+                                  (item) =>
+                                    item.active &&
+                                    SELECTABLE_MODEL_IDS.has(item.id)
                                 )
                                 .map((item) => (
                                   <DropdownMenuRadioItem
@@ -445,12 +450,14 @@ export function Composer({
                   type="submit"
                   variant="default"
                   size="icon"
+                  className="bg-foreground/10 text-foreground hover:bg-foreground/15 dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/80"
                   aria-label={submitting ? "Sending message" : "Send message"}
                   disabled={
                     !message.trim() ||
                     submitting ||
                     modelChanging ||
-                    modelDisabled
+                    modelDisabled ||
+                    providerDisabled
                   }
                 >
                   {submitting ? (

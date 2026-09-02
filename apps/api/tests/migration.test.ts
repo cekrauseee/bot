@@ -25,7 +25,7 @@ describe('compatibility migration', () => {
 
   it('derives ordered hashes from the journal and detects pending, mismatched, and out-of-order history', async () => {
     const expected = await readMigrationManifest(new URL('../drizzle/', import.meta.url))
-    expect(expected).toHaveLength(10)
+    expect(expected).toHaveLength(11)
     expect(compareMigrationHistory(expected, [])).toMatchObject({ ok: false, reason: 'pending' })
     expect(compareMigrationHistory(expected, [{ hash: 'wrong' }])).toMatchObject({ ok: false, reason: 'mismatch' })
     expect(compareMigrationHistory(expected, [{ hash: expected[0].hash }]))
@@ -70,6 +70,9 @@ describe('compatibility migration', () => {
       { table_name: 'sessions', conname: 'pk_sessions', contype: 'p', definition: 'PRIMARY KEY (id)' },
       { table_name: 'sessions', conname: 'fk_sessions_user_id_users', contype: 'f', definition: 'FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE' },
       { table_name: 'sessions', conname: 'uq_sessions_token_hash', contype: 'u', definition: 'UNIQUE (token_hash)' },
+      { table_name: 'provider_connections', conname: 'provider_connections_pkey', contype: 'p', definition: 'PRIMARY KEY (id)' },
+      { table_name: 'provider_connections', conname: 'provider_connections_user_id_users_id_fk', contype: 'f', definition: 'FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE' },
+      { table_name: 'provider_connections', conname: 'uq_provider_connections_user_id_provider', contype: 'u', definition: 'UNIQUE (user_id, provider)' },
       { table_name: 'projects', conname: 'projects_pkey', contype: 'p', definition: 'PRIMARY KEY (id)' },
       { table_name: 'projects', conname: 'projects_user_id_users_id_fk', contype: 'f', definition: 'FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE' },
       { table_name: 'projects', conname: 'uq_projects_user_id_slug', contype: 'u', definition: 'UNIQUE (user_id, slug)' },
@@ -106,6 +109,9 @@ describe('compatibility migration', () => {
       { table_name: 'sessions', indexname: 'ix_sessions_expires_at_revoked_at', indexdef: 'CREATE INDEX ix_sessions_expires_at_revoked_at ON public.sessions USING btree (expires_at, revoked_at)', is_primary: false },
       { table_name: 'sessions', indexname: 'ix_sessions_user_id', indexdef: 'CREATE INDEX ix_sessions_user_id ON public.sessions USING btree (user_id)', is_primary: false },
       { table_name: 'sessions', indexname: 'uq_sessions_token_hash', indexdef: 'CREATE UNIQUE INDEX uq_sessions_token_hash ON public.sessions USING btree (token_hash)', is_primary: false },
+      primary('provider_connections'),
+      { table_name: 'provider_connections', indexname: 'ix_provider_connections_user_id', indexdef: 'CREATE INDEX ix_provider_connections_user_id ON public.provider_connections USING btree (user_id)', is_primary: false },
+      { table_name: 'provider_connections', indexname: 'uq_provider_connections_user_id_provider', indexdef: 'CREATE UNIQUE INDEX uq_provider_connections_user_id_provider ON public.provider_connections USING btree (user_id, provider)', is_primary: false },
       primary('projects'),
       { table_name: 'projects', indexname: 'ix_projects_user_id_created_at', indexdef: 'CREATE INDEX ix_projects_user_id_created_at ON public.projects USING btree (user_id, created_at)', is_primary: false },
       { table_name: 'projects', indexname: 'uq_projects_user_id_slug', indexdef: 'CREATE UNIQUE INDEX uq_projects_user_id_slug ON public.projects USING btree (user_id, slug)', is_primary: false },

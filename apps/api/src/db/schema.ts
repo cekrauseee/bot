@@ -3,6 +3,7 @@ import {
   check,
   bigserial,
   bigint,
+  boolean,
   customType,
   foreignKey,
   index,
@@ -80,6 +81,22 @@ export const sessions = pgTable(
     unique('uq_sessions_token_hash').on(table.tokenHash),
     index('ix_sessions_user_id').on(table.userId),
     index('ix_sessions_expires_at_revoked_at').on(table.expiresAt, table.revokedAt),
+  ],
+)
+
+export const providerConnections = pgTable(
+  'provider_connections',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    provider: varchar('provider', { length: 50 }).notNull(),
+    active: boolean('active').default(true).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('uq_provider_connections_user_id_provider').on(table.userId, table.provider),
+    index('ix_provider_connections_user_id').on(table.userId),
   ],
 )
 
@@ -189,6 +206,7 @@ export const schema = {
   users,
   oauthIdentities,
   sessions,
+  providerConnections,
   projects,
   conversations,
   messages,

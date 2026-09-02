@@ -11,6 +11,8 @@
 - `src/modules/auth`: OTP, Google OpenID Connect, and session services.
 - `src/modules/conversations.ts`: private AI client and public conversation serialization.
 - `src/modules/agent-control-plane.ts`: leased execution, checkpoint projection, event replay, Redis fanout, and WebSocket transport.
+- `src/modules/provider-connections.ts`: provider-agnostic connection contracts, adapter registry types, errors, and persisted activation settings.
+- `src/modules/codex-app-server.ts`: isolated Codex process lifecycle, ChatGPT browser or device login, account state, and rate-limit projection.
 - `src/modules/models.ts`: provider-aware public model capability catalog.
 - `src/db`: Drizzle schema, repository, connection, migration, drift checks, and local application seed.
 - `src/email.ts`: React Email composition and Resend delivery.
@@ -26,6 +28,22 @@
 ```
 
 The response is validated by an Elysia runtime schema and covered by API tests. Authentication routes live under `/auth`; their stable behavior is documented in [Authentication](authentication.md). The service does not add an `/api` path prefix because the API is hosted on its own domain. Interactive OpenAPI documentation is available at `/openapi`, with its JSON document at `/openapi/json`.
+
+Authenticated provider-connection routes are:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/provider-connections` | List every registered connection with its provider, status, and active state |
+| `GET` | `/provider-connections/:connectionId` | Return safe connection, account, limit, and active state |
+| `PATCH` | `/provider-connections/:connectionId` | Persist `{ active: boolean }` for the connected provider |
+| `POST` | `/provider-connections/:connectionId/logins` | Start an owned login using the registered adapter |
+| `GET` | `/provider-connections/:connectionId/logins/:loginId` | Poll one owned login attempt |
+| `DELETE` | `/provider-connections/:connectionId/logins/:loginId` | Cancel one owned login attempt |
+| `DELETE` | `/provider-connections/:connectionId` | Remove the provider credentials and mark the provider inactive |
+
+`:connectionId` identifies a concrete connection method such as `openai-codex`; the registry maps it to the model provider `openai` and a provider-specific adapter. Common Elysia handlers own authentication, route validation, login lifecycle, activation, and disconnection. Unknown connection IDs return 404. The adapter owns vendor-specific login, account, limits, credentials, and errors. PostgreSQL stores activation by user and model provider, so disabling a provider also blocks selecting its models and starting runs without deleting its credentials.
+
+The OpenAI Codex adapter communicates with Codex app-server over JSONL `stdio`. `CODEX_LOGIN_MODE` is explicitly validated as `browser` or `device`, defaults to browser outside production and device in production, and has no silent fallback. Browser mode starts official app-server ChatGPT browser login and returns `auth_url`; device mode returns `verification_url` and `user_code`. Each application user receives a separate HMAC-derived `CODEX_HOME`; app-server uses file-backed credential storage and refreshes ChatGPT tokens itself. Public responses contain only login URLs/codes, safe account metadata, and normalized rate-limit windows. Provider tokens and native error bodies do not enter PostgreSQL, Redis, browser responses, or logs. Production exposes the connection only when an absolute durable `CODEX_HOME_ROOT` is configured.
 
 Authenticated conversation routes are:
 
@@ -84,4 +102,4 @@ Existing-conversation turn requests may include `retry_of`, the UUID of the late
 
 ## Database Compatibility
 
-Drizzle owns the schema and migration workflow. After the conversation pin/title and project-order migrations, `0005_lyrical_captain_britain` adds one global workspace per user, durable runs, and append-only events. `0006_yellow_scorpion` adds immutable project workspace paths and frozen run working directories. `0007_crazy_maginty` permits retry attempts to create separate run histories while reusing the failed assistant message. These migrations are non-destructive and preserve existing conversation ownership. Migration checks verify the complete relational contract before delivery.
+Drizzle owns the schema and migration workflow. After the conversation pin/title and project-order migrations, `0005_lyrical_captain_britain` adds one global workspace per user, durable runs, and append-only events. `0006_yellow_scorpion` adds immutable project workspace paths and frozen run working directories. `0007_crazy_maginty` permits retry attempts to create separate run histories while reusing the failed assistant message. `0010_noisy_korvac` adds the per-user, per-provider activation state. These migrations are non-destructive and preserve existing conversation ownership. Migration checks verify the complete relational contract before delivery.
