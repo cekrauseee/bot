@@ -250,6 +250,7 @@ export class AgentEventHub {
   private readonly events = new Map<string, Set<EventListener>>()
   private readonly allEvents = new Set<EventListener>()
   private readonly frames = new Map<string, Set<FrameListener>>()
+  private readonly latestFrames = new Map<string, unknown>()
 
   private publishTo<T>(listenersByRun: Map<string, Set<(value: T) => void>>, runId: string, value: T) {
     const listeners = listenersByRun.get(runId)
@@ -275,6 +276,7 @@ export class AgentEventHub {
   }
 
   publish(event: PublicAgentEvent) {
+    if (terminalTypes.has(event.type)) this.latestFrames.delete(event.run_id)
     this.publishTo(this.events, event.run_id, event)
     for (const listener of this.allEvents) {
       try {
@@ -294,14 +296,23 @@ export class AgentEventHub {
     const listeners = this.frames.get(runId) ?? new Set<FrameListener>()
     listeners.add(listener)
     this.frames.set(runId, listeners)
+    if (this.latestFrames.has(runId)) {
+      try {
+        listener(this.latestFrames.get(runId))
+      } catch {
+        listeners.delete(listener)
+        if (!listeners.size) this.frames.delete(runId)
+      }
+    }
     return () => {
       listeners.delete(listener)
       if (!listeners.size) this.frames.delete(runId)
     }
   }
 
-  /** Runtime providers may project ephemeral browser frames here later. */
+  /** Keep only the current transient frame so late subscribers can render the active browser. */
   publishBrowserFrame(runId: string, frame: unknown) {
+    this.latestFrames.set(runId, frame)
     this.publishTo(this.frames, runId, frame)
   }
 }

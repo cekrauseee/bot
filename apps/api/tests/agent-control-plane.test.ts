@@ -79,12 +79,24 @@ describe('durable agent event contract', () => {
   it('keeps browser frames in process-local fanout only', () => {
     const hub = new AgentEventHub()
     const listener = vi.fn()
-    const unsubscribe = hub.subscribeFrames(runId, listener)
     hub.publishBrowserFrame(runId, { jpeg: 'frame' })
+    const unsubscribe = hub.subscribeFrames(runId, listener)
     unsubscribe()
     hub.publishBrowserFrame(runId, { jpeg: 'ignored' })
     expect(listener).toHaveBeenCalledOnce()
     expect(listener).toHaveBeenCalledWith({ jpeg: 'frame' })
+  })
+
+  it('clears the cached browser frame when the run becomes terminal', () => {
+    const hub = new AgentEventHub()
+    hub.publishBrowserFrame(runId, { jpeg: 'frame' })
+    hub.publish({
+      version: 2, sequence: '1', run_id: runId, turn_id: turnId,
+      type: 'turn.completed', data: {},
+    })
+    const listener = vi.fn()
+    hub.subscribeFrames(runId, listener)
+    expect(listener).not.toHaveBeenCalled()
   })
 
   it('supports all-event listeners for cross-run discovery', () => {
@@ -136,7 +148,6 @@ describe('durable agent event contract', () => {
     const firstListener = vi.fn()
     const secondListener = vi.fn()
     first.hub.subscribeFrames(runId, firstListener)
-    second.hub.subscribeFrames(runId, secondListener)
     const frameData = {
       base64: 'cG5n', mime_type: 'image/png', captured_at: '2026-08-30T17:00:00Z',
     }
@@ -145,6 +156,7 @@ describe('durable agent event contract', () => {
       dispatchBrowserFrame(runId: string, frame: Record<string, unknown>): Promise<void>
     }).dispatchBrowserFrame(runId, frameData)
 
+    second.hub.subscribeFrames(runId, secondListener)
     expect(firstListener).toHaveBeenCalledOnce()
     expect(secondListener).toHaveBeenCalledOnce()
     expect(firstListener).toHaveBeenCalledWith(frameData)
