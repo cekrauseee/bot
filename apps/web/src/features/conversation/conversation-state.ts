@@ -472,7 +472,8 @@ function eventActivity(event: TurnStreamEvent): ProcessActivity | null {
       id,
       type: "trace",
       kind: "child",
-      label: "Delegated a task",
+      label: string(raw.label) ?? "a task",
+      ...(string(raw.detail) ? { detail: string(raw.detail) } : {}),
       ...(activityStatus(raw.status)
         ? { status: activityStatus(raw.status) }
         : {}),
