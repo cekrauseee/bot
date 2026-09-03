@@ -292,14 +292,18 @@ function ProcessActivityRow({ activity }: { activity: ProcessActivity }) {
   }
 
   if (activity.kind === "child") {
+    const taskLabel =
+      activity.label === "Delegated a task" ? "a task" : activity.label
     return (
       <ActivityRow
         icon={<WaypointsIcon />}
         label={
           activity.status === "in_progress"
-            ? "Delegating a task"
-            : "Delegated a task"
+            ? `Delegating ${taskLabel}`
+            : `Delegated ${taskLabel}`
         }
+        detail={activity.detail}
+        title={[activity.label, activity.detail].filter(Boolean).join(" · ")}
       />
     )
   }

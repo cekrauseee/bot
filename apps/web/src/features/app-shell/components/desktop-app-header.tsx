@@ -1,10 +1,17 @@
 import { SidebarTrigger } from "@/components/ui/sidebar"
+import { ConversationSimulationToggle } from "@/features/conversation-simulator/components/conversation-simulation-toggle"
 
 type DesktopAppHeaderProps = {
+  simulationEnabled?: boolean
+  onSimulationEnabledChange?: (enabled: boolean) => void
   title: string
 }
 
-export function DesktopAppHeader({ title }: DesktopAppHeaderProps) {
+export function DesktopAppHeader({
+  simulationEnabled,
+  onSimulationEnabledChange,
+  title,
+}: DesktopAppHeaderProps) {
   return (
     <header
       data-slot="desktop-app-header"
@@ -16,11 +23,17 @@ export function DesktopAppHeader({ title }: DesktopAppHeaderProps) {
       />
       <h1
         id="conversation-title"
-        className="min-w-0 truncate text-sm leading-5 font-semibold"
+        className="min-w-0 flex-1 truncate text-sm leading-5 font-semibold"
         title={title}
       >
         {title}
       </h1>
+      {simulationEnabled !== undefined && onSimulationEnabledChange ? (
+        <ConversationSimulationToggle
+          checked={simulationEnabled}
+          onCheckedChange={onSimulationEnabledChange}
+        />
+      ) : null}
     </header>
   )
 }

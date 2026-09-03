@@ -1,4 +1,5 @@
 import {
+  lazy,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -25,6 +26,14 @@ import {
 import { useConversations } from "@/features/conversation/hooks/use-conversations"
 import { DesktopAppHeader } from "@/features/app-shell/components/desktop-app-header"
 import { BrowserPictureInPicture } from "@/features/conversation/components/browser-picture-in-picture"
+import { createMockBrowserFrame } from "@/features/conversation-simulator/browser-frame"
+import { ConversationSimulationToggle } from "@/features/conversation-simulator/components/conversation-simulation-toggle"
+import { useConversationSimulator } from "@/features/conversation-simulator/use-conversation-simulator"
+
+const ConversationSimulatorView = lazy(
+  () =>
+    import("@/features/conversation-simulator/components/conversation-simulator-view")
+)
 
 type AuthenticatedAppShellProps = {
   activeConversationId: string | null
@@ -44,7 +53,13 @@ export function AuthenticatedAppShell({
   const isDesktop = Boolean(window.myBotDesktop)
   const [signingOut, setSigningOut] = useState(false)
   const [signOutFailed, setSignOutFailed] = useState(false)
+  const [simulationEnabled, setSimulationEnabled] = useState(false)
   const [defaultPreferences, setDefaultPreferences] = useState({
+    model: user.default_model,
+    reasoningEffort: user.default_reasoning_effort,
+    fastMode: user.default_speed === "fast",
+  })
+  const [simulationPreferences, setSimulationPreferences] = useState({
     model: user.default_model,
     reasoningEffort: user.default_reasoning_effort,
     fastMode: user.default_speed === "fast",
@@ -53,6 +68,9 @@ export function AuthenticatedAppShell({
   const shellRef = useRef<HTMLElement>(null)
   const composerDockRef = useRef<HTMLElement>(null)
   const catalog = useSidebarCatalog(true)
+  const simulator = useConversationSimulator()
+  const pauseSimulation = simulator.pause
+  const restartSimulation = simulator.restart
   const {
     activeRecord: activeConversationRecord,
     activeTurnConversationId,
@@ -82,6 +100,12 @@ export function AuthenticatedAppShell({
           : "Conversation"
       : "New conversation")
   const centeredComposer = activeConversationId === null
+  const simulationActive = simulationEnabled && !centeredComposer
+  const simulationRecord = simulator.snapshot.record
+  const simulationFrame = useMemo(
+    () => createMockBrowserFrame(simulator.snapshot.browserFrameScene),
+    [simulator.snapshot.browserFrameScene]
+  )
   const greetingName = user.first_name?.trim()
   const greeting = greetingName
     ? `What’s on your mind today, ${greetingName}?`
@@ -124,6 +148,16 @@ export function AuthenticatedAppShell({
     },
     []
   )
+
+  useEffect(() => {
+    if (simulationActive) restartSimulation()
+    else pauseSimulation()
+  }, [
+    activeConversationId,
+    pauseSimulation,
+    restartSimulation,
+    simulationActive,
+  ])
 
   useLayoutEffect(() => {
     const shell = shellRef.current
@@ -227,6 +261,24 @@ export function AuthenticatedAppShell({
     [activeConversationId, setConversationPreferences]
   )
 
+  const handleSimulationEnabledChange = useCallback(
+    (enabled: boolean) => {
+      if (enabled) {
+        setSimulationPreferences({
+          model: activeConversation?.model ?? defaultPreferences.model,
+          reasoningEffort:
+            activeConversation?.reasoning_effort ??
+            defaultPreferences.reasoningEffort,
+          fastMode: activeConversation
+            ? activeConversation.speed === "fast"
+            : defaultPreferences.fastMode,
+        })
+      }
+      setSimulationEnabled(enabled)
+    },
+    [activeConversation, defaultPreferences]
+  )
+
   const handleStop = useCallback(async () => {
     const conversationId = activeConversationId
     const runId = activeConversationRecord?.runId
@@ -251,6 +303,12 @@ export function AuthenticatedAppShell({
       <SidebarProvider className="relative h-svh min-h-0 overflow-hidden">
         {isDesktop && (
           <DesktopAppHeader
+            {...(activeConversationId
+              ? {
+                  simulationEnabled,
+                  onSimulationEnabledChange: handleSimulationEnabledChange,
+                }
+              : {})}
             title={centeredComposer ? "myBot" : conversationTitle}
           />
         )}
@@ -271,20 +329,38 @@ export function AuthenticatedAppShell({
           className={cn("min-h-0 overflow-hidden", isDesktop && "pt-9")}
         >
           {!isDesktop && !centeredComposer && (
-            <header className="flex h-12 min-w-0 shrink-0 items-center border-b px-3.5">
+            <header className="flex h-12 min-w-0 shrink-0 items-center gap-3 border-b px-3.5">
               <h1
                 id="conversation-title"
-                className="min-w-0 truncate text-sm leading-5 font-medium"
+                className="min-w-0 flex-1 truncate text-sm leading-5 font-medium"
                 title={conversationTitle}
               >
                 {conversationTitle}
               </h1>
+              <ConversationSimulationToggle
+                checked={simulationEnabled}
+                onCheckedChange={handleSimulationEnabledChange}
+              />
             </header>
           )}
-          <div className="min-h-0 flex-1">{children}</div>
+          <div className="min-h-0 flex-1">
+            {simulationActive ? (
+              <ConversationSimulatorView simulator={simulator} />
+            ) : (
+              children
+            )}
+          </div>
           <BrowserPictureInPicture
-            frame={activeConversationRecord?.browserFrame}
-            projection={activeConversationRecord?.browserProjection}
+            frame={
+              simulationActive
+                ? simulationFrame
+                : activeConversationRecord?.browserFrame
+            }
+            projection={
+              simulationActive
+                ? simulationRecord.browserProjection
+                : activeConversationRecord?.browserProjection
+            }
           />
           <footer
             ref={composerDockRef}
@@ -302,34 +378,72 @@ export function AuthenticatedAppShell({
                 </h1>
               )}
               <Composer
-                model={activeConversation?.model ?? defaultPreferences.model}
+                key={simulationActive ? "simulation" : "live"}
+                model={
+                  simulationActive
+                    ? simulationPreferences.model
+                    : (activeConversation?.model ?? defaultPreferences.model)
+                }
                 reasoningEffort={
-                  activeConversation?.reasoning_effort ??
-                  defaultPreferences.reasoningEffort
+                  simulationActive
+                    ? simulationPreferences.reasoningEffort
+                    : (activeConversation?.reasoning_effort ??
+                      defaultPreferences.reasoningEffort)
                 }
                 fastMode={
-                  activeConversation
-                    ? activeConversation.speed === "fast"
-                    : defaultPreferences.fastMode
+                  simulationActive
+                    ? simulationPreferences.fastMode
+                    : activeConversation
+                      ? activeConversation.speed === "fast"
+                      : defaultPreferences.fastMode
                 }
                 models={catalog.models}
-                modelContextKey={activeConversationId ?? "new"}
+                modelContextKey={`${activeConversationId ?? "new"}${simulationActive ? ":simulation" : ""}`}
                 providerDisabled={
-                  catalog.models.find(
-                    (item) =>
-                      item.id ===
-                      (activeConversation?.model ?? defaultPreferences.model)
-                  )?.active === false
+                  simulationActive
+                    ? false
+                    : catalog.models.find(
+                        (item) =>
+                          item.id ===
+                          (activeConversation?.model ??
+                            defaultPreferences.model)
+                      )?.active === false
                 }
                 modelScope={activeConversationId ? "conversation" : "default"}
-                onPreferencesChange={handlePreferencesChange}
-                onSubmit={handleComposerSubmit}
-                activeRunId={
-                  activeConversationRecord?.stopRequested
-                    ? undefined
-                    : activeConversationRecord?.runId
+                onPreferencesChange={
+                  simulationActive
+                    ? (preferences) => {
+                        setSimulationPreferences(preferences)
+                        return Promise.resolve()
+                      }
+                    : handlePreferencesChange
                 }
-                onStop={handleStop}
+                onSubmit={
+                  simulationActive
+                    ? (submission, onAccepted) => {
+                        simulator.startWithPrompt(submission.message)
+                        onAccepted()
+                        return Promise.resolve()
+                      }
+                    : handleComposerSubmit
+                }
+                activeRunId={
+                  simulationActive
+                    ? simulationRecord.stopRequested
+                      ? undefined
+                      : simulationRecord.runId
+                    : activeConversationRecord?.stopRequested
+                      ? undefined
+                      : activeConversationRecord?.runId
+                }
+                onStop={
+                  simulationActive
+                    ? () => {
+                        simulator.stop()
+                        return Promise.resolve()
+                      }
+                    : handleStop
+                }
               />
             </div>
           </footer>
