@@ -16,6 +16,7 @@ function fakeRedis() {
       const record = records.get(key)
       if (!record) return 0
       if (args.length === 1) {
+        if (record.status === 'approved' && record.user_id === args[0]) return 1
         if (record.status !== 'pending') return 0
         record.status = 'approved'; record.user_id = args[0]; return 1
       }
@@ -36,7 +37,12 @@ describe('DesktopAuthService', () => {
     const transaction = await service.start()
     expect(transaction.verificationUrl).toContain('desktop_transaction=')
     expect(transaction.verificationUrl).not.toContain(transaction.clientSecret)
-    await service.approve(transaction.transactionId, 'user_123')
+    const completion = await service.complete(transaction.transactionId, 'user_123')
+    expect(completion.callbackUrl).toBe(`mybot://auth/callback?transaction_id=${transaction.transactionId}`)
+    await expect(service.complete(transaction.transactionId, 'user_123')).resolves.toEqual(completion)
+    await expect(service.complete(transaction.transactionId, 'another_user')).rejects.toMatchObject({
+      code: 'invalid_desktop_transaction',
+    })
     const record = [...redis.records.values()][0]
     expect(record).toMatchObject({ status: 'approved', user_id: 'user_123' })
     expect(record).not.toHaveProperty('session_token')

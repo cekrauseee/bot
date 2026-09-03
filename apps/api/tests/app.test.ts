@@ -40,6 +40,34 @@ describe('HTTP contract', () => {
     expect(services.otp.issue).not.toHaveBeenCalled()
   })
 
+  it('allows the stable desktop renderer origin through CORS in every environment', async () => {
+    for (const environment of ['development', 'test', 'production'] as const) {
+      const app = createApp({ ...settings, environment }, services)
+      const response = await app.handle(new Request('http://localhost/projects', {
+        method: 'OPTIONS',
+        headers: {
+          origin: 'app://mybot',
+          'access-control-request-method': 'POST',
+          'access-control-request-headers': 'authorization,content-type',
+        },
+      }))
+      expect(response.headers.get('access-control-allow-origin')).toBe('app://mybot')
+      expect(response.headers.get('access-control-allow-credentials')).toBe('true')
+      expect(response.headers.get('access-control-allow-headers')).toContain('Authorization')
+    }
+  })
+
+  it('keeps OTP authentication browser-only', async () => {
+    const app = createApp(settings, services)
+    const response = await app.handle(new Request('http://localhost/auth/otp/request', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'app://mybot' },
+      body: JSON.stringify({ email: 'person@example.com' }),
+    }))
+    expect(response.status).toBe(403)
+    expect(services.otp.issue).not.toHaveBeenCalled()
+  })
+
   it('rejects a missing browser origin in production', async () => {
     const productionSettings = loadSettings({
       ...process.env,
@@ -229,6 +257,42 @@ describe('HTTP contract', () => {
     expect(response.status).toBe(303)
     expect(response.headers.get('location')).toBe('https://accounts.google.com/authorize')
     expect(response.headers.get('set-cookie')).toContain('mybot_oauth_state=')
+  })
+
+  it('completes an authenticated desktop handoff with a validated deep link', async () => {
+    const transactionId = 't'.repeat(32)
+    const desktopServices = {
+      ...services,
+      database: {
+        transaction: vi.fn(async (callback: (db: unknown) => Promise<unknown>) => callback({})),
+      },
+      sessions: {
+        ...services.sessions,
+        resolve: vi.fn().mockResolvedValue({ id: 'session_123', user: { id: 'user_123' } }),
+      },
+      desktopAuth: {
+        complete: vi.fn().mockResolvedValue({
+          callbackUrl: `mybot://auth/callback?transaction_id=${transactionId}`,
+        }),
+      },
+    }
+    const app = createApp(settings, desktopServices as any)
+    const response = await app.handle(new Request('http://localhost/auth/desktop/complete', {
+      method: 'POST',
+      headers: {
+        cookie: `${settings.sessionCookieName}=browser-session`,
+        origin: settings.webOrigin,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ transaction_id: transactionId }),
+    }))
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(await response.json()).toEqual({
+      callback_url: `mybot://auth/callback?transaction_id=${transactionId}`,
+    })
+    expect(desktopServices.desktopAuth.complete).toHaveBeenCalledWith(transactionId, 'user_123')
   })
 
   it('clears the OAuth state cookie when Google callback fails', async () => {

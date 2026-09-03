@@ -63,6 +63,8 @@ import {
   type RequestOutcome,
 } from './logger.js'
 
+const DESKTOP_RENDERER_ORIGIN = 'app://mybot'
+
 export type Services = {
   database: Database
   otp: OtpService
@@ -566,7 +568,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       }
     })
     .use(cors({
-      origin: [settings.webOrigin, 'app://mybot'],
+      origin: [settings.webOrigin, DESKTOP_RENDERER_ORIGIN],
       credentials: true,
       methods: ['GET', 'POST', 'PATCH', 'DELETE'],
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id', 'X-Correlation-Id'],
@@ -632,7 +634,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
 
   const browserOrigin = (request: Request) => {
     const origin = request.headers.get('origin')
-    if (origin === settings.webOrigin || origin === 'app://mybot' || (settings.environment !== 'production' && !origin)) return
+    if (origin === settings.webOrigin || origin === DESKTOP_RENDERER_ORIGIN || (settings.environment !== 'production' && !origin)) return
     throw new AuthError('invalid_origin', 'This request did not come from an allowed origin.', 403)
   }
   const webBrowserOrigin = (request: Request) => {
@@ -642,7 +644,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   }
   const websocketOrigin = (request: Request) => {
     if (bearerValue(request)) return
-    if (request.headers.get('origin') === settings.webOrigin || request.headers.get('origin') === 'app://mybot') return
+    if (request.headers.get('origin') === settings.webOrigin || request.headers.get('origin') === DESKTOP_RENDERER_ORIGIN) return
     throw new AuthError('invalid_origin', 'This request did not come from an allowed origin.', 403)
   }
 
@@ -652,7 +654,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   const clearOauthStateCookie = () => `${oauthStateCookieName}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax${settings.secureCookies ? '; Secure' : ''}`
   const desktopRequestOrigin = (request: Request) => {
     const origin = request.headers.get('origin')
-    if (!origin || origin === settings.webOrigin || origin === 'app://mybot') return
+    if (!origin || origin === settings.webOrigin || origin === DESKTOP_RENDERER_ORIGIN) return
     throw new AuthError('invalid_origin', 'This request did not come from an allowed origin.', 403)
   }
 
@@ -666,8 +668,11 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     verification_url: t.String({ format: 'uri' }),
     expires_in_seconds: t.Integer(),
   })
-  const desktopApprovalSchema = t.Object({
+  const desktopCompletionBodySchema = t.Object({
     transaction_id: t.String({ minLength: 32, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$' }),
+  })
+  const desktopCompletionSchema = t.Object({
+    callback_url: t.String({ format: 'uri' }),
   })
 
   app.get('/health', () => ({ status: 'ok' as const }), { response: t.Object({ status: t.Literal('ok') }) })
@@ -695,7 +700,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     return { token: issued.token }
   }, { body: desktopTransactionSchema, response: { 200: t.Object({ token: t.String() }), 400: detailSchema, 403: detailSchema, 503: detailSchema } })
 
-  app.post('/auth/desktop/approve', async ({ request, body }) => {
+  app.post('/auth/desktop/complete', async ({ request, body, set }) => {
     webBrowserOrigin(request)
     if (!services.desktopAuth) throw new AuthError('desktop_auth_unavailable', 'Desktop sign-in is unavailable.', 503)
     const token = cookieValue(request, settings.sessionCookieName)
@@ -707,9 +712,10 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     })
     const userId = active.user?.id
     if (!userId) throw new AuthError('unauthorized', 'Sign in to continue.', 401)
-    await services.desktopAuth.approve(body.transaction_id, userId)
-    return new Response(null, { status: 204 })
-  }, { body: desktopApprovalSchema, response: { 204: t.Void(), 400: detailSchema, 401: detailSchema, 403: detailSchema, 503: detailSchema } })
+    const result = await services.desktopAuth.complete(body.transaction_id, userId)
+    set.headers['cache-control'] = 'no-store'
+    return { callback_url: result.callbackUrl }
+  }, { body: desktopCompletionBodySchema, response: { 200: desktopCompletionSchema, 400: detailSchema, 401: detailSchema, 403: detailSchema, 503: detailSchema } })
 
   app.post('/auth/otp/request', async ({ request, body, set }) => {
     webBrowserOrigin(request)
@@ -794,7 +800,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       set.status = 303
       const transactionId = cookieValue(request, desktopTransactionCookieName)
       set.headers.Location = transactionId
-        ? `${settings.webOrigin}/sign?desktop_transaction=${encodeURIComponent(transactionId)}`
+        ? `${settings.webOrigin}/sign?desktop_transaction=${encodeURIComponent(transactionId)}&error=google`
         : `${settings.webOrigin}/login?error=google`
       set.headers['set-cookie'] = [clearOauthStateCookie(), ...(transactionId ? [`${desktopTransactionCookieName}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax`] : [])] as any
       return undefined

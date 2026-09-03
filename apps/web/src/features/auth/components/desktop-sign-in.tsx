@@ -7,36 +7,38 @@ type DesktopState = "idle" | "opening" | "waiting" | "error"
 
 export function DesktopSignIn() {
   const [state, setState] = useState<DesktopState>(() =>
-    new URLSearchParams(window.location.search).get("desktop") === "success" ? "waiting" : "idle"
+    new URLSearchParams(window.location.search).get("desktop") === "error"
+      ? "error"
+      : "idle"
   )
-  const [error, setError] = useState("")
 
   const continueInBrowser = async () => {
-    if (!window.myBotDesktop || state === "opening" || state === "waiting") return
+    if (!window.myBotDesktop || state === "opening") return
     setState("opening")
-    setError("")
     try {
-      setState("waiting")
       await window.myBotDesktop.startBrowserSignIn()
-      window.location.assign("/")
+      setState("waiting")
     } catch {
       setState("error")
-      setError("We couldn’t complete browser sign-in. Please try again.")
     }
   }
 
   return (
-    <Card className="w-full max-w-sm">
+    <Card className="w-full max-w-sm" size="sm">
       <CardHeader>
         <CardTitle><h1>Sign in to myBot</h1></CardTitle>
-        <CardDescription>Continue in your browser to securely sign in with Google or email.</CardDescription>
+        <CardDescription>Use your browser to sign in.</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        <Button className="w-full" onClick={continueInBrowser} disabled={state === "opening" || state === "waiting"}>
-          {state === "opening" ? "Opening browser…" : state === "waiting" ? "Waiting for browser sign-in…" : "Continue in browser"}
+        <Button className="w-full" onClick={continueInBrowser} disabled={state === "opening"}>
+          {state === "opening" ? "Opening browser…" : state === "waiting" ? "Open browser again" : "Continue in browser"}
         </Button>
         <p className="text-muted-foreground text-center text-xs" role="status" aria-live="polite">
-          {error || (state === "waiting" ? "Finish signing in in the browser window. This screen will continue automatically." : "")}
+          {state === "error"
+            ? "Unable to sign in. Try again."
+            : state === "waiting"
+              ? "Finish signing in in your browser."
+              : ""}
         </p>
       </CardContent>
     </Card>

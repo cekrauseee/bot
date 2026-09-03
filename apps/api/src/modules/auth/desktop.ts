@@ -13,6 +13,10 @@ export type DesktopTransaction = {
   expiresInSeconds: number
 }
 
+export type DesktopCompletion = {
+  callbackUrl: string
+}
+
 const digest = (value: string) => createHash('sha256').update(value).digest('hex')
 
 /** Short-lived, one-time browser handoff state. Secrets are never placed in URLs. */
@@ -32,17 +36,25 @@ export class DesktopAuthService {
     }
   }
 
-  async approve(transactionId: string, userId: string) {
+  async complete(transactionId: string, userId: string): Promise<DesktopCompletion> {
     if (!/^[A-Za-z0-9_-]{32,64}$/.test(transactionId) || !/^[A-Za-z0-9_-]{1,128}$/.test(userId)) {
       throw new AuthError('invalid_desktop_transaction', 'This desktop sign-in request is invalid or expired.', 400)
     }
     const result = await this.redis.eval(`
       local status = redis.call('HGET', KEYS[1], 'status')
-      if status ~= 'pending' then return 0 end
-      redis.call('HSET', KEYS[1], 'status', 'approved', 'user_id', ARGV[1])
-      return 1
+      if status == 'pending' then
+        redis.call('HSET', KEYS[1], 'status', 'approved', 'user_id', ARGV[1])
+        return 1
+      end
+      if status == 'approved' and redis.call('HGET', KEYS[1], 'user_id') == ARGV[1] then
+        return 1
+      end
+      return 0
     `, 1, key(transactionId), userId)
     if (Number(result) !== 1) throw new AuthError('invalid_desktop_transaction', 'This desktop sign-in request is invalid or expired.', 400)
+    return {
+      callbackUrl: `mybot://auth/callback?transaction_id=${encodeURIComponent(transactionId)}`,
+    }
   }
 
   async exchange(transactionId: string, clientSecret: string) {
