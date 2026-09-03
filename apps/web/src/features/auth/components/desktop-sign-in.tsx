@@ -23,6 +23,13 @@ export function DesktopSignIn() {
     }
   }
 
+  const statusMessage =
+    state === "error"
+      ? "Unable to sign in. Try again."
+      : state === "waiting"
+        ? "Finish signing in in your browser."
+        : null
+
   return (
     <Card className="w-full max-w-sm" size="sm">
       <CardHeader>
@@ -33,13 +40,11 @@ export function DesktopSignIn() {
         <Button className="w-full" onClick={continueInBrowser} disabled={state === "opening"}>
           {state === "opening" ? "Opening browser…" : state === "waiting" ? "Open browser again" : "Continue in browser"}
         </Button>
-        <p className="text-muted-foreground text-center text-xs" role="status" aria-live="polite">
-          {state === "error"
-            ? "Unable to sign in. Try again."
-            : state === "waiting"
-              ? "Finish signing in in your browser."
-              : ""}
-        </p>
+        {statusMessage && (
+          <p className="text-muted-foreground text-center text-xs" role="status" aria-live="polite">
+            {statusMessage}
+          </p>
+        )}
       </CardContent>
     </Card>
   )
