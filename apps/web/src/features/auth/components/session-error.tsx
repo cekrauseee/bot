@@ -21,7 +21,7 @@ export function SessionError({ onRetry }: SessionErrorProps) {
           ref={headingRef}
           id="session-error-title"
           tabIndex={-1}
-          className="text-base font-medium"
+          className="text-base font-medium outline-none"
         >
           Unable to check your session
         </h1>
