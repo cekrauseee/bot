@@ -24,6 +24,7 @@ import {
 } from "@/features/composer/components/composer"
 import { useConversations } from "@/features/conversation/hooks/use-conversations"
 import { DesktopAppHeader } from "@/features/app-shell/components/desktop-app-header"
+import { BrowserPictureInPicture } from "@/features/conversation/components/browser-picture-in-picture"
 
 type AuthenticatedAppShellProps = {
   activeConversationId: string | null
@@ -281,6 +282,10 @@ export function AuthenticatedAppShell({
             </header>
           )}
           <div className="min-h-0 flex-1">{children}</div>
+          <BrowserPictureInPicture
+            frame={activeConversationRecord?.browserFrame}
+            projection={activeConversationRecord?.browserProjection}
+          />
           <footer
             ref={composerDockRef}
             className={cn(

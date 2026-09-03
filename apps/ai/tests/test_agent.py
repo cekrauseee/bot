@@ -1,7 +1,6 @@
 import asyncio
 import json
 from types import SimpleNamespace
-from typing import TypedDict
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -10,12 +9,9 @@ import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.errors import GraphRecursionError
-from langgraph.graph import END, START, StateGraph
-from langgraph.types import Command
 from pydantic import ValidationError
 
 from my_bot_ai.config import Settings
-from my_bot_ai.features.agent.checkpoints import create_in_memory_checkpointer
 from my_bot_ai.features.agent.contracts import (
     AgentRequest,
     ConversationTitleRequest,
@@ -23,11 +19,7 @@ from my_bot_ai.features.agent.contracts import (
     PlanStep,
     resolve_model_settings,
 )
-from my_bot_ai.features.agent.errors import (
-    CheckpointMissingError,
-    InvalidResumeError,
-    RuntimeCallError,
-)
+from my_bot_ai.features.agent.errors import RuntimeCallError
 from my_bot_ai.features.agent.models import build_chat_model, provider_builtin_tools
 from my_bot_ai.features.agent.service import (
     GRAPH_RECURSION_LIMIT,
@@ -42,7 +34,6 @@ from my_bot_ai.features.agent.service import (
     stream_model,
 )
 from my_bot_ai.features.agent.title import TITLE_MODEL, generate_conversation_title
-from my_bot_ai.features.agent.tools import build_core_tools
 from my_bot_ai.main import create_app
 
 RUN = uuid4()
@@ -643,41 +634,8 @@ def test_provider_quota_failure_keeps_public_retry_contract_and_safe_diagnostic(
     assert "private provider response" not in response.text
 
 
-def test_user_input_required_pauses_without_turn_completed() -> None:
-    async def waiting_runner(_body, _settings):
-        yield {
-            "type": "user.input_required",
-            "data": {
-                "question_id": "choice",
-                "title": "Choose",
-                "description": "Pick one",
-                "options": [{"id": "a", "label": "A"}],
-                "multiple": False,
-                "allow_custom": False,
-            },
-        }
-
-    response = client(waiting_runner).post(
-        "/agent/stream", json=PAYLOAD, headers={"Authorization": "Bearer test-token"}
-    )
-    event_types = [
-        json.loads(block.split("data: ", 1)[1])["type"]
-        for block in response.text.split("\n\n")
-        if block
-    ]
-    assert event_types == ["turn.started", "user.input_required"]
-
-
 def test_checkpoint_led_preparation_never_replays_the_transcript() -> None:
     body = AgentRequest.model_validate(PAYLOAD)
-    question = {
-        "question_id": "choice",
-        "title": "Choose",
-        "description": "Pick one",
-        "options": [{"id": "a", "label": "A"}],
-        "multiple": False,
-        "allow_custom": False,
-    }
 
     class SnapshotGraph:
         def __init__(self, snapshot):
@@ -686,7 +644,7 @@ def test_checkpoint_led_preparation_never_replays_the_transcript() -> None:
         async def aget_state(self, _config):
             return self.snapshot
 
-    def snapshot(*, checkpoint_id=None, next_nodes=(), interrupts=(), messages=()):
+    def snapshot(*, checkpoint_id=None, next_nodes=(), messages=()):
         return SimpleNamespace(
             config={
                 "configurable": {
@@ -697,10 +655,7 @@ def test_checkpoint_led_preparation_never_replays_the_transcript() -> None:
             created_at="now" if checkpoint_id else None,
             metadata={} if checkpoint_id else None,
             next=next_nodes,
-            tasks=tuple(
-                SimpleNamespace(interrupts=(SimpleNamespace(value=value),))
-                for value in interrupts
-            ),
+            tasks=(),
             values={"messages": list(messages)},
         )
 
@@ -723,35 +678,6 @@ def test_checkpoint_led_preparation_never_replays_the_transcript() -> None:
         "messages": [message.model_dump(mode="json") for message in body.messages]
     }
     assert absent.checkpoint["phase"] == "absent"
-
-    resumed = AgentRequest.model_validate(
-        {**PAYLOAD, "resume": {"question_id": "choice", "answer": "a"}}
-    )
-    missing = anyio.run(prepare, snapshot(), resumed)
-    assert isinstance(missing.error, CheckpointMissingError)
-    assert missing.should_invoke is False
-
-    waiting = anyio.run(
-        prepare,
-        snapshot(checkpoint_id="cp-wait", interrupts=(question,)),
-        resumed,
-    )
-    assert waiting.should_invoke is True
-    assert isinstance(waiting.invocation, Command)
-    assert waiting.invocation.resume == {"question_id": "choice", "answer": "a"}
-    assert waiting.checkpoint["resume_consumed"] is False
-
-    stale = AgentRequest.model_validate(
-        {**PAYLOAD, "resume": {"question_id": "prior", "answer": "a"}}
-    )
-    interrupted = anyio.run(
-        prepare,
-        snapshot(checkpoint_id="cp-next-question", interrupts=(question,)),
-        stale,
-    )
-    assert interrupted.should_invoke is False
-    assert interrupted.checkpoint["pending_question"]["question_id"] == "choice"
-    assert interrupted.checkpoint["resume_consumed"] is True
 
     current_messages = (
         HumanMessage(content="Earlier"),
@@ -963,8 +889,23 @@ def test_child_agents_are_recursive_configurable_and_checkpoint_led() -> None:
         assert "A tool failure is returned as JSON with ok:false" in prompt
         assert len(call["middleware"]) == 1
     assert "Current task plan (context only)" in created[0]["system_prompt"]
+    assert "ask the necessary questions as normal response text" in created[0]["system_prompt"]
+    assert "do not force questions into a fixed schema" in created[0]["system_prompt"]
+    root_tool_names = {
+        name
+        for tool in created[0]["tools"]
+        if isinstance((name := getattr(tool, "name", None)), str)
+    }
+    assert root_tool_names == {
+        "update_plan",
+        "delegate_to_child_agent",
+    }
     assert all(
         "Current task plan (context only)" not in call["system_prompt"] for call in created[1:]
+    )
+    assert all(
+        "report the smallest concrete blocker to the parent agent" in call["system_prompt"]
+        for call in created[1:]
     )
     assert all(call["checkpointer"] is saver for call in created[1:])
     assert all(runtime_tool in call["tools"] for call in created[1:])
@@ -985,96 +926,6 @@ def test_child_agents_are_recursive_configurable_and_checkpoint_led() -> None:
     assert child_thread_id(RUN, "child-call-1") == child_thread_id(RUN, "child-call-1")
     with pytest.raises(ValueError):
         child_thread_id(RUN, "x" * (MAX_TOOL_CALL_ID_LENGTH + 1))
-
-
-class AskState(TypedDict, total=False):
-    answer: str
-
-
-def test_ask_user_interrupts_and_resumes_multiple_questions_durably() -> None:
-    async def child(_task: str, _tool_call_id: str) -> str:
-        return "done"
-
-    ask_tool = next(tool for tool in build_core_tools(child) if tool.name == "ask_user")
-
-    def ask(_state: AskState):
-        answer = ask_tool.invoke(
-            {
-                "questions": [
-                    {
-                        "id": "choice",
-                        "title": "Choose",
-                        "description": "Pick one",
-                        "options": [{"id": "a", "label": "A"}],
-                        "multiple": False,
-                        "allow_custom": False,
-                    },
-                    {
-                        "id": "details",
-                        "title": "Details",
-                        "description": "Add details",
-                        "options": [],
-                        "multiple": False,
-                        "allow_custom": True,
-                    },
-                ]
-            }
-        )
-        return {"answer": answer}
-
-    builder = StateGraph(AskState)
-    builder.add_node("ask", ask)
-    builder.add_edge(START, "ask")
-    builder.add_edge("ask", END)
-    graph = builder.compile(checkpointer=create_in_memory_checkpointer())
-    config = {"configurable": {"thread_id": str(uuid4())}}
-
-    first = graph.invoke({}, config)
-    assert first["__interrupt__"][0].value["question_id"] == "choice"
-    second = graph.invoke(Command(resume={"question_id": "choice", "answer": "a"}), config)
-    assert second["__interrupt__"][0].value["question_id"] == "details"
-    final = graph.invoke(
-        Command(resume={"question_id": "details", "answer": "More context"}), config
-    )
-    assert json.loads(final["answer"])["answers"] == [
-        {"question_id": "choice", "answer": "a"},
-        {"question_id": "details", "answer": "More context"},
-    ]
-
-
-def test_ask_user_rejects_invalid_answer_shape() -> None:
-    async def child(_task: str, _tool_call_id: str) -> str:
-        return "done"
-
-    ask_tool = next(tool for tool in build_core_tools(child) if tool.name == "ask_user")
-
-    def ask(_state: AskState):
-        return {
-            "answer": ask_tool.invoke(
-                {
-                    "questions": [
-                        {
-                            "id": "choices",
-                            "title": "Choose",
-                            "description": "Pick several",
-                            "options": [{"id": "a", "label": "A"}],
-                            "multiple": True,
-                            "allow_custom": False,
-                        }
-                    ]
-                }
-            )
-        }
-
-    builder = StateGraph(AskState)
-    builder.add_node("ask", ask)
-    builder.add_edge(START, "ask")
-    builder.add_edge("ask", END)
-    graph = builder.compile(checkpointer=create_in_memory_checkpointer())
-    config = {"configurable": {"thread_id": str(uuid4())}}
-    graph.invoke({}, config)
-    with pytest.raises(InvalidResumeError):
-        graph.invoke(Command(resume={"question_id": "choices", "answer": "a"}), config)
 
 
 def test_stream_propagates_cancellation() -> None:

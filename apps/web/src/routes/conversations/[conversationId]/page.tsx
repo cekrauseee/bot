@@ -62,6 +62,8 @@ export default function ConversationPage() {
   return (
     <ConversationView
       key={activeConversation.id}
+      activeAssistantId={activeConversationRecord.activeAssistantId}
+      browserProjection={activeConversationRecord.browserProjection}
       messages={activeConversationRecord.messages}
       onTurnSpacerAnchorConsumed={handleTurnSpacerAnchorConsumed}
       turnSpacerAnchorId={activeConversationRecord.turnSpacerAnchorId}

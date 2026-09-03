@@ -11,7 +11,12 @@ const tool = (
   id: string,
   action: string,
   target?: string
-): ProcessActivity => ({ id, action, target, type: "tool" })
+): Extract<ProcessActivity, { type: "tool" }> => ({
+  id,
+  action,
+  target,
+  type: "tool",
+})
 
 describe("process activity model", () => {
   it("groups only consecutive activities from the same family", () => {
@@ -71,5 +76,27 @@ describe("process activity model", () => {
       label: "Could not interact with the page",
       detail: "The browser action could not be completed.",
     })
+  })
+
+  it("uses the latest browser child status after a recovered failure", () => {
+    const activities: ProcessActivity[] = [
+      { ...tool("click-1", "browser_click"), status: "failed" },
+      { ...tool("snapshot-2", "browser_snapshot"), status: "completed" },
+    ]
+
+    expect(processActivityGroupLabel("browser", activities)).toBe(
+      "Worked in the browser"
+    )
+  })
+
+  it("uses the current browser action while it is in progress", () => {
+    const activities: ProcessActivity[] = [
+      { ...tool("open-1", "browser_open"), status: "completed" },
+      { ...tool("click-2", "browser_click"), status: "in_progress" },
+    ]
+
+    expect(processActivityGroupLabel("browser", activities)).toBe(
+      "Interacting with the page"
+    )
   })
 })

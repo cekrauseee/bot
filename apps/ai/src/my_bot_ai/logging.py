@@ -264,10 +264,6 @@ def classify_error(error: BaseException, provider: str | None = None) -> dict[st
             category = code
         elif code in {"runtime_error", "manual_recovery_required", "idempotency_conflict"}:
             category = "runtime"
-        elif code in {"checkpoint_missing"}:
-            category = "checkpoint"
-        elif code in {"invalid_resume"}:
-            category = "invalid_request"
         else:
             category = "internal"
         retryable = bool(getattr(public, "retryable", False))
@@ -314,8 +310,6 @@ def classify_public_error(
         "runtime_error": "runtime",
         "manual_recovery_required": "runtime",
         "idempotency_conflict": "runtime",
-        "checkpoint_missing": "checkpoint",
-        "invalid_resume": "invalid_request",
         "cancelled": "cancelled",
     }
     safe_code = code if code in categories else (

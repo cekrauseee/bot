@@ -36,14 +36,10 @@ const frame = (
   data,
 })}\n\n`
 
-const providerResponse = (input: Record<string, unknown>, waiting = false) => new Response([
+const providerResponse = (input: Record<string, unknown>) => new Response([
   frame(input, 1, 'turn.started', { model: input.model }),
-  frame(input, 2, 'text.delta', { delta: waiting ? 'Waiting.' : 'Done.' }),
-  waiting
-    ? frame(input, 3, 'user.input_required', {
-      question: { question_id: 'question-1', prompt: 'Continue?' },
-    })
-    : frame(input, 3, 'turn.completed', { model: input.model }),
+  frame(input, 2, 'text.delta', { delta: 'Done.' }),
+  frame(input, 3, 'turn.completed', { model: input.model }),
 ].join(''), { headers: { 'content-type': 'text/event-stream' } })
 
 const parseEvents = async (response: Response) => (await response.text())
@@ -119,7 +115,6 @@ async function startTurn(
   request: RequestApp,
   message: string,
   conversationId?: string,
-  finalEvent = 'turn.completed',
 ) {
   const path = conversationId
     ? `/conversations/${conversationId}/turns`
@@ -134,7 +129,7 @@ async function startTurn(
   expect(response.status).toBe(200)
   const events = await parseEvents(response)
   expect(events[0]?.type).toBe('turn.started')
-  expect(events.at(-1)?.type).toBe(finalEvent)
+  expect(events.at(-1)?.type).toBe('turn.completed')
   return {
     runId: events[0].run_id,
     conversation: events[0].data.conversation as { id: string; project_id: string | null },
@@ -148,18 +143,6 @@ async function runWorkspace(userId: string, runId: string) {
   )
   expect(run.rows).toHaveLength(1)
   return run.rows[0]
-}
-
-async function waitForStatus(request: RequestApp, runId: string, expected: string) {
-  let state: { status: string } | undefined
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const response = await request(`/agent-runs/${runId}`)
-    expect(response.status).toBe(200)
-    state = await response.json() as { status: string }
-    if (state.status === expected) return
-    await new Promise((resolve) => setTimeout(resolve, 10))
-  }
-  expect(state?.status).toBe(expected)
 }
 
 describe('PostgreSQL project workspace integration', () => {
@@ -209,12 +192,12 @@ describe('PostgreSQL project workspace integration', () => {
     }
   })
 
-  it('keeps a waiting run directory durable while moves, renames, and deletion happen', async () => {
+  it('keeps completed run directories stable while moves, renames, and deletion happen', async () => {
     const owner = await authenticatedUser('workspace-durable')
     const calls: Record<string, unknown>[] = []
     const ai: AiClient = async (input) => {
       calls.push(input)
-      return providerResponse(input, calls.length === 2 && input.resume === undefined)
+      return providerResponse(input)
     }
     let executor = new AgentRunExecutor(database, ai)
     let request = requestFor(executor, owner.cookie)
@@ -226,8 +209,7 @@ describe('PostgreSQL project workspace integration', () => {
       const conversationId = root.conversation.id
       const workspaceId = (await runWorkspace(owner.id, root.runId)).workspace_id
       await assignProject(request, conversationId, first.id)
-      const waiting = await startTurn(request, 'Wait', conversationId, 'user.input_required')
-      await waitForStatus(request, waiting.runId, 'waiting')
+      const firstRun = await startTurn(request, 'Use Alpha', conversationId)
       const firstWorkspace = {
         working_directory: first.workspace_path,
         workspace_id: workspaceId,
@@ -242,27 +224,11 @@ describe('PostgreSQL project workspace integration', () => {
       )
       expect(renamed.rows).toEqual([{ workspace_path: first.workspace_path }])
       await deleteProject(owner.id, first.id)
-      expect(await runWorkspace(owner.id, waiting.runId)).toEqual(firstWorkspace)
+      expect(await runWorkspace(owner.id, firstRun.runId)).toEqual(firstWorkspace)
 
       await executor.close()
       executor = new AgentRunExecutor(database, ai)
       request = requestFor(executor, owner.cookie)
-      const resume = { question_id: 'question-1', answer: 'Yes' }
-      const resumed = await request(`/agent-runs/${waiting.runId}/resume`, {
-        method: 'POST',
-        headers: jsonHeaders,
-        body: JSON.stringify(resume),
-      })
-      expect(resumed.status).toBe(202)
-      await waitForStatus(request, waiting.runId, 'completed')
-      expect(calls).toHaveLength(3)
-      expect(calls[2]).toMatchObject({
-        version: 2,
-        run_id: waiting.runId,
-        ...firstWorkspace,
-        resume,
-      })
-      expect(await runWorkspace(owner.id, waiting.runId)).toEqual(firstWorkspace)
 
       const recreated = await createProject(request, 'Alpha renamed')
       expect(recreated.id).not.toBe(first.id)
@@ -273,7 +239,7 @@ describe('PostgreSQL project workspace integration', () => {
         workspace_id: workspaceId,
       }
       expect(await runWorkspace(owner.id, moved.runId)).toEqual(secondWorkspace)
-      expect(calls[3]).toMatchObject({ version: 2, ...secondWorkspace })
+      expect(calls[2]).toMatchObject({ version: 2, ...secondWorkspace })
 
       await deleteProject(owner.id, second.id)
       expect(await runWorkspace(owner.id, moved.runId)).toEqual(secondWorkspace)
@@ -281,8 +247,8 @@ describe('PostgreSQL project workspace integration', () => {
       const rootWorkspace = { working_directory: '/workspace', workspace_id: workspaceId }
       expect(next.conversation.project_id).toBeNull()
       expect(await runWorkspace(owner.id, next.runId)).toEqual(rootWorkspace)
-      expect(calls).toHaveLength(5)
-      expect(calls[4]).toMatchObject({ version: 2, ...rootWorkspace })
+      expect(calls).toHaveLength(4)
+      expect(calls[3]).toMatchObject({ version: 2, ...rootWorkspace })
     } finally {
       await executor.close()
       await pool.query('delete from users where id = $1', [owner.id])

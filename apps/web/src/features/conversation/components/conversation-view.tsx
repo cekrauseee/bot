@@ -8,7 +8,10 @@ import {
 } from "@/components/ui/message-scroller"
 import { ConversationMessage } from "@/features/conversation/components/conversation-message"
 import { useTurnSpacer } from "@/features/conversation/hooks/use-turn-spacer"
-import type { ConversationMessageData } from "@/features/conversation/model"
+import type {
+  BrowserProjection,
+  ConversationMessageData,
+} from "@/features/conversation/model"
 import type { CSSProperties } from "react"
 
 const composerScrollMask = {
@@ -20,10 +23,14 @@ const composerScrollMask = {
 
 export function ConversationView({
   messages,
+  activeAssistantId,
+  browserProjection,
   onTurnSpacerAnchorConsumed,
   turnSpacerAnchorId,
 }: {
   messages: readonly ConversationMessageData[]
+  activeAssistantId?: string
+  browserProjection?: BrowserProjection | null
   onTurnSpacerAnchorConsumed?: (anchorId: string) => void
   turnSpacerAnchorId?: string
 }) {
@@ -56,7 +63,14 @@ export function ConversationView({
                   role="listitem"
                   className="w-full"
                 >
-                  <ConversationMessage message={message} />
+                  <ConversationMessage
+                    browserProjection={
+                      message.id === activeAssistantId
+                        ? browserProjection
+                        : undefined
+                    }
+                    message={message}
+                  />
                 </MessageScrollerItem>
               ))}
             </MessageScrollerContent>

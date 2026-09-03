@@ -55,7 +55,8 @@ export function processToolCopy(
 ) {
   const action = normalizedAction(activity.action)
   const file = workspaceTarget(activity.target)
-  const failureDetail = activity.status === "failed" ? activity.detail : undefined
+  const failureDetail =
+    activity.status === "failed" ? activity.detail : undefined
 
   if (["filesystem_list", "list"].includes(action)) {
     return {
@@ -157,17 +158,6 @@ export function processToolCopy(
       detail: failureDetail,
     }
   }
-  if (action === "ask_user") {
-    return {
-      label: statusLabel(
-        activity.status,
-        "Asking for input",
-        "Asked for input",
-        "Could not ask for input"
-      ),
-      detail: failureDetail,
-    }
-  }
   return {
     label: statusLabel(
       activity.status,
@@ -236,14 +226,30 @@ export function groupProcessActivities(
 
 export function processActivityGroupLabel(
   family: ProcessActivityFamily,
-  activities: readonly ProcessActivity[]
+  activities: readonly ProcessActivity[],
+  browserActive = false
 ) {
-  const active = activities.some(
-    (activity) => "status" in activity && activity.status === "in_progress"
-  )
-  const failed = activities.some(
-    (activity) => "status" in activity && activity.status === "failed"
-  )
+  // Tool calls are sequential from the agent's perspective. The latest
+  // status is therefore the source of truth for the current group state;
+  // historical failures remain visible in the child rows but must not poison
+  // a later successful retry.
+  const latest = [...activities]
+    .reverse()
+    .find(
+      (
+        activity
+      ): activity is Extract<
+        ProcessActivity,
+        { type: "tool" | "search" | "trace" }
+      > =>
+        (activity.type === "tool" ||
+          activity.type === "search" ||
+          activity.type === "trace") &&
+        Boolean(activity.status)
+    )
+  const active =
+    browserActive || (latest !== undefined && latest.status === "in_progress")
+  const failed = latest !== undefined && latest.status === "failed"
   const labels: Record<ProcessActivityFamily, [string, string, string]> = {
     browser: [
       "Working in the browser",
@@ -273,5 +279,13 @@ export function processActivityGroupLabel(
     ],
   }
   const [pending, completed, error] = labels[family]
+  if (
+    active &&
+    family === "browser" &&
+    latest?.type === "tool" &&
+    latest.status === "in_progress"
+  ) {
+    return processToolCopy(latest).label
+  }
   return active ? pending : failed ? error : completed
 }

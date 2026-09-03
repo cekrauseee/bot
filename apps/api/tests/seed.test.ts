@@ -97,7 +97,6 @@ describe('application seed data', () => {
       ),
     )
     for (const action of [
-      'ask_user',
       'browser_click',
       'browser_close',
       'browser_open',

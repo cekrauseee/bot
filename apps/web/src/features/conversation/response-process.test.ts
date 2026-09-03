@@ -66,7 +66,7 @@ describe("response process", () => {
       })
     )
 
-    expect(markup).toContain("Reading files")
+    expect(markup).toContain("Read files")
     expect(markup).toContain('title="Reading package.json"')
     expect(markup).toContain('title="Read src/app.ts"')
     expect(markup).not.toContain("filesystem_read")
@@ -104,5 +104,98 @@ describe("response process", () => {
     expect(markup).toContain("<code>git diff --check</code>")
     expect(markup).toContain('aria-expanded="false"')
     expect(markup).not.toContain("shell_exec")
+  })
+
+  it("starts browser groups collapsed while an action is active", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(ResponseProcess, {
+        hasResponse: false,
+        process: {
+          activities: [
+            {
+              action: "browser_open",
+              id: "browser-1",
+              status: "in_progress",
+              target: "https://example.com",
+              type: "tool",
+            },
+            {
+              action: "browser_snapshot",
+              id: "browser-2",
+              status: "in_progress",
+              type: "tool",
+            },
+          ],
+          durationSeconds: 2,
+          status: "processing",
+        },
+      })
+    )
+
+    expect(markup).toContain("Inspecting the page")
+    expect(markup).toContain('aria-expanded="false"')
+    expect(markup).toContain("shimmer")
+  })
+
+  it("keeps a live browser session active between tool calls", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(ResponseProcess, {
+        hasResponse: false,
+        process: {
+          activities: [
+            {
+              action: "browser_open",
+              id: "browser-1",
+              status: "completed",
+              target: "https://example.com",
+              type: "tool",
+            },
+            {
+              action: "browser_click",
+              id: "browser-2",
+              status: "failed",
+              type: "tool",
+            },
+          ],
+          browserProjection: { control: "agent", state: "live" },
+          durationSeconds: 2,
+          status: "processing",
+        },
+      })
+    )
+
+    expect(markup).toContain("Working in the browser")
+    expect(markup).toContain("shimmer")
+    expect(markup).toContain('aria-expanded="false"')
+  })
+
+  it("shows the current browser operation while the session is live", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(ResponseProcess, {
+        hasResponse: false,
+        process: {
+          activities: [
+            {
+              action: "browser_open",
+              id: "browser-1",
+              status: "completed",
+              type: "tool",
+            },
+            {
+              action: "browser_snapshot",
+              id: "browser-2",
+              status: "in_progress",
+              type: "tool",
+            },
+          ],
+          browserProjection: { control: "agent", state: "live" },
+          durationSeconds: 2,
+          status: "processing",
+        },
+      })
+    )
+
+    expect(markup).toContain("Inspecting the page")
+    expect(markup).toContain("shimmer")
   })
 })

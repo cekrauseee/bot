@@ -11,7 +11,6 @@ const agentEventTypes = new Set([
   "step.completed",
   "plan.updated",
   "conversation.title.updated",
-  "user.input_required",
   "tool.started",
   "tool.updated",
   "tool.completed",
@@ -23,7 +22,6 @@ const agentEventTypes = new Set([
 const terminalEventTypes = new Set([
   "turn.completed",
   "turn.failed",
-  "user.input_required",
 ])
 const canonicalSequence = /^(0|[1-9]\d*)$/
 const maximumSequence = 9_223_372_036_854_775_807n

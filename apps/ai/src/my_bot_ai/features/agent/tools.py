@@ -5,7 +5,6 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import Annotated, Any
 
 from langchain_core.tools import BaseTool, InjectedToolCallId, StructuredTool
-from langgraph.types import interrupt
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from my_bot_ai.features.agent.contracts import (
@@ -15,53 +14,11 @@ from my_bot_ai.features.agent.contracts import (
     ReasoningEffort,
     Speed,
 )
-from my_bot_ai.features.agent.errors import InvalidResumeError
 
 ChildRunner = Callable[
     [str, str, ModelName | None, ReasoningEffort | None, Speed | None],
     Awaitable[str],
 ]
-
-
-class QuestionOption(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    id: str = Field(min_length=1, max_length=200)
-    label: str = Field(min_length=1, max_length=500)
-    description: str | None = Field(default=None, max_length=2_000)
-
-
-class AskUserQuestion(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    id: str = Field(min_length=1, max_length=200)
-    title: str = Field(min_length=1, max_length=500)
-    description: str = Field(min_length=1, max_length=2_000)
-    options: list[QuestionOption] = Field(default_factory=list, max_length=20)
-    multiple: bool = False
-    allow_custom: bool = False
-
-    @model_validator(mode="after")
-    def validate_options(self) -> AskUserQuestion:
-        option_ids = [option.id for option in self.options]
-        if len(option_ids) != len(set(option_ids)):
-            raise ValueError("question option ids must be unique")
-        if not self.options and not self.allow_custom:
-            raise ValueError("a question needs options or allow_custom")
-        return self
-
-
-class AskUserInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    questions: list[AskUserQuestion] = Field(min_length=1, max_length=20)
-
-    @model_validator(mode="after")
-    def validate_question_ids(self) -> AskUserInput:
-        question_ids = [question.id for question in self.questions]
-        if len(question_ids) != len(set(question_ids)):
-            raise ValueError("question ids must be unique")
-        return self
 
 
 class UpdatePlanInput(BaseModel):
@@ -95,30 +52,13 @@ class DelegateInput(BaseModel):
 
 
 def build_core_tools(child_runner: ChildRunner) -> Sequence[BaseTool]:
-    """Create interrupt, plan, and child-delegation tools for one run."""
-
-    def ask_user(questions: list[dict[str, Any]]) -> str:
-        parsed = AskUserInput(questions=questions).questions
-        answers: list[dict[str, Any]] = []
-        for question in parsed:
-            payload = question.model_dump(mode="json")
-            payload["question_id"] = question.id
-            resumed = interrupt(payload)
-            answer = _validated_answer(question, resumed)
-            answers.append({"question_id": question.id, "answer": answer})
-        return json.dumps({"answers": answers}, separators=(",", ":"))
+    """Create plan and child-delegation tools for one run."""
 
     def update_plan(plan: list[dict[str, Any]]) -> str:
         serialized = [PlanStep.model_validate(step).model_dump(mode="json") for step in plan]
         return json.dumps({"plan": serialized}, separators=(",", ":"))
 
     return (
-        StructuredTool.from_function(
-            func=ask_user,
-            name="ask_user",
-            description="Pause this run and ask the user one or more necessary questions.",
-            args_schema=AskUserInput,
-        ),
         StructuredTool.from_function(
             func=update_plan,
             name="update_plan",
@@ -154,26 +94,3 @@ def build_child_delegation_tool(child_runner: ChildRunner) -> BaseTool:
     """Expose recursive delegation without giving child agents user-facing tools."""
 
     return _delegation_tool(child_runner)
-
-
-def _validated_answer(question: AskUserQuestion, resumed: Any) -> str | list[str]:
-    if not isinstance(resumed, dict) or resumed.get("question_id") != question.id:
-        raise InvalidResumeError
-    answer = resumed.get("answer")
-    if question.multiple:
-        if not isinstance(answer, list) or not answer:
-            raise InvalidResumeError
-        if any(not isinstance(item, str) or not item.strip() for item in answer):
-            raise InvalidResumeError
-        if len(answer) != len(set(answer)):
-            raise InvalidResumeError
-        values = answer
-    else:
-        if not isinstance(answer, str) or not answer.strip():
-            raise InvalidResumeError
-        values = [answer]
-
-    option_ids = {option.id for option in question.options}
-    if not question.allow_custom and any(value not in option_ids for value in values):
-        raise InvalidResumeError
-    return answer

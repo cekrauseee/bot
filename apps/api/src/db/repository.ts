@@ -457,7 +457,7 @@ export class ConversationRepository {
     if (row) return row
     const [run] = await this.db.select({ id: agentRuns.id }).from(agentRuns).where(and(
       eq(agentRuns.conversationId, id),
-      inArray(agentRuns.status, ['queued', 'running', 'waiting', 'cancelling']),
+      inArray(agentRuns.status, ['queued', 'running', 'cancelling']),
     ))
     return run
   }
@@ -543,8 +543,6 @@ export type AgentWorkspace = typeof agentWorkspaces.$inferSelect
 export type AgentRun = typeof agentRuns.$inferSelect
 export type AgentEvent = typeof agentEvents.$inferSelect
 export type AgentRunStatus = AgentRun['status']
-export type ResumeAnswer = string | string[]
-
 export class AgentRunLeaseLostError extends Error {
   constructor() {
     super('agent_run_lease_lost')
@@ -630,7 +628,7 @@ export class AgentRunRepository {
   async activeForConversation(conversationId: string) {
     const [run] = await this.db.select().from(agentRuns).where(and(
       eq(agentRuns.conversationId, conversationId),
-      inArray(agentRuns.status, ['queued', 'running', 'waiting', 'cancelling']),
+      inArray(agentRuns.status, ['queued', 'running', 'cancelling']),
     ))
     return run
   }
@@ -644,7 +642,7 @@ export class AgentRunRepository {
       ))
       .where(and(
         eq(agentRuns.userId, userId),
-        inArray(agentRuns.status, ['queued', 'running', 'waiting', 'cancelling']),
+        inArray(agentRuns.status, ['queued', 'running', 'cancelling']),
       )).orderBy(agentRuns.createdAt, agentRuns.id)
   }
 
@@ -714,7 +712,7 @@ export class AgentRunRepository {
     type: string,
     data: Record<string, unknown>,
     patch: Partial<Pick<AgentRun,
-      'status' | 'plan' | 'pendingQuestion' | 'browserProjection' | 'resumeInput' |
+      'status' | 'plan' | 'browserProjection' |
       'reconciledCheckpointId' | 'leaseExpiresAt' | 'completedAt'>> = {},
   ) {
     await this.lockExecution(run)
@@ -782,46 +780,9 @@ export class AgentRunRepository {
     }).where(and(
       eq(agentRuns.id, id),
       eq(agentRuns.userId, userId),
-      inArray(agentRuns.status, ['queued', 'running', 'waiting']),
+      inArray(agentRuns.status, ['queued', 'running']),
     )).returning()
     return run
-  }
-
-  async queueResume(userId: string, id: string, questionId: string, answer: ResumeAnswer) {
-    const run = await this.lockOwned(userId, id)
-    if (!run) return undefined
-    const prior = run.resumeInput as { question_id?: unknown; answer?: unknown } | null
-    const repeatedAnswer = typeof answer === 'string'
-      ? prior?.answer === answer
-      : Array.isArray(prior?.answer) && prior.answer.length === answer.length &&
-        prior.answer.every((value, index) => value === answer[index])
-    if (prior?.question_id === questionId && repeatedAnswer) return run
-    if (run.status !== 'waiting') return undefined
-    const question = run.pendingQuestion as { question_id?: unknown; id?: unknown } | null
-    if ((question?.question_id ?? question?.id) !== questionId) return undefined
-    const now = new Date()
-    const transcriptAnswer = typeof answer === 'string'
-      ? answer
-      : answer.map((value) => `- ${value}`).join('\n')
-    await this.db.insert(messages).values({
-      conversationId: run.conversationId,
-      role: 'user',
-      content: transcriptAnswer,
-      status: 'completed',
-      createdAt: now,
-      updatedAt: now,
-    })
-    await this.db.update(messages).set({ status: 'streaming', updatedAt: now })
-      .where(eq(messages.id, run.assistantMessageId))
-    const [queued] = await this.db.update(agentRuns).set({
-      status: 'queued',
-      pendingQuestion: null,
-      resumeInput: { question_id: questionId, answer },
-      executionToken: null,
-      leaseExpiresAt: null,
-      updatedAt: now,
-    }).where(and(eq(agentRuns.id, id), eq(agentRuns.status, 'waiting'))).returning()
-    return queued
   }
 
   async setAssistant(run: AgentRun, patch: Partial<Pick<Message,

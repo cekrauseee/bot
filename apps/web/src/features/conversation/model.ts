@@ -50,6 +50,7 @@ export type ProcessActivity =
 
 export type ResponseProcessData = {
   activities: readonly ProcessActivity[]
+  browserProjection?: BrowserProjection | null
   durationSeconds: number
   startedAt?: number
   status: "processed" | "processing"
@@ -61,4 +62,18 @@ export type ConversationMessageData = {
   id: string
   process?: ResponseProcessData
   role: "assistant" | "user"
+}
+
+export type BrowserFrame = {
+  base64: string
+  capturedAt: string
+  mimeType: "image/png" | "image/jpeg"
+}
+
+export type BrowserProjection = {
+  control: "agent" | "user" | "locked"
+  state: "launching" | "live" | "awaiting_user" | "stopped" | "failed"
+  url?: string
+  message?: string
+  leaseExpiresAt?: string | null
 }

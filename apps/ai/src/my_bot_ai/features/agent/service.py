@@ -16,7 +16,6 @@ from langchain.agents.middleware import ToolErrorMiddleware
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.errors import GraphRecursionError
-from langgraph.types import Command
 
 from my_bot_ai.config import Settings
 from my_bot_ai.features.agent.contracts import (
@@ -31,16 +30,11 @@ from my_bot_ai.features.agent.contracts import (
 )
 from my_bot_ai.features.agent.errors import (
     AgentServiceError,
-    CheckpointMissingError,
     RuntimeCallError,
 )
 from my_bot_ai.features.agent.models import build_chat_model, provider_builtin_tools
 from my_bot_ai.features.agent.runtime import RuntimeClient, RuntimeContext, build_runtime_tools
-from my_bot_ai.features.agent.tools import (
-    AskUserQuestion,
-    build_child_delegation_tool,
-    build_core_tools,
-)
+from my_bot_ai.features.agent.tools import build_child_delegation_tool, build_core_tools
 
 MAX_TOOL_CALL_ID_LENGTH = 200
 MAX_CHILD_AGENT_DEPTH = 4
@@ -50,7 +44,7 @@ GRAPH_RECURSION_MARGIN = 4
 # two additional steps for the model's final summary and boundary handling.
 MAX_TOOL_CALLS_PER_RUN = max(1, (GRAPH_RECURSION_LIMIT - GRAPH_RECURSION_MARGIN - 2) // 2)
 MAX_TOOL_FAILURES_PER_RUN = 8
-CheckpointPhase = Literal["absent", "runnable", "interrupted", "completed"]
+CheckpointPhase = Literal["absent", "runnable", "completed"]
 _DEFAULT_INVOCATION = object()
 
 
@@ -62,7 +56,6 @@ class PreparedAgentRequest:
     invocation: Any
     should_invoke: bool
     checkpoint: dict[str, Any]
-    error: Exception | None = None
 
 
 def _content(value: Any) -> str:
@@ -156,7 +149,6 @@ def _tool_label(name: str, status: str) -> str:
     active = status == "in_progress"
     failed = status == "failed"
     labels = {
-        "ask_user": ("Asking for input", "Asked for input", "Could not ask for input"),
         "filesystem_list": ("Inspecting files", "Inspected files", "Could not inspect files"),
         "filesystem_read": ("Reading files", "Read files", "Could not read files"),
         "filesystem_write": ("Updating files", "Updated files", "Could not update files"),
@@ -390,12 +382,10 @@ def _browser_tool_projection(
             "message": "The browser operation failed.",
         }
     if kind == "on_tool_start":
-        if name != "browser_open":
-            return None
         tool_input = data.get("input")
         url = tool_input.get("url") if isinstance(tool_input, dict) else None
         return {
-            "state": "launching",
+            "state": "launching" if name == "browser_open" else "live",
             "control": "agent",
             **({"url": url} if isinstance(url, str) else {}),
         }
@@ -531,35 +521,6 @@ def _tool_event(event: dict[str, Any]) -> NormalizedEvent | None:
     )
 
 
-def _interrupt_payloads(snapshot: Any) -> list[dict[str, Any]]:
-    found: list[dict[str, Any]] = []
-    for task in getattr(snapshot, "tasks", ()) or ():
-        for item in getattr(task, "interrupts", ()) or ():
-            value = getattr(item, "value", None)
-            if not isinstance(value, dict):
-                continue
-            question_id = value.get("question_id")
-            if not isinstance(question_id, str):
-                continue
-            candidate = {**value, "id": question_id}
-            candidate.pop("question_id", None)
-            try:
-                question = AskUserQuestion.model_validate(candidate)
-            except ValueError:
-                continue
-            payload = question.model_dump(mode="json")
-            payload["question_id"] = question.id
-            found.append(payload)
-    return found
-
-
-async def pending_questions(graph: Any, config: dict[str, Any]) -> list[dict[str, Any]]:
-    """Read pending durable interrupts without exposing graph-native objects."""
-
-    snapshot = await graph.aget_state(config)
-    return _interrupt_payloads(snapshot)
-
-
 def _checkpoint_id(snapshot: Any) -> str | None:
     config = getattr(snapshot, "config", None)
     if not isinstance(config, dict):
@@ -613,11 +574,9 @@ def _checkpoint_content(snapshot: Any) -> str:
     return "\n\n".join(parts)
 
 
-def _checkpoint_phase(snapshot: Any, questions: list[dict[str, Any]]) -> CheckpointPhase:
+def _checkpoint_phase(snapshot: Any) -> CheckpointPhase:
     if not _checkpoint_exists(snapshot):
         return "absent"
-    if questions:
-        return "interrupted"
     if getattr(snapshot, "next", ()):
         return "runnable"
     return "completed"
@@ -628,14 +587,13 @@ async def stream_model(
     messages: list[dict[str, str]],
     *,
     config: dict[str, Any] | None = None,
-    resume: dict[str, Any] | None = None,
     provider: ProviderName | None = None,
     invocation: Any = _DEFAULT_INVOCATION,
 ) -> AsyncIterator[dict[str, Any]]:
     """Normalize LangChain v2 events without exposing native events or raw reasoning."""
 
     if invocation is _DEFAULT_INVOCATION:
-        invocation = Command(resume=resume) if resume is not None else {"messages": messages}
+        invocation = {"messages": messages}
     searches: dict[str, dict[str, Any]] = {}
     pending_sources: list[dict[str, str]] = []
     emitted_text: list[str] = []
@@ -760,11 +718,6 @@ async def stream_model(
                 },
             }
         return
-
-    if config is not None and hasattr(graph, "aget_state"):
-        for question in await pending_questions(graph, config):
-            yield {"type": "user.input_required", "data": question}
-
 
 def _result_text(result: Any) -> str:
     messages = result.get("messages", []) if isinstance(result, dict) else []
@@ -920,6 +873,19 @@ def build_model(
             "interaction. If you cannot continue, explain the blocker and a useful next step "
             "to the user."
         )
+        if depth == 0:
+            system_prompt += (
+                " Ask only when missing information would materially change the result or "
+                "create meaningful risk and no safe assumption allows progress. State any "
+                "context the user needs, ask the necessary questions as normal response text, "
+                "and then stop. Use paragraphs or bullets only when they improve clarity; do "
+                "not force questions into a fixed schema."
+            )
+        else:
+            system_prompt += (
+                " If required information is missing, report the smallest concrete blocker "
+                "to the parent agent."
+            )
         if depth == 0 and current_task_plan:
             serialized_plan = json.dumps(
                 [step.model_dump(mode="json") for step in current_task_plan],
@@ -957,7 +923,7 @@ async def stream_agent_request(
     *,
     runtime_tools: Sequence[BaseTool] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
-    """Execute or resume one request using its durable LangGraph checkpoint."""
+    """Execute one request using its durable LangGraph checkpoint."""
 
     prepared = await prepare_agent_request(
         body,
@@ -973,16 +939,10 @@ async def stream_agent_request(
             "reasoning_effort": body.reasoning_effort,
             "speed": body.speed,
             "plan": [step.model_dump(mode="json") for step in body.task_plan],
-            "resumed": body.resume is not None,
             "checkpoint": prepared.checkpoint,
         },
     }
-    if prepared.error is not None:
-        raise prepared.error
     if not prepared.should_invoke:
-        pending = prepared.checkpoint.get("pending_question")
-        if isinstance(pending, dict):
-            yield {"type": "user.input_required", "data": pending}
         return
 
     messages = [message.model_dump(mode="json") for message in body.messages]
@@ -1036,26 +996,11 @@ async def prepare_agent_request(
     )
     config = graph_config(body.run_id)
     snapshot = await graph.aget_state(config)
-    waiting = _interrupt_payloads(snapshot)
-    phase = _checkpoint_phase(snapshot, waiting)
-    resume = body.resume
-    matching_question = None
-    if resume is not None:
-        matching_question = next(
-            (
-                question
-                for question in waiting
-                if question.get("question_id") == str(resume.question_id)
-            ),
-            None,
-        )
-    resume_consumed = resume is not None and phase != "absent" and matching_question is None
+    phase = _checkpoint_phase(snapshot)
     checkpoint = {
         "id": _checkpoint_id(snapshot),
         "phase": phase,
         "content": _checkpoint_content(snapshot),
-        "pending_question": waiting[0] if waiting else None,
-        "resume_consumed": resume_consumed,
     }
     messages = [message.model_dump(mode="json") for message in body.messages]
     if phase == "absent":
@@ -1064,19 +1009,9 @@ async def prepare_agent_request(
             provider,
             config,
             {"messages": messages},
-            resume is None,
+            True,
             checkpoint,
-            CheckpointMissingError() if resume is not None else None,
         )
-    if phase == "interrupted":
-        if resume is not None and matching_question is not None:
-            invocation = Command(
-                resume={"question_id": str(resume.question_id), "answer": resume.answer}
-            )
-            return PreparedAgentRequest(
-                graph, provider, config, invocation, True, checkpoint
-            )
-        return PreparedAgentRequest(graph, provider, config, None, False, checkpoint)
     if phase == "runnable":
         return PreparedAgentRequest(graph, provider, config, None, True, checkpoint)
     return PreparedAgentRequest(graph, provider, config, None, False, checkpoint)

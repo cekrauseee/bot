@@ -46,11 +46,10 @@ describe('durable agent event contract', () => {
       .not.toContain('private-provider-body')
   })
 
-  it('parses chunk-safe AI v2 events including the nonterminal input pause', () => {
+  it('parses chunk-safe durable events and transient browser frames', () => {
     const parsed = parseAgentEvents(
       frame(1, 'plan.updated', { plan: [{ id: 'one', status: 'in_progress' }] }) +
-      frame(2, 'user.input_required', { question: { question_id: 'q-1', prompt: 'Continue?' } }) +
-      frame(3, 'browser.frame', {
+      frame(2, 'browser.frame', {
         frame: {
           base64: 'cG5n', mime_type: 'image/png', captured_at: '2026-08-30T17:00:00Z',
         },
@@ -58,7 +57,7 @@ describe('durable agent event contract', () => {
       'partial',
     )
     expect(parsed.events.map((event) => event.type)).toEqual([
-      'plan.updated', 'user.input_required', 'browser.frame',
+      'plan.updated', 'browser.frame',
     ])
     expect(parsed.events[1]).toMatchObject({ version: 2, run_id: runId, turn_id: turnId })
     expect(parsed.remainder).toBe('partial')
