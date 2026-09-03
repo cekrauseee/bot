@@ -37,8 +37,8 @@ export const authApi = {
       body: JSON.stringify({ challenge_id: challengeId, code }),
     }),
   signOut: () => apiRequest<void>("/auth/sign-out", { method: "POST" }),
-  approveDesktop: (transactionId: string) =>
-    apiRequest<void>("/auth/desktop/approve", {
+  completeDesktop: (transactionId: string) =>
+    apiRequest<{ callback_url: string }>("/auth/desktop/complete", {
       method: "POST",
       body: JSON.stringify({ transaction_id: transactionId }),
     }),

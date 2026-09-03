@@ -16,6 +16,7 @@ module.exports = {
     },
     prune: false,
     icon: path.resolve(__dirname, 'assets/icon'),
+    protocols: [{ name: 'myBot authentication', schemes: ['mybot'] }],
     // Electron Packager accepts source paths here (not electron-builder's
     // { from, to } objects). The directory basename becomes Resources/dist.
     extraResource: [

@@ -11,11 +11,11 @@ State-changing browser requests require the configured web origin (or the deskto
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `POST` | `/auth/desktop/start` | Create a short-lived transaction and return its one-time secret to the desktop main process |
-| `POST` | `/auth/desktop/approve` | Authenticated browser action that records the approved `user_id` |
+| `POST` | `/auth/desktop/complete` | Authenticated browser action that records the `user_id` and returns the desktop callback URL |
 | `POST` | `/auth/desktop/exchange` | One-time exchange that issues a new desktop session for that user |
 
-The client secret appears only in the desktop main process and request body. Redis stores its hash, transaction status, and approved user ID; it never stores a browser session token. Approval is never implicit after OTP or Google authentication: the browser shows an accessible confirmation card and requires an explicit button. The newly issued desktop session can be signed out without revoking the browser session that approved it.
+The client secret appears only in the desktop main process and exchange request body. Redis stores its hash, transaction status, and authenticated user ID; it never stores a browser session token. After Google or OTP establishes the browser session, the web application completes the transaction and redirects to a validated `mybot://auth/callback` deep link. The callback contains only the public transaction ID. The newly issued desktop session can be signed out without revoking the browser session that created it.
 
 ## Desktop storage
 
-Electron stores the desktop session with `safeStorage` under the user-data directory. Renderer code receives no token. Main-process API requests add the token only for the exact configured API origin.
+Electron stores the pending client secret and desktop session with `safeStorage` under the user-data directory. Renderer code receives neither value. The main process validates the deep link against the pending transaction, exchanges the secret once, and adds the resulting bearer token only for the exact configured API origin.
