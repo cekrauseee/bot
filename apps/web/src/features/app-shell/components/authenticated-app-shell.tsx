@@ -66,6 +66,7 @@ export function AuthenticatedAppShell({
   })
   const turnController = useRef<AbortController | null>(null)
   const shellRef = useRef<HTMLElement>(null)
+  const conversationViewportRef = useRef<HTMLDivElement>(null)
   const composerDockRef = useRef<HTMLElement>(null)
   const catalog = useSidebarCatalog(true)
   const simulator = useConversationSimulator()
@@ -343,25 +344,29 @@ export function AuthenticatedAppShell({
               />
             </header>
           )}
-          <div className="min-h-0 flex-1">
+          <div
+            ref={conversationViewportRef}
+            className="relative min-h-0 flex-1"
+          >
             {simulationActive ? (
               <ConversationSimulatorView simulator={simulator} />
             ) : (
               children
             )}
+            <BrowserPictureInPicture
+              containerRef={conversationViewportRef}
+              frame={
+                simulationActive
+                  ? simulationFrame
+                  : activeConversationRecord?.browserFrame
+              }
+              projection={
+                simulationActive
+                  ? simulationRecord.browserProjection
+                  : activeConversationRecord?.browserProjection
+              }
+            />
           </div>
-          <BrowserPictureInPicture
-            frame={
-              simulationActive
-                ? simulationFrame
-                : activeConversationRecord?.browserFrame
-            }
-            projection={
-              simulationActive
-                ? simulationRecord.browserProjection
-                : activeConversationRecord?.browserProjection
-            }
-          />
           <footer
             ref={composerDockRef}
             className={cn(

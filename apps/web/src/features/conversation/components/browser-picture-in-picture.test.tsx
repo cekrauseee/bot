@@ -9,6 +9,7 @@ const frame = {
   capturedAt: "2026-09-03T00:00:00Z",
   mimeType: "image/png" as const,
 }
+const containerRef = { current: null } as React.RefObject<HTMLElement | null>
 
 describe("browser picture-in-picture", () => {
   it.each(["launching", "live", "awaiting_user"] as const)(
@@ -16,6 +17,7 @@ describe("browser picture-in-picture", () => {
     (state) => {
       const markup = renderToStaticMarkup(
         React.createElement(BrowserPictureInPicture, {
+          containerRef,
           frame,
           projection: { control: "agent", state },
         })
@@ -24,6 +26,13 @@ describe("browser picture-in-picture", () => {
       expect(markup).toContain('aria-label="Browser preview"')
       expect(markup).toContain('alt="Current browser page"')
       expect(markup).toContain('src="data:image/png;base64,cG5n"')
+      expect(markup).toContain("gap-2 py-3")
+      expect(markup).toContain("gap-2 py-0")
+      expect(markup).toContain("absolute inset-0 z-10 overflow-hidden")
+      expect(markup).toContain("touch-none")
+      expect(markup).toContain('draggable="false"')
+      expect(markup).toContain("translate3d(0px, 0px, 0)")
+      expect(markup).toContain("visibility:hidden")
     }
   )
 
@@ -33,6 +42,7 @@ describe("browser picture-in-picture", () => {
       expect(
         renderToStaticMarkup(
           React.createElement(BrowserPictureInPicture, {
+            containerRef,
             frame,
             projection: { control: "agent", state },
           })
@@ -41,13 +51,16 @@ describe("browser picture-in-picture", () => {
     }
   )
 
-  it("renders nothing without a frame", () => {
-    expect(
-      renderToStaticMarkup(
-        React.createElement(BrowserPictureInPicture, {
-          projection: { control: "agent", state: "live" },
-        })
-      )
-    ).toBe("")
+  it("renders a busy preview while the first frame is pending", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(BrowserPictureInPicture, {
+        containerRef,
+        projection: { control: "agent", state: "live" },
+      })
+    )
+
+    expect(markup).toContain('aria-label="Browser preview"')
+    expect(markup).toContain('aria-busy="true"')
+    expect(markup).not.toContain("<img")
   })
 })
