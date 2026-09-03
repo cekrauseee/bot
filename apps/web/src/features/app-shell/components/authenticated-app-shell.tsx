@@ -22,6 +22,7 @@ import {
   type ComposerSubmission,
 } from "@/features/composer/components/composer"
 import { useConversations } from "@/features/conversation/hooks/use-conversations"
+import { DesktopAppHeader } from "@/features/app-shell/components/desktop-app-header"
 
 type AuthenticatedAppShellProps = {
   activeConversationId: string | null
@@ -38,6 +39,7 @@ export function AuthenticatedAppShell({
   onSignedOut,
   user,
 }: AuthenticatedAppShellProps) {
+  const isDesktop = Boolean(window.myBotDesktop)
   const [signingOut, setSigningOut] = useState(false)
   const [signOutFailed, setSignOutFailed] = useState(false)
   const [defaultPreferences, setDefaultPreferences] = useState({
@@ -224,11 +226,17 @@ export function AuthenticatedAppShell({
 
   return (
     <AppShellContext.Provider value={context}>
-      <SidebarProvider className="h-svh min-h-0 overflow-hidden">
+      <SidebarProvider className="relative h-svh min-h-0 overflow-hidden">
+        {isDesktop && (
+          <DesktopAppHeader
+            title={centeredComposer ? "myBot" : conversationTitle}
+          />
+        )}
         <AppSidebar
           user={user}
           catalog={catalog}
           activeConversationId={activeConversationId}
+          isDesktop={isDesktop}
           onConversationSelect={onConversationSelect}
           onSignOut={() => void handleSignOut()}
           signingOut={signingOut}
@@ -237,9 +245,9 @@ export function AuthenticatedAppShell({
         <SidebarInset
           ref={shellRef}
           id="main-content"
-          className="min-h-0 overflow-hidden"
+          className={cn("min-h-0 overflow-hidden", isDesktop && "pt-9")}
         >
-          {!centeredComposer && (
+          {!isDesktop && !centeredComposer && (
             <header className="flex h-12 min-w-0 shrink-0 items-center border-b px-3.5">
               <h1
                 id="conversation-title"

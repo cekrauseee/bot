@@ -27,6 +27,7 @@ import type { User } from "@/features/auth/api"
 type AppSidebarProps = {
   activeConversationId: string | null
   catalog: SidebarCatalogController
+  isDesktop: boolean
   onConversationSelect: (conversationId: string | null) => void
   onSignOut: () => void
   signingOut: boolean
@@ -50,6 +51,7 @@ const swappedIds = <T extends { id: string }>(
 export function AppSidebar({
   activeConversationId,
   catalog,
+  isDesktop,
   onConversationSelect,
   onSignOut,
   signingOut,
@@ -156,32 +158,54 @@ export function AppSidebar({
     catalog.conversations.length > 0 || catalog.projects.length > 0
 
   return (
-    <Sidebar collapsible="icon" aria-label="Application navigation">
-      <SidebarHeader>
-        <div className="flex h-8 items-center gap-2 px-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
-          <span className="truncate text-sm font-semibold group-data-[collapsible=icon]:hidden">
-            myBot
-          </span>
-          <SidebarTrigger
-            className="ml-auto group-data-[collapsible=icon]:ml-0"
-            aria-label="Toggle sidebar"
-          />
-        </div>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              tooltip="New conversation"
-              isActive={activeConversationId === null}
-              onClick={() => onConversationSelect(null)}
-            >
-              <SquarePenIcon aria-hidden="true" />
-              <span>New conversation</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarHeader>
+    <Sidebar
+      collapsible="icon"
+      aria-label="Application navigation"
+      className={isDesktop ? "pt-9" : undefined}
+      mobileClassName={isDesktop ? "top-9! h-[calc(100%-2.25rem)]!" : undefined}
+      mobileOverlayClassName={isDesktop ? "top-9!" : undefined}
+    >
+      {!isDesktop && (
+        <SidebarHeader>
+          <div className="flex h-8 items-center gap-2 px-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+            <span className="truncate text-sm font-semibold group-data-[collapsible=icon]:hidden">
+              myBot
+            </span>
+            <SidebarTrigger
+              className="ml-auto group-data-[collapsible=icon]:ml-0"
+              aria-label="Toggle sidebar"
+            />
+          </div>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                tooltip="New conversation"
+                isActive={activeConversationId === null}
+                onClick={() => onConversationSelect(null)}
+              >
+                <SquarePenIcon aria-hidden="true" />
+                <span>New conversation</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarHeader>
+      )}
 
       <SidebarContent aria-busy={catalog.loading}>
+        {isDesktop && (
+          <SidebarMenu className="p-2">
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                tooltip="New conversation"
+                isActive={activeConversationId === null}
+                onClick={() => onConversationSelect(null)}
+              >
+                <SquarePenIcon aria-hidden="true" />
+                <span>New conversation</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        )}
         {catalog.loading && !hasCatalog ? (
           <SidebarSkeleton />
         ) : catalog.catalogError && !hasCatalog ? (

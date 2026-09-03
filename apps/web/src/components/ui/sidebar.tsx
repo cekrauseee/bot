@@ -156,11 +156,15 @@ function Sidebar({
   className,
   children,
   dir,
+  mobileClassName,
+  mobileOverlayClassName,
   ...props
 }: React.ComponentProps<"div"> & {
   side?: "left" | "right"
   variant?: "sidebar" | "floating" | "inset"
   collapsible?: "offcanvas" | "icon" | "none"
+  mobileClassName?: string
+  mobileOverlayClassName?: string
 }) {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
 
@@ -187,7 +191,11 @@ function Sidebar({
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
-          className="w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
+          className={cn(
+            "w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden",
+            mobileClassName
+          )}
+          overlayClassName={mobileOverlayClassName}
           style={
             {
               "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
