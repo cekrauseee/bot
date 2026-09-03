@@ -259,12 +259,7 @@ async function createWindow() {
   installSessionBoundary()
   mainWindow = new BrowserWindow({
     width: 1200, height: 800, minWidth: 720, minHeight: 520,
-    ...(process.platform === 'darwin'
-      ? {
-          titleBarStyle: 'hiddenInset' as const,
-          trafficLightPosition: { x: 12, y: 7.5 },
-        }
-      : {}),
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   })
   mainWindow.on('closed', () => { mainWindow = undefined })
