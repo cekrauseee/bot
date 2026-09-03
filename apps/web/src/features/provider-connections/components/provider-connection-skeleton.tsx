@@ -1,5 +1,9 @@
-import { Card, CardContent } from "@/components/ui/card"
+import { ChevronDownIcon } from "lucide-react"
+
+import { Card, CardHeader } from "@/components/ui/card"
+import { OpenAILogo } from "@/components/ui/openai-logo"
 import { Skeleton } from "@/components/ui/skeleton"
+import { codexProvider } from "@/features/provider-connections/model"
 
 export function ProviderConnectionSkeleton() {
   return (
@@ -9,13 +13,22 @@ export function ProviderConnectionSkeleton() {
       className="gap-0 py-0 ring-0"
       role="status"
     >
-      <CardContent className="flex h-8 items-center gap-2 px-2 py-0">
-        <Skeleton className="size-4 rounded-sm" />
-        <Skeleton className="h-3.5 w-24" />
-        <Skeleton className="h-3 w-12" />
-        <Skeleton className="ml-auto size-4 rounded-sm" />
-        <Skeleton className="mr-2 h-5 w-9 rounded-full" />
-      </CardContent>
+      <CardHeader className="flex items-center gap-1 p-0">
+        <div className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left">
+          <OpenAILogo className="size-4 shrink-0" />
+          <span className="truncate font-medium">
+            {codexProvider.displayName}
+          </span>
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {codexProvider.productName}
+          </span>
+          <ChevronDownIcon
+            aria-hidden="true"
+            className="ml-auto size-4 shrink-0 text-muted-foreground"
+          />
+        </div>
+        <Skeleton className="mr-2 h-[18.4px] w-8 rounded-full" />
+      </CardHeader>
     </Card>
   )
 }

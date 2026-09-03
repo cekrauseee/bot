@@ -287,10 +287,6 @@ export function AuthenticatedAppShell({
                 }
                 models={catalog.models}
                 modelContextKey={activeConversationId ?? "new"}
-                modelDisabled={
-                  catalog.models.length === 0 ||
-                  (activeConversationId !== null && activeConversation === null)
-                }
                 providerDisabled={
                   catalog.models.find(
                     (item) =>

@@ -103,7 +103,6 @@ type ComposerProps = {
   fastMode: boolean
   models: ComposerModel[]
   modelContextKey: string
-  modelDisabled?: boolean
   providerDisabled?: boolean
   modelScope: "conversation" | "default"
   onPreferencesChange: (preferences: ComposerPreferences) => Promise<void>
@@ -119,7 +118,6 @@ export function Composer({
   fastMode: persistedFastMode,
   models,
   modelContextKey,
-  modelDisabled = false,
   providerDisabled = false,
   modelScope,
   onPreferencesChange,
@@ -189,8 +187,7 @@ export function Composer({
         preferences.reasoningEffort === effectiveReasoningEffort &&
         preferences.fastMode === effectiveFastMode) ||
       submittingRef.current ||
-      modelChangingRef.current ||
-      modelDisabled
+      modelChangingRef.current
     ) {
       return
     }
@@ -279,7 +276,6 @@ export function Composer({
       !onSubmit ||
       submittingRef.current ||
       modelChangingRef.current ||
-      modelDisabled ||
       providerDisabled
     ) {
       return
@@ -374,7 +370,7 @@ export function Composer({
                     aria-describedby={
                       visibleModelError ? "composer-error" : undefined
                     }
-                    disabled={submitting || modelChanging || modelDisabled}
+                    disabled={submitting}
                     render={
                       <InputGroupButton
                         variant="ghost-contrast"
@@ -525,7 +521,6 @@ export function Composer({
                     !message.trim() ||
                     submitting ||
                     modelChanging ||
-                    modelDisabled ||
                     providerDisabled
                   }
                 >

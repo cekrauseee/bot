@@ -1,3 +1,5 @@
+import { FolderIcon, PlusIcon } from "lucide-react"
+
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   SidebarGroup,
@@ -29,15 +31,13 @@ const RECENT_WIDTHS = [
   "64%",
 ]
 
-function SkeletonLabel({ width }: { width: string }) {
-  return <Skeleton className="h-3" style={{ width }} />
-}
-
-function SkeletonRow({ icon, width }: { icon?: boolean; width: string }) {
+function SkeletonRow({ project, width }: { project?: boolean; width: string }) {
   return (
     <SidebarMenuItem aria-hidden="true">
       <div className="flex h-8 items-center gap-2 rounded-md px-2">
-        {icon ? <Skeleton className="size-4 rounded-md" /> : null}
+        {project ? (
+          <FolderIcon aria-hidden="true" className="size-4 shrink-0" />
+        ) : null}
         <Skeleton className="h-3.5" style={{ width }} />
       </div>
     </SidebarMenuItem>
@@ -48,25 +48,21 @@ export function SidebarSkeleton() {
   return (
     <div aria-hidden="true">
       <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-        <SidebarGroupLabel>
-          <SkeletonLabel width="3.5rem" />
-        </SidebarGroupLabel>
+        <SidebarGroupLabel>Projects</SidebarGroupLabel>
         <div className="absolute top-3.5 right-3 grid size-5 place-items-center rounded-md group-data-[collapsible=icon]:hidden">
-          <Skeleton className="size-3.5 rounded-sm" />
+          <PlusIcon aria-hidden="true" className="size-4 shrink-0" />
         </div>
         <SidebarGroupContent>
           <SidebarMenu>
             {PROJECT_WIDTHS.map((width, index) => (
-              <SkeletonRow key={`project-${index}`} icon width={width} />
+              <SkeletonRow key={`project-${index}`} project width={width} />
             ))}
           </SidebarMenu>
         </SidebarGroupContent>
       </SidebarGroup>
 
       <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-        <SidebarGroupLabel>
-          <SkeletonLabel width="3.75rem" />
-        </SidebarGroupLabel>
+        <SidebarGroupLabel>Recents</SidebarGroupLabel>
         <SidebarGroupContent>
           <SidebarMenu>
             {RECENT_WIDTHS.map((width, index) => (
