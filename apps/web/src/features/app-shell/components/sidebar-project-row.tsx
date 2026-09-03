@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react"
+import { useRef, useState, type ReactNode } from "react"
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -59,6 +59,18 @@ export function SidebarProjectRow({
 }: SidebarProjectRowProps) {
   const [editing, setEditing] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const menuTriggerRef = useRef<HTMLButtonElement>(null)
+
+  const handleMenuOpenChange = (
+    menuOpen: boolean,
+    eventDetails: Parameters<
+      NonNullable<React.ComponentProps<typeof DropdownMenu>["onOpenChange"]>
+    >[1]
+  ) => {
+    if (menuOpen || eventDetails.event instanceof KeyboardEvent) return
+
+    requestAnimationFrame(() => menuTriggerRef.current?.blur())
+  }
 
   if (editing) {
     return (
@@ -78,8 +90,18 @@ export function SidebarProjectRow({
     <SidebarMenuItem>
       <Collapsible open={open} onOpenChange={onOpenChange}>
         <CollapsibleTrigger
+          onClick={(event) => {
+            if (event.detail === 0) return
+
+            const trigger = event.currentTarget
+            requestAnimationFrame(() => trigger.blur())
+          }}
           render={
-            <SidebarMenuButton tooltip={project.name} disabled={pending} />
+            <SidebarMenuButton
+              className="group-has-data-[sidebar=menu-action]/menu-item:pr-8 md:group-focus-within/menu-item:pr-8 md:group-hover/menu-item:pr-8 md:group-has-data-[sidebar=menu-action]/menu-item:pr-2"
+              tooltip={project.name}
+              disabled={pending}
+            />
           }
         >
           {open ? (
@@ -90,10 +112,11 @@ export function SidebarProjectRow({
           <span className="font-normal">{project.name}</span>
         </CollapsibleTrigger>
 
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={handleMenuOpenChange}>
           <DropdownMenuTrigger
             render={
               <SidebarMenuAction
+                ref={menuTriggerRef}
                 showOnHover
                 disabled={pending}
                 aria-label={`Actions for ${project.name}`}
@@ -106,6 +129,7 @@ export function SidebarProjectRow({
             side="right"
             align="start"
             sideOffset={6}
+            finalFocus={(closeType) => closeType === "keyboard"}
             className="w-max min-w-48"
           >
             <DropdownMenuGroup>
