@@ -320,7 +320,7 @@ export function Composer({
           </FieldLabel>
           <InputGroup
             ref={composerSurfaceRef}
-            className="rounded-2xl border-border/80 bg-muted/80 shadow-sm [--composer-inset:--spacing(2.5)] dark:bg-muted"
+            className="rounded-2xl border-border/80 bg-background shadow-[0_2px_8px_-4px_oklch(0_0_0_/_0.2),0_1px_2px_oklch(0_0_0_/_0.04)] [--composer-inset:--spacing(2.5)] has-[[data-slot=input-group-control]:focus-visible]:border-foreground/20 has-[[data-slot=input-group-control]:focus-visible]:ring-0"
           >
             <InputGroupTextarea
               ref={textareaRef}
@@ -349,7 +349,7 @@ export function Composer({
               aria-describedby={
                 submitError ? "composer-error" : undefined
               }
-              className="max-h-48 min-h-10 min-w-0 overflow-y-auto px-(--composer-inset) pt-(--composer-inset) pb-1"
+              className="max-h-48 min-h-16 min-w-0 overflow-y-auto px-(--composer-inset) pt-(--composer-inset) pb-1"
             />
             <InputGroupAddon
               align={stackControls ? "block-end" : "inline-end"}
@@ -373,9 +373,9 @@ export function Composer({
                     disabled={submitting}
                     render={
                       <InputGroupButton
-                        variant="ghost-contrast"
+                        variant="ghost"
                         size="sm"
-                        className="gap-1"
+                        className="gap-1 focus-visible:border-foreground/20 focus-visible:ring-0 aria-expanded:border-foreground/20"
                       />
                     }
                   >
