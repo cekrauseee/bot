@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest"
 import { ResponseProcess } from "@/features/conversation/components/response-process"
 
 describe("response process", () => {
-  it("renders step-free processing as static status without disclosure", () => {
+  it("renders processing while a response is active without activities", () => {
     const markup = renderToStaticMarkup(
       React.createElement(ResponseProcess, {
         hasResponse: false,
@@ -22,7 +22,7 @@ describe("response process", () => {
     expect(markup).not.toContain('data-slot="collapsible-trigger"')
   })
 
-  it("separates a step-free completed status from its response", () => {
+  it("keeps the completed duration for a direct response", () => {
     const markup = renderToStaticMarkup(
       React.createElement(ResponseProcess, {
         hasResponse: true,

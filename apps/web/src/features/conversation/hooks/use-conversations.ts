@@ -5,24 +5,39 @@ import {
   applyTurnEvent,
   consumeTurnSpacerAnchor,
   emptyConversationRecord,
+  markRunStopRequested,
   recordFromDetail,
   type ConversationRecord,
 } from "@/features/conversation/conversation-state"
 import type { TurnStreamEvent } from "@/features/composer/api"
 import { apiErrorMessage } from "@/lib/api"
+import {
+  parseActiveRun,
+  subscribeToRun,
+} from "@/features/conversation/run-subscription"
+import { parseConversationSummary } from "@/features/app-shell/conversation-metadata"
+import type { ConversationSummary } from "@/features/app-shell/api"
 
 const idleRecord = emptyConversationRecord()
 
-export function useConversations(activeConversationId: string | null) {
+export function useConversations(
+  activeConversationId: string | null,
+  options?: {
+    onConversationTitle?: (conversation: ConversationSummary) => void
+  }
+) {
   const [records, setRecords] = useState<Record<string, ConversationRecord>>({})
   const recordsRef = useRef(records)
   const requests = useRef(new Map<string, AbortController>())
+  const subscriptions = useRef(new Map<string, () => void>())
   recordsRef.current = records
 
   useEffect(
     () => () => {
       for (const controller of requests.current.values()) controller.abort()
       requests.current.clear()
+      for (const stop of subscriptions.current.values()) stop()
+      subscriptions.current.clear()
     },
     []
   )
@@ -62,11 +77,15 @@ export function useConversations(activeConversationId: string | null) {
         if (controller.signal.aborted) return
         setRecords((state) => {
           const latest = state[conversationId] ?? emptyConversationRecord()
-          if (latest.version !== expectedVersion) return state
+          if (!options?.force && latest.version !== expectedVersion)
+            return state
           return {
             ...state,
             [conversationId]: {
-              ...recordFromDetail(detail.messages),
+              ...recordFromDetail(
+                detail.messages,
+                parseActiveRun(detail.active_run) ?? undefined
+              ),
               version: latest.version,
             },
           }
@@ -75,7 +94,8 @@ export function useConversations(activeConversationId: string | null) {
         if (controller.signal.aborted) return
         setRecords((state) => {
           const latest = state[conversationId] ?? emptyConversationRecord()
-          if (latest.version !== expectedVersion) return state
+          if (!options?.force && latest.version !== expectedVersion)
+            return state
           return {
             ...state,
             [conversationId]: {
@@ -110,6 +130,43 @@ export function useConversations(activeConversationId: string | null) {
     []
   )
 
+  const onConversationTitle = options?.onConversationTitle
+  useEffect(() => {
+    for (const [conversationId, record] of Object.entries(records)) {
+      if (!record.runId) continue
+      if (subscriptions.current.has(conversationId)) continue
+      const stop = subscribeToRun({
+        after: record.lastEventSequence ?? "0",
+        runId: record.runId,
+        turnId: record.turnId,
+        onEvent: (event) => {
+          applyEvent(conversationId, event)
+          if (event.type === "conversation.title.updated") {
+            const conversation = parseConversationSummary(
+              event.data.conversation
+            )
+            if (conversation) onConversationTitle?.(conversation)
+          }
+        },
+        onTerminal: () => {
+          subscriptions.current.delete(conversationId)
+          void loadConversation(conversationId, { force: true })
+        },
+        onResync: () => {
+          subscriptions.current.delete(conversationId)
+          void loadConversation(conversationId, { force: true })
+        },
+      })
+      subscriptions.current.set(conversationId, stop)
+    }
+    for (const [conversationId, stop] of subscriptions.current) {
+      if (!records[conversationId]?.runId) {
+        stop()
+        subscriptions.current.delete(conversationId)
+      }
+    }
+  }, [applyEvent, loadConversation, onConversationTitle, records])
+
   const consumeSpacerAnchor = useCallback(
     (conversationId: string, anchorId: string) => {
       setRecords((state) => {
@@ -118,6 +175,18 @@ export function useConversations(activeConversationId: string | null) {
         const next = consumeTurnSpacerAnchor(current, anchorId)
         if (next === current) return state
         return { ...state, [conversationId]: next }
+      })
+    },
+    []
+  )
+
+  const setRunStopRequested = useCallback(
+    (conversationId: string, runId: string, requested: boolean) => {
+      setRecords((state) => {
+        const current = state[conversationId]
+        if (!current) return state
+        const next = markRunStopRequested(current, runId, requested)
+        return next === current ? state : { ...state, [conversationId]: next }
       })
     },
     []
@@ -134,5 +203,6 @@ export function useConversations(activeConversationId: string | null) {
     applyEvent,
     consumeTurnSpacerAnchor: consumeSpacerAnchor,
     loadConversation,
+    setRunStopRequested,
   }
 }

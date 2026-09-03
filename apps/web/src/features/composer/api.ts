@@ -157,6 +157,11 @@ async function readTurnStream(
 
       onEvent(event)
 
+      if (event.type === "turn.started") {
+        await reader.cancel()
+        return
+      }
+
       terminal = terminalEventTypes.has(event.type)
       if (event.type === "turn.failed") {
         const error = record(event.data.error)
@@ -182,6 +187,7 @@ export async function startConversationTurn(
   onEvent: (event: TurnStreamEvent) => void,
   signal: AbortSignal
 ) {
+  let accepted = false
   const path = conversationId
     ? `/conversations/${encodeURIComponent(conversationId)}/turns`
     : "/conversations/turns"
@@ -200,5 +206,17 @@ export async function startConversationTurn(
     )
   }
 
-  await readTurnStream(response, onConversationStarted, onEvent)
+  try {
+    await readTurnStream(
+      response,
+      (started) => {
+        accepted = true
+        onConversationStarted(started)
+      },
+      onEvent
+    )
+  } catch (error) {
+    if (signal.aborted && accepted) return
+    throw error
+  }
 }

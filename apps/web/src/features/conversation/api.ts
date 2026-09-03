@@ -25,4 +25,8 @@ export const conversationApi = {
       `/conversations/${encodeURIComponent(conversationId)}`,
       { signal }
     ),
+  cancelRun: (runId: string) =>
+    apiRequest<void>(`/agent-runs/${encodeURIComponent(runId)}/cancel`, {
+      method: "POST",
+    }),
 }

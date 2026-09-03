@@ -12,6 +12,9 @@ export type ConversationRecord = {
   messages: ConversationMessageData[]
   processStartedAt?: number
   runId?: string
+  stopRequested?: boolean
+  turnId?: string
+  lastEventSequence?: string
   status: "error" | "idle" | "loading" | "ready"
   turnSpacerAnchorId?: string
   version: number
@@ -30,6 +33,44 @@ export function consumeTurnSpacerAnchor(
 ) {
   if (current.turnSpacerAnchorId !== anchorId) return current
   return { ...current, turnSpacerAnchorId: undefined }
+}
+
+export function markRunStopRequested(
+  current: ConversationRecord,
+  runId: string,
+  requested: boolean,
+  at = Date.now()
+): ConversationRecord {
+  if (current.runId !== runId || Boolean(current.stopRequested) === requested) {
+    return current
+  }
+  const messages = requested
+    ? current.messages.flatMap((message) => {
+        if (message.id !== current.activeAssistantId) return [message]
+        const activities = message.process?.activities ?? []
+        if (!message.content.trim() && activities.length === 0) return []
+        return [{
+          ...message,
+          process: message.process
+            ? {
+                ...message.process,
+                durationSeconds: current.processStartedAt === undefined
+                  ? message.process.durationSeconds
+                  : Math.max(1, Math.round((at - current.processStartedAt) / 1000)),
+                status: "processed" as const,
+              }
+            : undefined,
+        }]
+      })
+    : current.messages
+  return {
+    ...current,
+    activeAssistantId: requested ? undefined : current.activeAssistantId,
+    messages,
+    processStartedAt: requested ? undefined : current.processStartedAt,
+    stopRequested: requested ? true : undefined,
+    version: current.version + 1,
+  }
 }
 
 const record = (value: unknown): Record<string, unknown> | null =>
@@ -125,6 +166,7 @@ export function parseProcessActivity(value: unknown): ProcessActivity | null {
       type: "tool",
       action: string(activity.action) ?? string(activity.name) ?? "tool",
       ...(string(activity.target) ? { target: string(activity.target) } : {}),
+      ...(string(activity.detail) ? { detail: string(activity.detail) } : {}),
       ...(activityStatus(activity.status)
         ? { status: activityStatus(activity.status) }
         : {}),
@@ -157,6 +199,7 @@ export function parseProcessActivity(value: unknown): ProcessActivity | null {
       type: "tool",
       action: string(activity.name) ?? "tool",
       ...(string(activity.target) ? { target: string(activity.target) } : {}),
+      ...(string(activity.detail) ? { detail: string(activity.detail) } : {}),
       ...(activityStatus(activity.status)
         ? { status: activityStatus(activity.status) }
         : {}),
@@ -223,6 +266,14 @@ export function mapApiMessage(value: unknown): ConversationMessageData | null {
   const errorMessage = string(message.error_message)
   const renderedContent =
     content || (message.status === "failed" ? (errorMessage ?? "") : "")
+  if (
+    role === "assistant" &&
+    message.status === "cancelled" &&
+    !renderedContent &&
+    activities.length === 0
+  ) {
+    return null
+  }
   const showProcess = role === "assistant"
 
   return {
@@ -243,23 +294,40 @@ export function mapApiMessage(value: unknown): ConversationMessageData | null {
   }
 }
 
-export function recordFromDetail(messages: unknown[]): ConversationRecord {
+export function recordFromDetail(
+  messages: unknown[],
+  activeRun?: {
+    id: string
+    turn_id?: string
+    last_event_sequence?: string | null
+  }
+): ConversationRecord {
+  let activeAssistantId: string | undefined
   const mapped = messages.flatMap((message) => {
     const parsed = mapApiMessage(message)
+    const raw = record(message)
+    if (
+      parsed?.role === "assistant" &&
+      raw?.status === "streaming"
+    ) {
+      activeAssistantId = parsed.id
+    }
     return parsed ? [parsed] : []
   })
-  const activeAssistant = [...mapped]
-    .reverse()
-    .find(
-      (message) =>
-        message.role === "assistant" && message.process?.status === "processing"
-    )
+  const activeAssistant = mapped.find((message) => message.id === activeAssistantId)
 
   return {
-    activeAssistantId: activeAssistant?.id,
+    activeAssistantId,
     error: "",
     messages: mapped,
     processStartedAt: activeAssistant?.process?.startedAt,
+    ...(activeRun
+      ? {
+          runId: activeRun.id,
+          turnId: activeRun.turn_id,
+          lastEventSequence: activeRun.last_event_sequence ?? undefined,
+        }
+      : {}),
     status: "ready",
     version: 0,
   }
@@ -366,6 +434,7 @@ function eventActivity(event: TurnStreamEvent): ProcessActivity | null {
       type: "tool",
       action: string(raw.name) ?? "tool",
       ...(string(raw.target) ? { target: string(raw.target) } : {}),
+      ...(string(raw.detail) ? { detail: string(raw.detail) } : {}),
       ...(activityStatus(raw.status)
         ? { status: activityStatus(raw.status) }
         : {}),
@@ -390,6 +459,16 @@ export function applyTurnEvent(
   event: TurnStreamEvent,
   at: number
 ): ConversationRecord {
+  try {
+    if (
+      current.lastEventSequence !== undefined &&
+      BigInt(event.sequence) <= BigInt(current.lastEventSequence)
+    ) {
+      return current
+    }
+  } catch {
+    return current
+  }
   let next: ConversationRecord = {
     ...current,
     error: "",
@@ -414,12 +493,31 @@ export function applyTurnEvent(
       messages: upsertMessages(next.messages, [user, assistant]),
       processStartedAt,
       runId: event.run_id,
+      turnId: event.turn_id,
+      lastEventSequence: event.sequence,
       turnSpacerAnchorId: user.id,
       version: next.version + 1,
     }
   }
 
-  if (next.runId && next.runId !== event.run_id) return next
+  if (
+    next.runId &&
+    (next.runId !== event.run_id ||
+      (next.turnId && next.turnId !== event.turn_id))
+  )
+    return next
+
+  const terminalEvent =
+    event.type === "turn.completed" ||
+    event.type === "user.input_required" ||
+    event.type === "turn.failed"
+  if (next.stopRequested && !terminalEvent) {
+    return {
+      ...next,
+      lastEventSequence: event.sequence,
+      version: next.version + 1,
+    }
+  }
 
   if (event.type === "reasoning.delta") {
     const delta = string(event.data.delta)
@@ -529,8 +627,15 @@ export function applyTurnEvent(
       activeAssistantId: undefined,
       processStartedAt: undefined,
       runId: undefined,
+      stopRequested: undefined,
+      turnId: undefined,
+      lastEventSequence: undefined,
     }
   }
 
-  return { ...next, version: next.version + 1 }
+  return {
+    ...next,
+    lastEventSequence: event.sequence,
+    version: next.version + 1,
+  }
 }
