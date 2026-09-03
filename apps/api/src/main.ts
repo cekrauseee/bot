@@ -9,6 +9,7 @@ import { DesktopAuthService } from './modules/auth/desktop.js'
 import { SessionManager } from './modules/auth/sessions.js'
 import { CodexAppServerManager } from './modules/codex-app-server.js'
 import { DatabaseProviderConnectionSettings } from './modules/provider-connections.js'
+import { GithubConnectionService } from './modules/github-connection.js'
 import { createLogger, safeError } from './logger.js'
 import { AgentRunExecutor, RedisAgentEventFanout } from './modules/agent-control-plane.js'
 import { createAiClient, createTitleClient } from './modules/conversations.js'
@@ -23,12 +24,27 @@ const eventSubscriber = new Redis(settings.redisUrl, { lazyConnect: true })
 await Promise.all([redis.connect(), eventPublisher.connect(), eventSubscriber.connect()])
 const eventFanout = new RedisAgentEventFanout(eventPublisher, eventSubscriber)
 await eventFanout.connect()
+const providerConnectionSettings = new DatabaseProviderConnectionSettings(database)
+const github = new GithubConnectionService(database, redis, settings)
 const agentRuns = new AgentRunExecutor(
   database,
   createAiClient(settings),
   undefined,
   eventFanout,
   createTitleClient(settings),
+  async (userId) => {
+    if (!github.configured) return undefined
+    const active = await providerConnectionSettings.isActive(userId, 'github')
+    if (!active) return undefined
+    try {
+      const token = await github.accessToken(userId)
+      return token
+        ? { server_url: settings.githubMcpUrl, authorization: token, allowed_tools: ['search_repositories', 'get_file_contents'] }
+        : undefined
+    } catch {
+      return undefined
+    }
+  },
 )
 const codex = settings.codexHomeRoot
   ? new CodexAppServerManager({
@@ -38,7 +54,6 @@ const codex = settings.codexHomeRoot
       loginMode: settings.codexLoginMode,
     })
   : undefined
-
 const app = createApp(
   settings,
   {
@@ -47,6 +62,7 @@ const app = createApp(
     sessions: new SessionManager(settings),
     desktopAuth: new DesktopAuthService(redis, settings),
     google: new GoogleOAuthService(redis, settings),
+    github,
     agentRuns,
     providerConnectionAdapters: {
       'openai-codex': {
@@ -54,8 +70,13 @@ const app = createApp(
         loginMode: settings.codexLoginMode,
         adapter: codex,
       },
+      github: {
+        provider: 'github',
+        loginMode: 'browser',
+        adapter: github,
+      },
     },
-    providerConnectionSettings: new DatabaseProviderConnectionSettings(database),
+    providerConnectionSettings,
   },
   nodeSocketPeer,
 )
@@ -67,6 +88,7 @@ const shutdown = createShutdown({
   closeResources: [async () => {
     await agentRuns.close()
     await codex?.close()
+    await github.close()
     await eventFanout.close()
     await redis.quit()
     await database.close()

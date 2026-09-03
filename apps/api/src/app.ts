@@ -28,6 +28,7 @@ import {
   type ProviderConnectionSettings,
 } from './modules/provider-connections.js'
 import { signValue, verifySignedValue } from './security.js'
+import type { GithubConnectionService } from './modules/github-connection.js'
 import {
   conversationTitle,
   createAiClient,
@@ -75,6 +76,7 @@ export type Services = {
   agentRuns?: AgentRunExecutor
   providerConnectionAdapters?: ProviderConnectionRegistry
   providerConnectionSettings?: ProviderConnectionSettings
+  github?: GithubConnectionService
 }
 
 export type PeerResolver = (request: Request) => string | undefined
@@ -682,9 +684,12 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   }
 
   const oauthStateCookieName = settings.environment === 'production' ? '__Host-mybot_oauth_state' : 'mybot_oauth_state'
+  const githubOauthStateCookieName = settings.environment === 'production' ? '__Host-mybot_github_oauth_state' : 'mybot_github_oauth_state'
   const desktopTransactionCookieName = 'mybot_desktop_transaction'
   const oauthStateCookie = (state: string) => `${oauthStateCookieName}=${encodeURIComponent(signValue(state, settings.sessionSecret))}; Max-Age=600; Path=/; HttpOnly; SameSite=Lax${settings.secureCookies ? '; Secure' : ''}`
   const clearOauthStateCookie = () => `${oauthStateCookieName}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax${settings.secureCookies ? '; Secure' : ''}`
+  const githubOauthStateCookie = (state: string) => `${githubOauthStateCookieName}=${encodeURIComponent(signValue(state, settings.sessionSecret))}; Max-Age=600; Path=/; HttpOnly; SameSite=Lax${settings.secureCookies ? '; Secure' : ''}`
+  const clearGithubOauthStateCookie = () => `${githubOauthStateCookieName}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax${settings.secureCookies ? '; Secure' : ''}`
   const desktopRequestOrigin = (request: Request) => {
     const origin = request.headers.get('origin')
     if (!origin || origin === settings.webOrigin || origin === DESKTOP_RENDERER_ORIGIN) return
@@ -839,6 +844,28 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       return undefined
     }
   }, { response: { 303: t.Void() } })
+
+  app.get('/auth/github/callback', async ({ request, set }) => {
+    if (!services.github) throw new AuthError('github_unavailable', 'GitHub connection is unavailable.', 503)
+    const url = new URL(request.url)
+    const query = Object.fromEntries(url.searchParams.entries())
+    const signed = cookieValue(request, githubOauthStateCookieName)
+    try {
+      const state = verifySignedValue(signed, settings.sessionSecret)
+      const hasSession = Boolean(
+        request.headers.get('authorization') || cookieValue(request, settings.sessionCookieName),
+      )
+      const expectedUserId = hasSession ? (await sessionUser(request)).id : undefined
+      await services.github.completeCallback(query, state, expectedUserId)
+      set.status = 303
+      set.headers.Location = `${settings.webOrigin}/?github=connected`
+    } catch {
+      set.status = 303
+      set.headers.Location = `${settings.webOrigin}/?github=error`
+    }
+    set.headers['set-cookie'] = clearGithubOauthStateCookie()
+    return undefined
+  }, { response: { 303: t.Void(), 503: detailSchema } })
 
   app.get('/auth/session', async ({ request }) => {
     const token = bearerValue(request) ?? cookieValue(request, settings.sessionCookieName)
@@ -1114,6 +1141,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       const login = await providerConnectionCall(() => adapter.startLogin(user.id))
       set.status = 202
       set.headers['cache-control'] = 'no-store'
+      if (login.type === 'browser' && login.state) set.headers['set-cookie'] = githubOauthStateCookie(login.state)
       return login.type === 'browser'
         ? { type: login.type, login_id: login.loginId, auth_url: login.authUrl }
         : {

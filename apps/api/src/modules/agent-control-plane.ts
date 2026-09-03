@@ -72,6 +72,8 @@ export const agentEventTypes = [
   'tool.completed',
   'child.started',
   'child.completed',
+  'skill.started',
+  'skill.completed',
   'turn.completed',
   'turn.failed',
 ] as const
@@ -95,6 +97,21 @@ export type PublicAgentEvent = {
   turn_id: string
   type: AgentEventType
   data: Record<string, unknown>
+}
+
+/** Per-run MCP credentials; this object never enters durable run state or events. */
+export type GithubMcpConfig = {
+  server_url: string
+  authorization: string
+  allowed_tools: string[]
+}
+export type GithubMcpResolver = (userId: string) => Promise<GithubMcpConfig | undefined>
+
+export function withGithubMcp(
+  request: Record<string, unknown>,
+  githubMcp: GithubMcpConfig | undefined,
+) {
+  return githubMcp ? { ...request, github_mcp: githubMcp } : request
 }
 
 const eventTypes = new Set<string>(agentEventTypes)
@@ -323,17 +340,17 @@ const plainRecord = (value: unknown): Record<string, unknown> | undefined =>
     : undefined
 
 const itemId = (data: Record<string, unknown>) => {
-  const item = plainRecord(data.step) ?? plainRecord(data.tool) ?? plainRecord(data.child)
+  const item = plainRecord(data.step) ?? plainRecord(data.tool) ?? plainRecord(data.child) ?? plainRecord(data.skill)
   return typeof item?.id === 'string' ? item.id : undefined
 }
 
-const upsertActivity = (
+export const upsertActivity = (
   activities: Array<Record<string, unknown>>,
   type: AgentEventType,
   data: Record<string, unknown>,
 ) => {
-  if (!type.startsWith('step.') && !type.startsWith('tool.') && !type.startsWith('child.')) return
-  const raw = plainRecord(data.step) ?? plainRecord(data.tool) ?? plainRecord(data.child)
+  if (!type.startsWith('step.') && !type.startsWith('tool.') && !type.startsWith('child.') && !type.startsWith('skill.')) return
+  const raw = plainRecord(data.step) ?? plainRecord(data.tool) ?? plainRecord(data.child) ?? plainRecord(data.skill)
   const id = itemId(data)
   if (!raw || !id) return
   let next: Record<string, unknown>
@@ -437,6 +454,7 @@ export class AgentRunExecutor {
     hub = new AgentEventHub(),
     private readonly fanout?: AgentEventFanout,
     private readonly titles?: TitleClient,
+    private readonly githubMcpResolver?: GithubMcpResolver,
   ) {
     this.hub = hub
     this.unsubscribeFanout = fanout?.subscribe((envelope) => {
@@ -697,7 +715,10 @@ export class AgentRunExecutor {
       const activities = Array.isArray(state.assistant.activities)
         ? [...state.assistant.activities] as Array<Record<string, unknown>>
         : []
-      const response = await this.ai({
+      const githubMcp = this.githubMcpResolver
+        ? await this.githubMcpResolver(run.userId)
+        : undefined
+      const request: Record<string, unknown> = {
         version: 2,
         run_id: run.id,
         turn_id: run.turnId,
@@ -713,7 +734,8 @@ export class AgentRunExecutor {
         model: run.model,
         reasoning_effort: run.reasoningEffort,
         speed: run.speed,
-      }, controller.signal, headers)
+      }
+      const response = await this.ai(withGithubMcp(request, githubMcp), controller.signal, headers)
       if (!response.ok || !response.body) throw new Error('provider_unavailable')
 
       reader = response.body.getReader()

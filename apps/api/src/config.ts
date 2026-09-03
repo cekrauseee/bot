@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
+import { Buffer } from 'node:buffer'
 import dotenv from 'dotenv'
 
 // Resolve the repository environment file from this module rather than from
@@ -41,6 +42,11 @@ export type Settings = {
   codexBinary: string
   codexHomeRoot: string | null
   codexLoginMode: 'browser' | 'device'
+  githubClientId: string
+  githubClientSecret: string
+  githubRedirectUri: string
+  githubTokenEncryptionKey: Buffer | null
+  githubMcpUrl: string
 }
 
 const isPlaceholder = (value: string) => {
@@ -104,6 +110,15 @@ const parseRedisUrl = (value: string) => {
   return value
 }
 
+const parseGithubKey = (value: string | undefined) => {
+  if (!value?.trim()) return null
+  const key = Buffer.from(value.trim(), 'base64')
+  if (key.length !== 32 || key.toString('base64') !== value.trim()) {
+    throw new Error('GITHUB_TOKEN_ENCRYPTION_KEY must be a base64-encoded 32-byte key')
+  }
+  return key
+}
+
 export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
   const environment = requiredValue(env, 'ENVIRONMENT')
   if (!['development', 'test', 'production'].includes(environment)) throw new Error('ENVIRONMENT is invalid')
@@ -116,6 +131,25 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
   const redirectUri = parseHttpUrl(redirectValue, 'GOOGLE_REDIRECT_URI', false)
   if (redirectUri.username || redirectUri.password || redirectUri.search || redirectUri.hash) {
     throw new Error('GOOGLE_REDIRECT_URI must not contain credentials, query, or fragment')
+  }
+  const githubClientId = env.GITHUB_OAUTH_CLIENT_ID?.trim() ?? ''
+  const githubClientSecret = env.GITHUB_OAUTH_CLIENT_SECRET?.trim() ?? ''
+  if (Boolean(githubClientId) !== Boolean(githubClientSecret)) {
+    throw new Error('GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET must be provided together')
+  }
+  const githubRedirectUri = env.GITHUB_OAUTH_REDIRECT_URI?.trim() || `${apiOrigin}/auth/github/callback`
+  const githubRedirect = parseHttpUrl(githubRedirectUri, 'GITHUB_OAUTH_REDIRECT_URI', false)
+  if (githubRedirect.username || githubRedirect.password || githubRedirect.search || githubRedirect.hash) {
+    throw new Error('GITHUB_OAUTH_REDIRECT_URI must not contain credentials, query, or fragment')
+  }
+  const githubMcpUrl = env.GITHUB_MCP_URL?.trim() || 'https://api.githubcopilot.com/mcp/'
+  const parsedGithubMcp = parseHttpUrl(githubMcpUrl, 'GITHUB_MCP_URL', false)
+  if (parsedGithubMcp.protocol !== 'https:' || parsedGithubMcp.hostname !== 'api.githubcopilot.com') {
+    throw new Error('GITHUB_MCP_URL must use the official GitHub MCP HTTPS endpoint')
+  }
+  const githubTokenEncryptionKey = parseGithubKey(env.GITHUB_TOKEN_ENCRYPTION_KEY)
+  if (environment === 'production' && githubClientId && (!githubTokenEncryptionKey || githubRedirect.protocol !== 'https:' || githubRedirect.origin !== apiOrigin)) {
+    throw new Error('production GitHub OAuth requires an encryption key and HTTPS API callback')
   }
   const secrets = {
     sessionSecret: requiredValue(env, 'SESSION_SECRET'),
@@ -169,5 +203,10 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     codexHomeRoot: configuredCodexHome || (environment === 'production'
       ? null
       : join(tmpdir(), 'my-bot-codex')),
+    githubClientId,
+    githubClientSecret,
+    githubRedirectUri: githubRedirect.toString(),
+    githubTokenEncryptionKey,
+    githubMcpUrl: parsedGithubMcp.toString(),
   }
 }

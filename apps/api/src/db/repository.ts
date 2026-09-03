@@ -9,6 +9,7 @@ import {
   oauthIdentities,
   projects,
   providerConnections,
+  githubConnections,
   sessions,
   users,
 } from './schema.js'
@@ -233,6 +234,56 @@ export class ProviderConnectionRepository {
       })
       .returning({ active: providerConnections.active })
     return connection?.active ?? active
+  }
+}
+
+export type GithubConnection = typeof githubConnections.$inferSelect
+
+export class GithubConnectionRepository {
+  constructor(readonly db: Db) {}
+
+  async get(userId: string) {
+    const [row] = await this.db.select().from(githubConnections)
+      .where(eq(githubConnections.userId, userId))
+    return row
+  }
+
+  async save(userId: string, value: {
+    accessToken: string
+    refreshToken?: string | null
+    accessTokenExpiresAt?: Date | null
+    refreshTokenExpiresAt?: Date | null
+    providerSubject: string
+    login: string
+    email?: string | null
+    scopes: string
+  }) {
+    const now = new Date()
+    const [row] = await this.db.insert(githubConnections).values({
+      userId,
+      ...value,
+      updatedAt: now,
+    }).onConflictDoUpdate({
+      target: githubConnections.userId,
+      set: { ...value, updatedAt: now },
+    }).returning()
+    return row
+  }
+
+  async updateTokens(userId: string, value: {
+    accessToken: string
+    refreshToken?: string | null
+    accessTokenExpiresAt?: Date | null
+    refreshTokenExpiresAt?: Date | null
+  }) {
+    const [row] = await this.db.update(githubConnections)
+      .set({ ...value, updatedAt: new Date() })
+      .where(eq(githubConnections.userId, userId)).returning()
+    return row
+  }
+
+  async delete(userId: string) {
+    await this.db.delete(githubConnections).where(eq(githubConnections.userId, userId))
   }
 }
 
