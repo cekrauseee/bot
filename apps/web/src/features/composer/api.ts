@@ -27,7 +27,6 @@ export type TurnStreamEvent = {
 const terminalEventTypes = new Set([
   "turn.completed",
   "turn.failed",
-  "user.input_required",
 ])
 const canonicalSequence = /^(0|[1-9]\d*)$/
 

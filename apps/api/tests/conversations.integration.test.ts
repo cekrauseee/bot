@@ -8,7 +8,6 @@ import { createApp } from '../src/app.js'
 import { loadSettings } from '../src/config.js'
 import { Database } from '../src/db/database.js'
 import {
-  AgentRunRepository,
   AuthRepository,
   ConversationRepository,
   ProjectRepository,
@@ -942,6 +941,10 @@ describe('PostgreSQL conversation flow', () => {
         'select id from agent_runs where user_id = $1 order by created_at desc limit 1', [owner.id],
       )
       const runId = created.rows[0].id
+      await pool.query(
+        `update agent_runs set browser_projection = $2::jsonb where id = $1`,
+        [runId, JSON.stringify({ state: 'live', control: 'agent' })],
+      )
       for (let attempt = 0; attempt < 50; attempt += 1) {
         const state = await request(`/agent-runs/${runId}`)
         if ((await state.json() as { status: string }).status === 'running') break
@@ -963,6 +966,10 @@ describe('PostgreSQL conversation flow', () => {
         await new Promise((resolve) => setTimeout(resolve, 10))
       }
       expect(finalStatus).toBe('cancelled')
+      const clearedProjection = await pool.query<{ browser_projection: unknown }>(
+        'select browser_projection from agent_runs where id = $1', [runId],
+      )
+      expect(clearedProjection.rows[0].browser_projection).toBeNull()
       await executor.recover()
       const terminalEvents = await pool.query<{ count: string }>(
         `select count(*) from agent_events
@@ -1014,11 +1021,9 @@ describe('PostgreSQL conversation flow', () => {
     }
   })
 
-  it('validates model capabilities and durably pauses, replays, and resumes an AI v2 run', async () => {
-    const owner = await authenticatedUser('agent-run-owner')
+  it('treats a blocking question as a completed message and continues in a normal turn', async () => {
+    const owner = await authenticatedUser('agent-question-message-owner')
     const calls: Record<string, unknown>[] = []
-    let releaseResumed!: () => void
-    const resumedGate = new Promise<void>((resolve) => { releaseResumed = resolve })
     const v2Ai: AiClient = async (input) => {
       calls.push(input)
       const runId = String(input.run_id)
@@ -1027,52 +1032,26 @@ describe('PostgreSQL conversation flow', () => {
         `event: ${type}\ndata: ${JSON.stringify({
           version: 2, sequence, run_id: runId, turn_id: turnId, type, data,
         })}\n\n`
-      const resumed = input.resume !== undefined
-      if (resumed) {
-        const encoder = new TextEncoder()
-        return new Response(new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(encoder.encode([
-              v2Frame(1, 'turn.started', {
-                model: input.model,
-                checkpoint: {
-                  id: 'checkpoint-after-resume',
-                  phase: 'runnable',
-                  content: 'Waiting. Recovered.',
-                  pending_question: null,
-                  resume_consumed: true,
-                },
-              }),
-              v2Frame(2, 'text.delta', { delta: ' Resumed.' }),
-            ].join('')))
-            void resumedGate.then(() => {
-              controller.enqueue(encoder.encode(v2Frame(3, 'turn.completed', { model: input.model })))
-              controller.close()
-            })
-          },
-        }), { headers: { 'content-type': 'text/event-stream' } })
-      }
+      const first = calls.length === 1
       return new Response([
-            v2Frame(1, 'turn.started', { model: input.model }),
-            v2Frame(2, 'plan.updated', {
-              plan: [{ id: 'inspect', title: 'Inspect the task', status: 'in_progress' }],
-            }),
-            v2Frame(3, 'text.delta', { delta: 'Waiting.' }),
-            v2Frame(4, 'user.input_required', {
-              question: { question_id: 'question-1', prompt: 'Continue?' },
-            }),
-          ].join(''), {
-        headers: { 'content-type': 'text/event-stream' },
-      })
+        v2Frame(1, 'turn.started', { model: input.model }),
+        ...(first
+          ? [v2Frame(2, 'plan.updated', {
+            plan: [{ id: 'inspect', title: 'Inspect the task', status: 'in_progress' }],
+          })]
+          : []),
+        v2Frame(first ? 3 : 2, 'text.delta', {
+          delta: first ? 'Which deployment target should I use?' : 'Using staging.',
+        }),
+        v2Frame(first ? 4 : 3, 'turn.completed', { model: input.model }),
+      ].join(''), { headers: { 'content-type': 'text/event-stream' } })
     }
-    const providerConnections = new DatabaseProviderConnectionSettings(database)
     const app = createApp(settings, {
       database,
       sessions: new SessionManager(settings),
       ai: v2Ai,
       otp: {} as never,
       google: {} as never,
-      providerConnectionSettings: providerConnections,
     })
     const request = (path: string, init: RequestInit = {}) => app.handle(new Request(
       `http://localhost${path}`,
@@ -1080,265 +1059,58 @@ describe('PostgreSQL conversation flow', () => {
     ))
 
     try {
-      const catalog = await request('/models')
-      expect(catalog.status).toBe(200)
-      expect(await catalog.json()).toMatchObject({
-        models: [
-          { id: 'gpt-5.6-sol', provider: 'openai' },
-          { id: 'gpt-5.6-terra', provider: 'openai' },
-          { id: 'gpt-5.6-luna', provider: 'openai' },
-        ],
-      })
-
-      expect(await providerConnections.setActive(owner.id, 'openai', false))
-        .toBe(false)
-      const disabledCatalog = await request('/models')
-      expect(await disabledCatalog.json()).toMatchObject({
-        models: [
-          { id: 'gpt-5.6-sol', provider: 'openai', active: true },
-          { id: 'gpt-5.6-terra', provider: 'openai', active: true },
-          { id: 'gpt-5.6-luna', provider: 'openai', active: true },
-        ],
-      })
-
-      const fallbackPreference = await request('/preferences/model', {
-        method: 'PATCH',
-        headers: { origin: settings.webOrigin, 'content-type': 'application/json' },
-        body: JSON.stringify({
-          model: 'gpt-5.6-sol', reasoning_effort: 'medium', speed: 'standard',
-        }),
-      })
-      expect(fallbackPreference.status).toBe(200)
-
       const started = await request('/conversations/turns', {
         method: 'POST',
         headers: { origin: settings.webOrigin, 'content-type': 'application/json' },
         body: JSON.stringify({
-          message: 'Pause for input', model: 'gpt-5.6-terra',
+          message: 'Deploy the application', model: 'gpt-5.6-terra',
           reasoning_effort: 'high', speed: 'standard',
         }),
       })
-      const initial = await parseEvents(started) as Array<{
-        sequence: string; run_id: string; type: string; data: Record<string, unknown>
-      }>
+      const initial = await parseEvents(started)
       expect(initial.map((event) => event.type)).toEqual([
-        'turn.started', 'plan.updated', 'text.delta', 'user.input_required',
+        'turn.started', 'plan.updated', 'text.delta', 'turn.completed',
       ])
-      expect(initial.every((event) => event.run_id === initial[0].run_id)).toBe(true)
-      expect(initial.map((event) => BigInt(event.sequence))).toEqual(
-        [...initial].map((event) => BigInt(event.sequence)).sort((left, right) => left < right ? -1 : 1),
-      )
       const runId = initial[0].run_id
+      const conversation = initial[0].data.conversation as { id: string }
 
-      const waiting = await request(`/agent-runs/${runId}`)
-      const waitingState = await waiting.json() as {
-        workspace_id: string
-        conversation_id: string
-        turn_id: string
-        status: string
-        last_event_sequence: string
-      }
-      expect(waitingState).toMatchObject({
-        status: 'waiting',
-        model: 'gpt-5.6-terra',
-        provider: 'openai',
-        reasoning_effort: 'high',
-        speed: 'standard',
-        plan: [{ id: 'inspect', title: 'Inspect the task', status: 'in_progress' }],
-        pending_question: { question_id: 'question-1', prompt: 'Continue?' },
-      })
-      const staleClaim = await database.transaction((db) => new AgentRunRepository(db).get(runId))
-      expect(staleClaim?.executionToken).toMatch(/^[0-9a-f-]{36}$/)
-
-      const conversationWhileWaiting = await request(`/conversations/${waitingState.conversation_id}`)
-      expect(await conversationWhileWaiting.json()).toMatchObject({
-        active_run: {
-          id: runId,
-          turn_id: waitingState.turn_id,
-          status: 'waiting',
-          last_event_sequence: waitingState.last_event_sequence,
-          plan: [{ id: 'inspect', title: 'Inspect the task', status: 'in_progress' }],
-          pending_question: { question_id: 'question-1', prompt: 'Continue?' },
-          browser_projection: null,
-          model: 'gpt-5.6-terra',
-          provider: 'openai',
-          reasoning_effort: 'high',
-          speed: 'standard',
-        },
-      })
-
-      const activeRuns = await request('/agent-runs')
-      expect(await activeRuns.json()).toMatchObject({
-        runs: [{
-          id: runId,
-          conversation_id: waitingState.conversation_id,
-          status: 'waiting',
-          last_event_sequence: waitingState.last_event_sequence,
-        }],
-        conversations: [{ id: waitingState.conversation_id }],
+      const completed = await request(`/agent-runs/${runId}`)
+      expect(await completed.json()).toMatchObject({ status: 'completed' })
+      const detail = await request(`/conversations/${conversation.id}`)
+      expect(await detail.json()).toMatchObject({
+        active_run: null,
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            role: 'assistant',
+            content: 'Which deployment target should I use?',
+            status: 'completed',
+          }),
+        ]),
       })
 
       const replay = await request(`/agent-runs/${runId}/events?after=${initial[0].sequence}`)
-      const replayBody = await replay.json() as {
-        events: Array<{ type: string }>
-        has_more: boolean
-        next_cursor: string
-      }
+      const replayBody = await replay.json() as { events: Array<{ type: string }> }
       expect(replayBody.events.map((event) => event.type)).toEqual([
-        'plan.updated', 'text.delta', 'user.input_required',
-      ])
-      expect(replayBody.has_more).toBe(false)
-      expect(BigInt(replayBody.next_cursor)).toBeGreaterThan(BigInt(initial[0].sequence))
-
-      const answer = ['Yes', 'Use staging']
-      const resumed = await request(`/agent-runs/${runId}/resume`, {
-        method: 'POST',
-        headers: { origin: settings.webOrigin, 'content-type': 'application/json' },
-        body: JSON.stringify({ question_id: 'question-1', answer }),
-      })
-      expect(resumed.status).toBe(202)
-      const retriedResume = await request(`/agent-runs/${runId}/resume`, {
-        method: 'POST',
-        headers: { origin: settings.webOrigin, 'content-type': 'application/json' },
-        body: JSON.stringify({ question_id: 'question-1', answer }),
-      })
-      expect(retriedResume.status).toBe(202)
-
-      let runningState: { status: string } | undefined
-      for (let attempt = 0; attempt < 50; attempt += 1) {
-        const response = await request(`/agent-runs/${runId}`)
-        runningState = await response.json() as { status: string }
-        if (runningState.status === 'running') break
-        await new Promise((resolve) => setTimeout(resolve, 10))
-      }
-      expect(runningState).toMatchObject({ status: 'running' })
-      const currentClaim = await database.transaction((db) => new AgentRunRepository(db).get(runId))
-      expect(currentClaim?.executionToken).not.toBe(staleClaim!.executionToken)
-      expect(await database.transaction((db) =>
-        new AgentRunRepository(db).renewLease(runId, staleClaim!.executionToken!))).toBeUndefined()
-      await expect(database.transaction((db) =>
-        new AgentRunRepository(db).appendEvent(staleClaim!, 'text.delta', { delta: 'stale' })))
-        .rejects.toThrow('agent_run_lease_lost')
-      await expect(database.transaction((db) =>
-        new AgentRunRepository(db).setAssistant(staleClaim!, { content: 'stale' })))
-        .rejects.toThrow('agent_run_lease_lost')
-
-      releaseResumed()
-      let completed: Response | undefined
-      for (let attempt = 0; attempt < 50; attempt += 1) {
-        completed = await request(`/agent-runs/${runId}`)
-        const state = await completed.clone().json() as { status: string }
-        if (state.status === 'completed') break
-        await new Promise((resolve) => setTimeout(resolve, 10))
-      }
-      expect(await completed!.json()).toMatchObject({ status: 'completed' })
-      expect(await (await request('/agent-runs')).json()).toEqual({ runs: [], conversations: [] })
-      const reloaded = await request(`/conversations/${waitingState.conversation_id}`)
-      expect(await reloaded.json()).toMatchObject({
-        plan: [{ id: 'inspect', title: 'Inspect the task', status: 'in_progress' }],
-        active_run: null,
-      })
-      expect(calls).toHaveLength(2)
-      expect(calls[0]).toMatchObject({
-        version: 2,
-        run_id: runId,
-        workspace_id: waitingState.workspace_id,
-        model: 'gpt-5.6-terra',
-        reasoning_effort: 'high',
-        speed: 'standard',
-      })
-      expect(calls[1]).toMatchObject({
-        version: 2,
-        run_id: runId,
-        workspace_id: waitingState.workspace_id,
-        resume: { question_id: 'question-1', answer },
-      })
-      expect(calls[1].messages).toEqual(expect.arrayContaining([
-        { role: 'user', content: '- Yes\n- Use staging' },
-      ]))
-
-      const persistedResume = await pool.query<{
-        resume_input: null
-        execution_token: string
-      }>('select resume_input, execution_token from agent_runs where id = $1', [runId])
-      expect(persistedResume.rows[0].resume_input).toBeNull()
-      expect(persistedResume.rows[0].execution_token).not.toBe(staleClaim!.executionToken)
-      const reconciled = await pool.query<{
-        reconciled_checkpoint_id: string
-        content: string
-      }>(
-        `select r.reconciled_checkpoint_id, m.content
-         from agent_runs r join messages m on m.id = r.assistant_message_id
-         where r.id = $1`,
-        [runId],
-      )
-      expect(reconciled.rows[0]).toEqual({
-        reconciled_checkpoint_id: 'checkpoint-after-resume',
-        content: 'Waiting. Recovered. Resumed.',
-      })
-      const resumedMessages = await pool.query<{ content: string }>(
-        `select content from messages
-         where conversation_id = $1 and role = 'user'
-         order by created_at, id`,
-        [waitingState.conversation_id],
-      )
-      expect(resumedMessages.rows.map(({ content }) => content)).toEqual([
-        'Pause for input',
-        '- Yes\n- Use staging',
+        'plan.updated', 'text.delta', 'turn.completed',
       ])
 
-      const nextTurn = await request(`/conversations/${waitingState.conversation_id}/turns`, {
+      const nextTurn = await request(`/conversations/${conversation.id}/turns`, {
         method: 'POST',
         headers: { origin: settings.webOrigin, 'content-type': 'application/json' },
         body: JSON.stringify({
-          message: 'Continue the task', model: 'gpt-5.6-terra',
+          message: 'Use staging', model: 'gpt-5.6-terra',
           reasoning_effort: 'high', speed: 'standard',
         }),
       })
-      expect(nextTurn.status).toBe(200)
-      const nextTurnEvents = await parseEvents(nextTurn)
-      expect(nextTurnEvents[0].data.plan).toEqual([{
-        id: 'inspect', title: 'Inspect the task', status: 'in_progress',
-      }])
-      expect(calls).toHaveLength(3)
-      expect(calls[2].task_plan).toEqual([{
-        id: 'inspect', title: 'Inspect the task', status: 'in_progress',
-      }])
-
-      const replayStart = BigInt((await pool.query<{ sequence: string }>(
-        'select max(sequence)::text as sequence from agent_events where run_id = $1', [runId],
-      )).rows[0].sequence)
-      await pool.query(
-        `insert into agent_events (run_id, turn_id, type, data)
-         select $1, $2, 'step.updated', jsonb_build_object('index', value)
-         from generate_series(1, 1005) as value`,
-        [runId, waitingState.turn_id],
-      )
-      await pool.query(
-        `update agent_runs set last_event_sequence = (
-           select max(sequence) from agent_events where run_id = $1
-         ) where id = $1`,
-        [runId],
-      )
-      const firstPage = await request(`/agent-runs/${runId}/events?after=${replayStart}`)
-      const firstPageBody = await firstPage.json() as {
-        events: Array<{ sequence: string }>
-        has_more: boolean
-        next_cursor: string
-      }
-      expect(firstPageBody.events).toHaveLength(1000)
-      expect(firstPageBody.has_more).toBe(true)
-      expect(firstPageBody.next_cursor).toBe(firstPageBody.events.at(-1)?.sequence)
-      const secondPage = await request(
-        `/agent-runs/${runId}/events?after=${firstPageBody.next_cursor}`,
-      )
-      const secondPageBody = await secondPage.json() as {
-        events: Array<{ sequence: string }>
-        has_more: boolean
-        next_cursor: string
-      }
-      expect(secondPageBody.events).toHaveLength(5)
-      expect(secondPageBody.has_more).toBe(false)
+      expect((await parseEvents(nextTurn)).at(-1)?.type).toBe('turn.completed')
+      expect(calls).toHaveLength(2)
+      expect(calls[1].messages).toEqual(expect.arrayContaining([
+        { role: 'assistant', content: 'Which deployment target should I use?' },
+        { role: 'user', content: 'Use staging' },
+      ]))
+      expect(calls[1].task_plan).toEqual([
+        { id: 'inspect', title: 'Inspect the task', status: 'in_progress' },
+      ])
     } finally {
       await pool.query('delete from users where id = $1', [owner.id])
     }

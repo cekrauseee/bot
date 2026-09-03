@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import type { TurnStreamEvent } from "@/features/composer/api"
 import {
   applyTurnEvent,
+  applyBrowserFrame,
   consumeTurnSpacerAnchor,
   emptyConversationRecord,
   markRunStopRequested,
@@ -40,6 +41,58 @@ const apiMessage = (
 })
 
 describe("conversation state", () => {
+  it("stores transient browser frames for an active run and clears them at terminal state", () => {
+    let state = applyTurnEvent(
+      emptyConversationRecord(),
+      event(0, "turn.started", {
+        user_message: apiMessage("user", "user", "completed", "Open a page."),
+        assistant_message: apiMessage("assistant", "assistant", "streaming"),
+      }),
+      0
+    )
+    state = { ...state, browserProjection: { state: "live", control: "agent" } }
+    state = applyBrowserFrame(
+      state,
+      {
+        base64: "cG5n",
+        mimeType: "image/png",
+        capturedAt: "2026-09-03T00:00:00Z",
+      },
+      "run-1"
+    )
+    expect(state.browserFrame?.base64).toBe("cG5n")
+    const newer = applyBrowserFrame(
+      { ...state, runId: "new-run" },
+      {
+        base64: "bGF0ZQ==",
+        mimeType: "image/png",
+        capturedAt: "2026-09-03T00:00:01Z",
+      },
+      "run-1"
+    )
+    expect(newer.browserFrame).toBe(state.browserFrame)
+    state = applyTurnEvent(state, event(1, "turn.completed", {}), 1)
+    expect(state.browserFrame).toBeUndefined()
+    expect(state.browserProjection).toBeUndefined()
+  })
+
+  it.each(["stopped", "failed"] as const)(
+    "clears the browser frame when browser projection becomes %s",
+    (stateValue) => {
+      let state = applyTurnEvent(emptyConversationRecord(), event(0, "turn.started", {
+        user_message: apiMessage("user", "user", "completed", "Open a page."),
+        assistant_message: apiMessage("assistant", "assistant", "streaming"),
+      }), 0)
+      state = { ...state, browserFrame: { base64: "cG5n", mimeType: "image/png", capturedAt: "2026-09-03T00:00:00Z" } }
+      state = applyTurnEvent(state, event(1, "tool.completed", {
+        tool: { id: "browser", name: "browser_close", status: "completed" },
+        browser_projection: { state: stateValue, control: "agent" },
+      }), 1)
+      expect(state.browserFrame).toBeUndefined()
+      expect(state.browserProjection?.state).toBe(stateValue)
+    },
+  )
+
   it("keeps a static process status for a completed direct response", () => {
     const message = mapApiMessage(
       apiMessage("assistant", "assistant", "completed", "Done.")
@@ -182,7 +235,9 @@ describe("conversation state", () => {
     )
     expect(duplicate).toBe(state)
     state = applyTurnEvent(state, event(2, "text.delta", { delta: "B" }), 2)
-    expect(state.messages.find((message) => message.id === "assistant")?.content).toBe("AB")
+    expect(
+      state.messages.find((message) => message.id === "assistant")?.content
+    ).toBe("AB")
     expect(state.lastEventSequence).toBe("2")
   })
 
@@ -195,19 +250,34 @@ describe("conversation state", () => {
       }),
       0
     )
-    state = applyTurnEvent(state, event(1, "text.delta", { delta: "Before" }), 1)
+    state = applyTurnEvent(
+      state,
+      event(1, "text.delta", { delta: "Before" }),
+      1
+    )
     state = markRunStopRequested(state, "run-1", true)
-    state = applyTurnEvent(state, event(2, "text.delta", { delta: " after" }), 2)
+    state = applyTurnEvent(
+      state,
+      event(2, "text.delta", { delta: " after" }),
+      2
+    )
 
     expect(state.stopRequested).toBe(true)
     expect(state.activeAssistantId).toBeUndefined()
     expect(state.lastEventSequence).toBe("2")
-    expect(state.messages.find((message) => message.id === "assistant")?.content).toBe("Before")
+    expect(
+      state.messages.find((message) => message.id === "assistant")?.content
+    ).toBe("Before")
 
-    state = applyTurnEvent(state, event(3, "turn.failed", {
-      error: { code: "cancelled", message: "Turn cancelled." },
-    }), 3)
+    state = applyTurnEvent(
+      state,
+      event(3, "turn.failed", {
+        error: { code: "cancelled", message: "Turn cancelled." },
+      }),
+      3
+    )
     expect(state.runId).toBeUndefined()
     expect(state.stopRequested).toBeUndefined()
   })
+
 })

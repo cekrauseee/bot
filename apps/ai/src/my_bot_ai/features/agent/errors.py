@@ -22,20 +22,6 @@ class ProviderMissingError(AgentServiceError):
     )
 
 
-class InvalidResumeError(AgentServiceError):
-    public_error = PublicAgentError(
-        "invalid_resume", "The run is not waiting for that question.", False
-    )
-
-
-class CheckpointMissingError(AgentServiceError):
-    public_error = PublicAgentError(
-        "checkpoint_missing",
-        "The durable agent checkpoint is missing.",
-        False,
-    )
-
-
 class RuntimeCallError(AgentServiceError):
     def __init__(
         self,

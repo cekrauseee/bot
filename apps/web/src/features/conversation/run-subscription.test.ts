@@ -64,6 +64,30 @@ describe("run subscription transport", () => {
     expect(() => parseRunSocketMessage(message({ sequence: "01" }))).toThrow()
   })
 
+  it("parses browser frames only when the complete payload is valid", () => {
+    const parsed = parseRunSocketMessage(
+      message({
+        type: "browser.frame",
+        turn_id: undefined,
+        data: {
+          base64: "cG5n",
+          mime_type: "image/png",
+          captured_at: "2026-09-03T00:00:00Z",
+        },
+      })
+    )
+    expect(parsed).toMatchObject({
+      kind: "transient",
+      runId,
+      frame: { mimeType: "image/png" },
+    })
+    expect(() =>
+      parseRunSocketMessage(
+        message({ type: "browser.frame", data: { frame: { base64: "cG5n" } } })
+      )
+    ).toThrow()
+  })
+
   it("reconnects from the last bigint cursor and ignores duplicate delivery", () => {
     const onEvent = vi.fn()
     const stop = subscribeToRun({
@@ -79,10 +103,38 @@ describe("run subscription transport", () => {
 
     first.close()
     vi.advanceTimersByTime(1_000)
-    expect(FakeWebSocket.instances[1].url).toContain(
-      "after=9007199254740993"
-    )
+    expect(FakeWebSocket.instances[1].url).toContain("after=9007199254740993")
     stop()
+  })
+
+  it("delivers transient browser frames without affecting the durable cursor", () => {
+    const onFrame = vi.fn()
+    subscribeToRun({
+      after: "0",
+      runId,
+      onEvent: vi.fn(),
+      onFrame,
+      onResync: vi.fn(),
+    })
+    FakeWebSocket.instances[0].receive(
+      message({
+        type: "browser.frame",
+        turn_id: undefined,
+        data: {
+          base64: "cG5n",
+          mime_type: "image/png",
+          captured_at: "2026-09-03T00:00:00Z",
+        },
+      })
+    )
+    expect(onFrame).toHaveBeenCalledWith(
+      {
+        base64: "cG5n",
+        mimeType: "image/png",
+        capturedAt: "2026-09-03T00:00:00Z",
+      },
+      runId
+    )
   })
 
   it.each([

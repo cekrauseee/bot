@@ -105,6 +105,7 @@ export function ResponseProcess({
         <CollapsibleContent>
           <ProcessActivityList
             activities={process.activities}
+            browserProjection={process.browserProjection}
             className="w-full"
             defaultGroupsOpen={process.status === "processing"}
           />

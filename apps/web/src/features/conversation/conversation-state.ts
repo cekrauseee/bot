@@ -1,6 +1,9 @@
 import type { TurnStreamEvent } from "@/features/composer/api"
+import { parseBrowserProjection } from "@/features/conversation/run-subscription"
 import type {
   ConversationMessageData,
+  BrowserFrame,
+  BrowserProjection,
   ProcessActivity,
   ProcessActivityStatus,
   ProcessSearchSource,
@@ -18,6 +21,8 @@ export type ConversationRecord = {
   status: "error" | "idle" | "loading" | "ready"
   turnSpacerAnchorId?: string
   version: number
+  browserFrame?: BrowserFrame
+  browserProjection?: BrowserProjection | null
 }
 
 export const emptyConversationRecord = (): ConversationRecord => ({
@@ -26,6 +31,15 @@ export const emptyConversationRecord = (): ConversationRecord => ({
   status: "idle",
   version: 0,
 })
+
+export function applyBrowserFrame(
+  current: ConversationRecord,
+  frame: BrowserFrame,
+  runId: string
+) {
+  if (!current.runId || current.runId !== runId) return current
+  return { ...current, browserFrame: frame, version: current.version + 1 }
+}
 
 export function consumeTurnSpacerAnchor(
   current: ConversationRecord,
@@ -49,18 +63,24 @@ export function markRunStopRequested(
         if (message.id !== current.activeAssistantId) return [message]
         const activities = message.process?.activities ?? []
         if (!message.content.trim() && activities.length === 0) return []
-        return [{
-          ...message,
-          process: message.process
-            ? {
-                ...message.process,
-                durationSeconds: current.processStartedAt === undefined
-                  ? message.process.durationSeconds
-                  : Math.max(1, Math.round((at - current.processStartedAt) / 1000)),
-                status: "processed" as const,
-              }
-            : undefined,
-        }]
+        return [
+          {
+            ...message,
+            process: message.process
+              ? {
+                  ...message.process,
+                  durationSeconds:
+                    current.processStartedAt === undefined
+                      ? message.process.durationSeconds
+                      : Math.max(
+                          1,
+                          Math.round((at - current.processStartedAt) / 1000)
+                        ),
+                  status: "processed" as const,
+                }
+              : undefined,
+          },
+        ]
       })
     : current.messages
   return {
@@ -300,21 +320,21 @@ export function recordFromDetail(
     id: string
     turn_id?: string
     last_event_sequence?: string | null
+    browserProjection?: BrowserProjection | null
   }
 ): ConversationRecord {
   let activeAssistantId: string | undefined
   const mapped = messages.flatMap((message) => {
     const parsed = mapApiMessage(message)
     const raw = record(message)
-    if (
-      parsed?.role === "assistant" &&
-      raw?.status === "streaming"
-    ) {
+    if (parsed?.role === "assistant" && raw?.status === "streaming") {
       activeAssistantId = parsed.id
     }
     return parsed ? [parsed] : []
   })
-  const activeAssistant = mapped.find((message) => message.id === activeAssistantId)
+  const activeAssistant = mapped.find(
+    (message) => message.id === activeAssistantId
+  )
 
   return {
     activeAssistantId,
@@ -326,6 +346,7 @@ export function recordFromDetail(
           runId: activeRun.id,
           turnId: activeRun.turn_id,
           lastEventSequence: activeRun.last_event_sequence ?? undefined,
+          browserProjection: activeRun.browserProjection ?? undefined,
         }
       : {}),
     status: "ready",
@@ -350,7 +371,13 @@ function updateAssistant(
   record: ConversationRecord,
   update: (message: ConversationMessageData) => ConversationMessageData
 ) {
-  const assistantId = record.activeAssistantId
+  const assistantId =
+    record.activeAssistantId ??
+    (record.runId
+      ? [...record.messages]
+          .reverse()
+          .find((message) => message.role === "assistant")?.id
+      : undefined)
   if (!assistantId) return record
   return {
     ...record,
@@ -474,7 +501,6 @@ export function applyTurnEvent(
     error: "",
     status: "ready",
   }
-
   if (event.type === "turn.started") {
     const user = mapApiMessage(event.data.user_message)
     const assistant = mapApiMessage(event.data.assistant_message)
@@ -509,7 +535,6 @@ export function applyTurnEvent(
 
   const terminalEvent =
     event.type === "turn.completed" ||
-    event.type === "user.input_required" ||
     event.type === "turn.failed"
   if (next.stopRequested && !terminalEvent) {
     return {
@@ -583,6 +608,17 @@ export function applyTurnEvent(
           },
         }
       })
+      const rawProjection =
+        record(event.data.browser_projection) ?? record(event.data.browser)
+      if (rawProjection) {
+        const projection = parseBrowserProjection(rawProjection)
+        if (projection) {
+          next.browserProjection = projection
+          if (projection.state === "stopped" || projection.state === "failed") {
+            next.browserFrame = undefined
+          }
+        }
+      }
     }
   } else if (event.type === "text.delta") {
     const delta = string(event.data.delta)
@@ -601,7 +637,6 @@ export function applyTurnEvent(
     }
   } else if (
     event.type === "turn.completed" ||
-    event.type === "user.input_required" ||
     event.type === "turn.failed"
   ) {
     next = updateAssistant(next, (assistant) => {
@@ -625,6 +660,8 @@ export function applyTurnEvent(
     next = {
       ...next,
       activeAssistantId: undefined,
+      browserFrame: undefined,
+      browserProjection: undefined,
       processStartedAt: undefined,
       runId: undefined,
       stopRequested: undefined,

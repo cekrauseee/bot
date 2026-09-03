@@ -129,7 +129,7 @@
           <article class="node">
             <span class="number">01</span><h3>Web interface</h3>
             <span class="tech">Vite · React · shadcn/Base UI</span>
-            <p>Messages, model controls, task-plan badge, questions, Stop, and browser preview.</p>
+            <p>Messages, model controls, task-plan badge, Stop, and browser preview.</p>
             <p><code>apps/web</code> · port 5173</p>
           </article>
           <span class="arrow" aria-hidden="true">→</span>
@@ -143,7 +143,7 @@
           <article class="node">
             <span class="number">03</span><h3>Agent service</h3>
             <span class="tech">Python · LangChain · LangGraph</span>
-            <p>Model loop, checkpoints, plans, questions, child agents, and normalized tool calls.</p>
+            <p>Model loop, checkpoints, plans, collaboration policy, child agents, and normalized tool calls.</p>
             <p><code>apps/ai</code> · port 8001</p>
           </article>
           <span class="arrow" aria-hidden="true">→</span>
@@ -182,7 +182,7 @@
           <ul>
             <li><code>browser_open</code>, <code>browser_snapshot</code>, <code>browser_click</code>, <code>browser_type</code>, and <code>browser_close</code> use agent-browser inside the sandbox.</li>
             <li>Each run has a distinct browser session. A recreated runtime controller can reattach to that session.</li>
-            <li>Actions may emit a bounded PNG frame. The UI shows it in a minimizable preview with reserved desktop space or a docked mobile layout.</li>
+            <li>Actions may emit a bounded PNG frame. The UI shows it in a run-scoped picture-in-picture preview while the browser is active.</li>
             <li>Frames are action-driven, not continuous video. They are removed from model tool results and are not saved in PostgreSQL or the journal.</li>
           </ul>
         </details>
@@ -195,19 +195,18 @@
           </ul>
         </details>
         <details>
-          <summary>Ask for input and resume<small>Structured questions with a durable waiting state.</small></summary>
+          <summary>Ask blocking questions<small>Normal conversation text with no special protocol.</small></summary>
           <ul>
-            <li><code>ask_user</code> interrupts the graph for one or more sequential questions.</li>
-            <li>Questions support single choice, multiple choice, descriptions, and optional custom answers through the web interface.</li>
-            <li>Answers retain their string or array shape. A matching answer resumes the checkpoint once.</li>
-            <li>Stop remains available while waiting. Cancellation disables the pending question and ends the browser preview.</li>
+            <li>The root agent asks only when missing information materially affects the result or risk, using normal prose or bullets as needed.</li>
+            <li>The question is a normal assistant message and completes the current turn.</li>
+            <li>The user's answer starts a normal subsequent turn with the conversation transcript as context.</li>
           </ul>
         </details>
         <details>
           <summary>Delegate to child agents<small>Bounded task context with model-level controls.</small></summary>
           <ul>
             <li><code>delegate_to_child_agent</code> accepts a task plus optional model, reasoning effort, and speed.</li>
-            <li>Children receive their bounded task, runtime tools, and recursive delegation. They do not receive the root's user-question or plan tools.</li>
+            <li>Children receive their bounded task, runtime tools, and recursive delegation. They do not receive the root's plan tool.</li>
             <li>Stable checkpoint namespaces support recovery without replaying a completed child task. The current depth limit is four child levels.</li>
             <li>Child start/completion activity is visible. A graph editor and richer context/permission policies are not implemented.</li>
           </ul>
@@ -215,7 +214,7 @@
         <details>
           <summary>Continue beyond the current view<small>Background execution, reconnect, and normalized output.</small></summary>
           <ul>
-            <li>Leaving a task detaches the view without cancelling its run. Returning hydrates the active run, plan, and pending question.</li>
+            <li>Leaving a task detaches the view without cancelling its run. Returning hydrates the active run and plan.</li>
             <li>The interface subscribes to the selected run and reconnects using a durable decimal event cursor.</li>
             <li>Text, safe reasoning summaries, searches, runtime tools, and child activity have normalized events. OpenAI also has built-in web search.</li>
             <li>Model selection adapts reasoning and Fast controls for the supported GPT models.</li>
@@ -251,13 +250,10 @@
       <div class="state-flow" role="group" aria-label="Run lifecycle">
         <span class="state">Queued</span><span aria-hidden="true">→</span>
         <span class="state">Running</span><span aria-hidden="true">→</span>
-        <span class="state">Waiting for input</span><span aria-hidden="true">→</span>
-        <span class="state">Running</span><span aria-hidden="true">→</span>
         <span class="state">Completed / Failed / Cancelled</span>
       </div>
-      <p class="meta" style="margin-top:8px">Waiting is optional. Stop can cancel an active or waiting run.</p>
       <div class="rules">
-        <article><h3>Checkpoint decides execution</h3><p>No checkpoint: submit the transcript. Runnable checkpoint: continue existing state. Matching interrupt: resume once. Completed checkpoint: project the result without calling the model again.</p></article>
+        <article><h3>Checkpoint decides execution</h3><p>No checkpoint: submit the transcript. Runnable checkpoint: continue existing state. Completed checkpoint: project the result without calling the model again.</p></article>
         <article><h3>Lease protects persistence</h3><p>The API renews an execution lease. An expired lease can be reclaimed; an old executor cannot write with a stale token. Checkpoint reconciliation replaces stale partial text before new deltas.</p></article>
         <article><h3>Journal protects effects</h3><p>Deterministic operation IDs replay completed results. An ambiguous shell/browser effect requires manual recovery. Cancelled queued work is checked again before dispatch; already-started effects follow provider semantics.</p></article>
       </div>

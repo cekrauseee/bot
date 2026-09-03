@@ -121,7 +121,6 @@ async def _events(
                         "reasoning_effort": body.reasoning_effort,
                         "speed": body.speed,
                         "plan": [step.model_dump(mode="json") for step in body.task_plan],
-                        "resumed": body.resume is not None,
                     },
                 )
             )
@@ -133,7 +132,7 @@ async def _events(
                 return
             event = NormalizedEvent.model_validate(raw_event)
             yield emit(event)
-            if event.type in {"turn.completed", "turn.failed", "user.input_required"}:
+            if event.type in {"turn.completed", "turn.failed"}:
                 terminal = True
                 if event.type == "turn.completed":
                     lifecycle_event(

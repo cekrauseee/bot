@@ -25,7 +25,6 @@ NormalizedEventType = Literal[
     "step.updated",
     "step.completed",
     "plan.updated",
-    "user.input_required",
     "tool.started",
     "tool.updated",
     "tool.completed",
@@ -103,22 +102,6 @@ class Message(BaseModel):
     content: str = Field(min_length=1)
 
 
-class ResumeInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    question_id: str = Field(min_length=1, max_length=200)
-    answer: str | list[str]
-
-    @model_validator(mode="after")
-    def validate_answer(self) -> ResumeInput:
-        if isinstance(self.answer, str):
-            if not self.answer.strip():
-                raise ValueError("answer must not be empty")
-        elif not self.answer or any(not item.strip() for item in self.answer):
-            raise ValueError("answer choices must not be empty")
-        return self
-
-
 class PlanStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -144,7 +127,6 @@ class AgentRequest(BaseModel):
     speed: Speed
     working_directory: str = Field(default="/workspace", max_length=4_096)
     task_plan: list[PlanStep] = Field(default_factory=list, max_length=50)
-    resume: ResumeInput | None = None
 
     @model_validator(mode="after")
     def validate_working_directory(self) -> AgentRequest:

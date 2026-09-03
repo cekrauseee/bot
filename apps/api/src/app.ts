@@ -844,13 +844,6 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   const runParams = t.Object({
     runId: t.String({ format: 'uuid' }),
   })
-  const resumeBody = t.Object({
-    question_id: t.String({ minLength: 1, maxLength: 200 }),
-    answer: t.Union([
-      t.String({ minLength: 1, maxLength: 1_048_576 }),
-      t.Array(t.String({ minLength: 1, maxLength: 1_048_576 }), { minItems: 1, maxItems: 100 }),
-    ]),
-  })
   const projectBody = t.Object({
     name: t.String({ minLength: 1, maxLength: 80 }),
   })
@@ -984,7 +977,6 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     reasoning_effort: run.reasoningEffort,
     speed: run.speed,
     plan: run.plan,
-    pending_question: run.pendingQuestion,
     browser_projection: run.browserProjection,
     last_event_sequence: run.lastEventSequence?.toString() ?? null,
     cancel_requested_at: run.cancelRequestedAt?.toISOString() ?? null,
@@ -1000,7 +992,6 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     status: run.status,
     last_event_sequence: run.lastEventSequence?.toString() ?? null,
     plan: run.plan,
-    pending_question: run.pendingQuestion,
     browser_projection: run.browserProjection,
     model: run.model,
     provider: run.provider,
@@ -1695,33 +1686,6 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       next_sequence: nextCursor,
     }
   }, { params: runParams })
-
-  app.post('/agent-runs/:runId/resume', async ({ request, params, body, set }) => {
-    browserOrigin(request)
-    const user = await sessionUser(request)
-    const answer = body.answer
-    const hasContent = typeof answer === 'string'
-      ? answer.trim().length > 0
-      : answer.every((value) => value.trim().length > 0)
-    if (!hasContent) throw new AuthError('invalid_answer', 'Enter an answer to continue.', 400)
-    const result = await services.database.transaction(async (db) => {
-      const repository = new AgentRunRepository(db)
-      const owned = await repository.getOwned(user.id, params.runId)
-      if (!owned) return { kind: 'missing' as const }
-      const run = await repository.queueResume(user.id, owned.id, body.question_id, answer)
-      return run ? { kind: 'queued' as const, run } : { kind: 'conflict' as const }
-    })
-    if (result.kind === 'missing') {
-      set.status = 404
-      return { detail: { code: 'not_found', message: 'Not Found' } }
-    }
-    if (result.kind === 'conflict') {
-      throw new AuthError('run_not_waiting', 'This run is not waiting for that input.', 409)
-    }
-    agentExecutor.start(result.run.id, requestHeaders(requestIdsFor(request)))
-    set.status = 202
-    return publicRun(result.run)
-  }, { params: runParams, body: resumeBody })
 
   app.post('/agent-runs/:runId/cancel', async ({ request, params, set }) => {
     browserOrigin(request)

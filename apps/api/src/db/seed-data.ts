@@ -1422,10 +1422,9 @@ const processActivities = (
       context,
       risk,
       activity('question', {
-        type: 'tool',
-        action: 'ask_user',
-        target: 'Confirm the implementation boundary',
-        status: 'completed',
+        type: 'trace',
+        kind: 'clarification',
+        label: 'Clarified the implementation boundary',
       }),
       activity('constraint-owner', {
         type: 'trace',

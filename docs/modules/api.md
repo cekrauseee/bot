@@ -16,7 +16,7 @@
 - `src/modules/models.ts`: OpenAI GPT model capability catalog.
 - `src/db`: Drizzle schema, repository, connection, migration, drift checks, and local application seed.
 - `src/email.ts`: React Email composition and Resend delivery.
-- `drizzle`: versioned, non-destructive SQL migrations.
+- `drizzle`: versioned SQL migrations.
 - `tests`: unit and PostgreSQL/Redis integration coverage.
 
 ## Current Contract
@@ -72,7 +72,6 @@ Agent control routes are:
 | `GET` | `/agent-runs` | List the current user's active runs for reload and global tracking |
 | `GET` | `/agent-runs/:runId` | Load one owned run projection |
 | `GET` | `/agent-runs/:runId/events?after=` | Replay a bounded page of durable events |
-| `POST` | `/agent-runs/:runId/resume` | Atomically answer the current question and queue continuation |
 | `POST` | `/agent-runs/:runId/cancel` | Request cancellation without deleting run history |
 | WebSocket | `/agent-runs/:runId/subscribe?after=` | Replay then stream durable events and transient browser frames |
 
@@ -80,9 +79,9 @@ Starting a turn creates a durable run and returns named `text/event-stream` even
 
 While the first run executes, the API requests a title from the separate AI title endpoint. It persists the normalized result and `conversation.title.updated` in one fenced transaction only while `title_updated_at` is null. A manual rename therefore wins every race. Recovery may retry a failed title request, while the conditional update keeps the operation idempotent. Generated titles update `title_updated_at` but not `updated_at`, so they do not reorder Recents.
 
-`GET /agent-runs` returns every queued, running, waiting, or cancelling run owned by the authenticated user plus the current metadata snapshot for each active conversation. The web application merges those snapshots with the conversation catalog by `title_updated_at`, which closes title-update races between the parallel catalog requests. It then rebuilds sidebar pending state and route-independent WebSocket subscriptions without inferring active work from Redis or client memory.
+`GET /agent-runs` returns every queued, running, or cancelling run owned by the authenticated user plus the current metadata snapshot for each active conversation. The web application merges those snapshots with the conversation catalog by `title_updated_at`, which closes title-update races between the parallel catalog requests. It then rebuilds sidebar pending state and route-independent WebSocket subscriptions without inferring active work from Redis or client memory.
 
-The API preserves validated request and correlation IDs in response headers and forwards them to the immediate AI execution, resume, or cancellation attempt. Recovered background work has no originating HTTP request and therefore starts a new logging context inside the worker boundary. Logs exclude prompts, message content, credentials, cookies, and provider reasoning.
+The API preserves validated request and correlation IDs in response headers and forwards them to the immediate AI execution or cancellation attempt. Recovered background work has no originating HTTP request and therefore starts a new logging context inside the worker boundary. Logs exclude prompts, message content, credentials, cookies, and provider reasoning.
 
 Runs may continue after the initiating HTTP connection closes. Conversation detail uses a repeatable-read snapshot so persisted messages and the `active_run` cursor cannot describe different event boundaries. Clients reconnect with that sequence, replay through a fixed high-water mark, and then receive Redis-backed live fanout. PostgreSQL remains authoritative if Redis drops a message. Browser images are validated and fanned out separately without a database insert.
 
@@ -90,9 +89,9 @@ Conversation details expose one current task `plan`, projected from the latest n
 
 Projects expose a stable `workspace_path` through the existing authenticated `GET /projects` and `POST /projects` routes. Creation stores `/workspace/projects/<initial-slug-prefix>-<project-id>` without calling the runtime. Paths use at most 48 Unicode code points from the initial slug and the full project UUID, so renaming preserves references and recreating a deleted project cannot adopt its files. Existing projects receive paths through the non-destructive migration.
 
-Each new run snapshots its owned conversation's project path into `working_directory`, or `/workspace` when unassigned. The executor uses the stored value on every invocation and resume, even if the conversation moves or project metadata changes. The following run uses the conversation's new assignment. Pre-migration runs keep `/workspace` to preserve existing tool effects. Folder selection, file browsing, and project lifecycle UI are outside this change.
+Each new run snapshots its owned conversation's project path into `working_directory`, or `/workspace` when unassigned. The executor uses the stored value throughout that run, even if the conversation moves or project metadata changes. The following run uses the conversation's new assignment. Pre-migration runs keep `/workspace` to preserve existing tool effects. Folder selection, file browsing, and project lifecycle UI are outside this change.
 
-The first AI event contains its LangGraph checkpoint projection. When that checkpoint advanced beyond the API, Elysia replaces stale assistant text, clears a consumed resume value, records the reconciled checkpoint ID, and then applies new deltas. Expired execution leases are reclaimed periodically; stale executors cannot append events or change the assistant.
+The first AI event contains its LangGraph checkpoint projection. When that checkpoint advanced beyond the API, Elysia replaces stale assistant text, records the reconciled checkpoint ID, and then applies new deltas. Expired execution leases are reclaimed periodically; stale executors cannot append events or change the assistant.
 
 Existing-conversation turn requests may include `retry_of`, the UUID of the latest failed assistant message. Under the owning conversation lock, the API verifies that the prompt matches its preceding user message and that no turn is streaming. It resets and reuses that assistant row, keeping the user message once. Older, completed, mismatched, or already-running attempts return 409; another user's conversation returns 404. New-conversation requests cannot include `retry_of`.
 
@@ -102,4 +101,4 @@ Existing-conversation turn requests may include `retry_of`, the UUID of the late
 
 ## Database Compatibility
 
-Drizzle owns the schema and migration workflow. After the conversation pin/title and project-order migrations, `0005_lyrical_captain_britain` adds one global workspace per user, durable runs, and append-only events. `0006_yellow_scorpion` adds immutable project workspace paths and frozen run working directories. `0007_crazy_maginty` permits retry attempts to create separate run histories while reusing the failed assistant message. `0010_noisy_korvac` adds the per-user, per-provider activation state. These migrations are non-destructive and preserve existing conversation ownership. Migration checks verify the complete relational contract before delivery.
+Drizzle owns the schema and migration workflow. After the conversation pin/title and project-order migrations, `0005_lyrical_captain_britain` adds one global workspace per user, durable runs, and append-only events. `0006_yellow_scorpion` adds immutable project workspace paths and frozen run working directories. `0007_crazy_maginty` permits retry attempts to create separate run histories while reusing the failed assistant message. `0010_noisy_korvac` adds the per-user, per-provider activation state. `0014_lively_darkstar` removes the obsolete structured-question columns. Migration checks verify the complete relational contract before delivery.

@@ -1,5 +1,9 @@
 import { apiBaseUrl } from "@/lib/api"
 import type { TurnStreamEvent } from "@/features/composer/api"
+import {
+  type BrowserFrame,
+  type BrowserProjection,
+} from "@/features/conversation/model"
 
 const eventTypes = new Set([
   "turn.started",
@@ -10,7 +14,6 @@ const eventTypes = new Set([
   "step.completed",
   "plan.updated",
   "conversation.title.updated",
-  "user.input_required",
   "tool.started",
   "tool.updated",
   "tool.completed",
@@ -19,11 +22,7 @@ const eventTypes = new Set([
   "turn.completed",
   "turn.failed",
 ])
-const terminalTypes = new Set([
-  "turn.completed",
-  "turn.failed",
-  "user.input_required",
-])
+const terminalTypes = new Set(["turn.completed", "turn.failed"])
 const sequencePattern = /^(0|[1-9]\d*)$/
 const maximumSequence = 9_223_372_036_854_775_807n
 
@@ -32,11 +31,12 @@ export type ActiveRun = {
   conversation_id: string
   turn_id?: string
   last_event_sequence?: string | null
+  browserProjection?: BrowserProjection | null
 }
 
 export type RunSubscriptionMessage =
   | { kind: "event"; event: TurnStreamEvent & { sequence: string } }
-  | { kind: "transient"; runId: string }
+  | { kind: "transient"; frame: BrowserFrame; runId: string }
 
 export function parseEventSequence(value: unknown): bigint {
   if (typeof value !== "string" || !sequencePattern.test(value))
@@ -51,6 +51,57 @@ const object = (value: unknown): Record<string, unknown> | null =>
     ? (value as Record<string, unknown>)
     : null
 
+export function parseBrowserFrame(value: unknown): BrowserFrame | null {
+  const frame = object(value)
+  if (
+    !frame ||
+    typeof frame.base64 !== "string" ||
+    frame.base64.length === 0 ||
+    frame.base64.length > 2_000_000
+  )
+    return null
+  if (frame.mime_type !== "image/png" && frame.mime_type !== "image/jpeg")
+    return null
+  if (
+    typeof frame.captured_at !== "string" ||
+    frame.captured_at.length === 0 ||
+    frame.captured_at.length > 100
+  )
+    return null
+  return {
+    base64: frame.base64,
+    mimeType: frame.mime_type,
+    capturedAt: frame.captured_at,
+  }
+}
+
+export function parseBrowserProjection(
+  value: unknown
+): BrowserProjection | null {
+  const projection = object(value)
+  if (
+    !projection ||
+    !["launching", "live", "awaiting_user", "stopped", "failed"].includes(
+      String(projection.state)
+    )
+  )
+    return null
+  if (!["agent", "user", "locked"].includes(String(projection.control)))
+    return null
+  return {
+    state: projection.state as BrowserProjection["state"],
+    control: projection.control as BrowserProjection["control"],
+    ...(typeof projection.url === "string" ? { url: projection.url } : {}),
+    ...(typeof projection.message === "string"
+      ? { message: projection.message }
+      : {}),
+    ...(projection.leaseExpiresAt === null ||
+    typeof projection.leaseExpiresAt === "string"
+      ? { leaseExpiresAt: projection.leaseExpiresAt }
+      : {}),
+  }
+}
+
 export function parseRunSocketMessage(value: unknown): RunSubscriptionMessage {
   if (typeof value !== "string") throw new Error("Invalid run event.")
   let parsed: unknown
@@ -63,8 +114,11 @@ export function parseRunSocketMessage(value: unknown): RunSubscriptionMessage {
   const data = object(message?.data)
   if (message?.version !== 2 || typeof message.run_id !== "string" || !data)
     throw new Error("Invalid run event.")
-  if (message.type === "browser.frame")
-    return { kind: "transient", runId: message.run_id }
+  if (message.type === "browser.frame") {
+    const frame = parseBrowserFrame(data)
+    if (!frame) throw new Error("Invalid browser frame.")
+    return { kind: "transient", frame, runId: message.run_id }
+  }
   if (
     typeof message.turn_id !== "string" ||
     typeof message.type !== "string" ||
@@ -102,6 +156,7 @@ type SubscriptionOptions = {
   runId: string
   turnId?: string
   onEvent: (event: TurnStreamEvent) => void
+  onFrame?: (frame: BrowserFrame, runId: string) => void
   onTerminal?: (event: TurnStreamEvent) => void
   onResync: () => void
 }
@@ -111,6 +166,7 @@ export function subscribeToRun({
   runId,
   turnId,
   onEvent,
+  onFrame,
   onTerminal,
   onResync,
 }: SubscriptionOptions) {
@@ -164,7 +220,10 @@ export function subscribeToRun({
         )
           throw new Error("Invalid run event.")
         attempt = 0
-        if (parsed.kind === "transient") return
+        if (parsed.kind === "transient") {
+          onFrame?.(parsed.frame, parsed.runId)
+          return
+        }
         const event = parsed.event
         if (event.sequence && BigInt(event.sequence) <= cursor) return
         if (expectedTurn && event.turn_id !== expectedTurn)
@@ -213,6 +272,17 @@ export function parseActiveRun(value: unknown): ActiveRun | null {
     ...(typeof run.turn_id === "string" ? { turn_id: run.turn_id } : {}),
     ...(run.last_event_sequence !== undefined
       ? { last_event_sequence: run.last_event_sequence as string | null }
+      : {}),
+    ...(run.browser_projection !== undefined
+      ? {
+          browserProjection:
+            run.browser_projection === null
+              ? null
+              : (parseBrowserProjection(run.browser_projection) ??
+                (() => {
+                  throw new Error("Invalid active browser projection.")
+                })()),
+        }
       : {}),
   }
 }

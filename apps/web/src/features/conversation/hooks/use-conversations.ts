@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { conversationApi } from "@/features/conversation/api"
 import {
   applyTurnEvent,
+  applyBrowserFrame,
   consumeTurnSpacerAnchor,
   emptyConversationRecord,
   markRunStopRequested,
@@ -147,6 +148,15 @@ export function useConversations(
             )
             if (conversation) onConversationTitle?.(conversation)
           }
+        },
+        onFrame: (frame, frameRunId) => {
+          setRecords((state) => {
+            const current = state[conversationId] ?? emptyConversationRecord()
+            const next = applyBrowserFrame(current, frame, frameRunId)
+            return next === current
+              ? state
+              : { ...state, [conversationId]: next }
+          })
         },
         onTerminal: () => {
           subscriptions.current.delete(conversationId)

@@ -67,7 +67,6 @@ export const agentEventTypes = [
   'step.completed',
   'plan.updated',
   'conversation.title.updated',
-  'user.input_required',
   'tool.started',
   'tool.updated',
   'tool.completed',
@@ -103,7 +102,7 @@ const providerEventTypes = new Set<string>([
   ...agentEventTypes.filter((type) => type !== 'conversation.title.updated'),
   'browser.frame',
 ])
-const terminalTypes = new Set<AgentEventType>(['turn.completed', 'turn.failed', 'user.input_required'])
+const terminalTypes = new Set<AgentEventType>(['turn.completed', 'turn.failed'])
 
 function validBrowserFrame(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
@@ -381,18 +380,13 @@ const appendReasoningActivity = (
   })
 }
 
-const questionProjection = (data: Record<string, unknown>) =>
-  plainRecord(data.question) ?? data
-
 const browserProjection = (data: Record<string, unknown>) =>
   plainRecord(data.browser) ?? plainRecord(data.browser_projection)
 
 type CheckpointProjection = {
   id: string
-  phase: 'runnable' | 'interrupted' | 'completed'
+  phase: 'runnable' | 'completed'
   content: string
-  pendingQuestion?: Record<string, unknown>
-  resumeConsumed: boolean
 }
 
 const checkpointProjection = (data: Record<string, unknown>): CheckpointProjection | undefined => {
@@ -401,20 +395,13 @@ const checkpointProjection = (data: Record<string, unknown>): CheckpointProjecti
   const phase = checkpoint.phase
   if (
     typeof checkpoint.id !== 'string' || !checkpoint.id ||
-    (phase !== 'runnable' && phase !== 'interrupted' && phase !== 'completed') ||
-    typeof checkpoint.content !== 'string' ||
-    typeof checkpoint.resume_consumed !== 'boolean'
+    (phase !== 'runnable' && phase !== 'completed') ||
+    typeof checkpoint.content !== 'string'
   ) return undefined
-  const pendingQuestion = checkpoint.pending_question === null
-    ? undefined
-    : plainRecord(checkpoint.pending_question)
-  if (checkpoint.pending_question !== null && !pendingQuestion) return undefined
   return {
     id: checkpoint.id,
     phase,
     content: checkpoint.content,
-    ...(pendingQuestion ? { pendingQuestion } : {}),
-    resumeConsumed: checkpoint.resume_consumed,
   }
 }
 
@@ -591,8 +578,7 @@ export class AgentRunExecutor {
       error: { code: 'cancelled', message: 'Turn cancelled.', retryable: false },
     }, {
       status: 'cancelled',
-      pendingQuestion: null,
-      resumeInput: null,
+      browserProjection: null,
       leaseExpiresAt: null,
       completedAt: new Date(),
     }, {
@@ -700,7 +686,6 @@ export class AgentRunExecutor {
       const activities = Array.isArray(state.assistant.activities)
         ? [...state.assistant.activities] as Array<Record<string, unknown>>
         : []
-      const resume = plainRecord(run.resumeInput)
       const response = await this.ai({
         version: 2,
         run_id: run.id,
@@ -717,7 +702,6 @@ export class AgentRunExecutor {
         model: run.model,
         reasoning_effort: run.reasoningEffort,
         speed: run.speed,
-        ...(resume ? { resume } : {}),
       }, controller.signal, headers)
       if (!response.ok || !response.body) throw new Error('provider_unavailable')
 
@@ -744,13 +728,9 @@ export class AgentRunExecutor {
           const checkpoint = checkpointProjection(event.data)
           if (!checkpoint) return
           content = checkpoint.content
-          if (
-            checkpoint.id === run.reconciledCheckpointId &&
-            !checkpoint.resumeConsumed
-          ) return
+          if (checkpoint.id === run.reconciledCheckpointId) return
           await this.persist(run, event.type, event.data, {
             reconciledCheckpointId: checkpoint.id,
-            ...(checkpoint.resumeConsumed ? { resumeInput: null } : {}),
           }, {
             content,
             reasoning: reasoning || null,
@@ -770,24 +750,12 @@ export class AgentRunExecutor {
         }
         upsertActivity(activities, event.type, data)
 
-        if (event.type === 'user.input_required') {
-          terminal = event.type
-          await titleTask
-          await this.persist(run, event.type, data, {
-            status: 'waiting',
-            pendingQuestion: questionProjection(data),
-            resumeInput: null,
-            leaseExpiresAt: null,
-          }, { content, reasoning: reasoning || null, activities, status: 'waiting', errorMessage: null })
-          return
-        }
         if (event.type === 'turn.completed') {
           terminal = event.type
           await titleTask
           await this.persist(run, event.type, data, {
             status: 'completed',
-            pendingQuestion: null,
-            resumeInput: null,
+            browserProjection: null,
             leaseExpiresAt: null,
             completedAt: new Date(),
           }, { content, reasoning: reasoning || null, activities, status: 'completed', errorMessage: null })
@@ -806,8 +774,7 @@ export class AgentRunExecutor {
             },
           }, {
             status: 'failed',
-            pendingQuestion: null,
-            resumeInput: null,
+            browserProjection: null,
             leaseExpiresAt: null,
             completedAt: new Date(),
           }, {
@@ -836,10 +803,6 @@ export class AgentRunExecutor {
           if (event.type !== 'browser.frame' && terminalTypes.has(event.type)) break read
         }
       }
-      if (terminal === 'user.input_required') {
-        await reader.cancel().catch(() => undefined)
-        return
-      }
       pending += decoder.decode()
       if (pending.trim() || !terminal) throw new Error('truncated_provider_stream')
     } catch (error) {
@@ -852,8 +815,6 @@ export class AgentRunExecutor {
           error: { code: 'provider_error', message: 'Unable to complete this turn.', retryable: true },
         }, {
           status: 'failed',
-          pendingQuestion: null,
-          resumeInput: null,
           leaseExpiresAt: null,
           completedAt: new Date(),
         }, {

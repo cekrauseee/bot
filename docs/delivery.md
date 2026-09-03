@@ -82,10 +82,12 @@ authentication, event envelopes, operation identifiers, working directories,
 and failure/recovery behavior across their boundaries.
 
 Apply and verify database migrations with the application changes. Drizzle
-migrations are versioned and non-destructive; use `npm run db:migrate` and
-`npm run db:check` for the local database contract, and include migration
-history in the Change map and Verification sections. Do not treat a fixture or
-fake provider as proof that a live dependency is configured or compatible.
+migrations are versioned and should be non-destructive by default. Destructive
+migrations require explicit owner authorization and are limited to development
+or an approved rollout plan. Use `npm run db:migrate` and `npm run db:check`
+for the local database contract, and include migration history in the Change
+map and Verification sections. Do not treat a fixture or fake provider as proof
+that a live dependency is configured or compatible.
 
 After the aggregate tree is complete and fully verified, keep the aggregate PR
 open for owner review. The owner decides when it is ready to merge into the

@@ -20,6 +20,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import type { ProcessActivity } from "@/features/conversation/model"
+import type { BrowserProjection } from "@/features/conversation/model"
 import {
   groupProcessActivities,
   processActivityGroupLabel,
@@ -102,7 +103,6 @@ function ToolIcon({ action }: { action: string }) {
     return <SquareTerminalIcon />
   }
   if (normalized.startsWith("browser_")) return <Globe2Icon />
-  if (normalized === "ask_user") return <MessageSquareIcon />
   return <WrenchIcon />
 }
 
@@ -315,21 +315,42 @@ function ProcessActivityRow({ activity }: { activity: ProcessActivity }) {
 }
 
 function ProcessActivityGroup({
+  browserActive,
   defaultOpen,
   item,
 }: {
+  browserActive: boolean
   defaultOpen: boolean
   item: Extract<ProcessActivityItem, { type: "group" }>
 }) {
-  const label = processActivityGroupLabel(item.family, item.activities)
+  const label = processActivityGroupLabel(
+    item.family,
+    item.activities,
+    browserActive
+  )
+  const last = item.activities.at(-1)
+  const active =
+    browserActive ||
+    ((last?.type === "tool" ||
+      last?.type === "search" ||
+      last?.type === "trace") &&
+      last.status === "in_progress")
 
   return (
-    <Collapsible defaultOpen={defaultOpen} className="flex min-w-0 flex-col">
+    <Collapsible
+      defaultOpen={item.family === "browser" ? false : defaultOpen}
+      className="flex min-w-0 flex-col"
+    >
       <CollapsibleTrigger className="group/activity-group -ms-1 flex min-h-6 max-w-full min-w-0 items-center gap-2 rounded-md px-1 text-start leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background data-[panel-open]:[&_.activity-group-chevron]:rotate-90">
         <ActivityIcon>
           <GroupIcon family={item.family} />
         </ActivityIcon>
-        <span className="min-w-0 truncate text-muted-foreground">
+        <span
+          className={cn(
+            "min-w-0 truncate text-muted-foreground",
+            active && "shimmer"
+          )}
+        >
           {label}
         </span>
         <ChevronRightIcon
@@ -355,14 +376,19 @@ function ProcessActivityGroup({
 
 export function ProcessActivityList({
   activities,
+  browserProjection,
   className,
   defaultGroupsOpen = false,
 }: {
   activities: readonly ProcessActivity[]
+  browserProjection?: BrowserProjection | null
   className?: string
   defaultGroupsOpen?: boolean
 }) {
   const items = groupProcessActivities(activities)
+  const browserActive = ["launching", "live", "awaiting_user"].includes(
+    browserProjection?.state ?? ""
+  )
 
   return (
     <ol
@@ -375,7 +401,11 @@ export function ProcessActivityList({
           className="min-w-0"
         >
           {item.type === "group" ? (
-            <ProcessActivityGroup defaultOpen={defaultGroupsOpen} item={item} />
+            <ProcessActivityGroup
+              browserActive={browserActive && item.family === "browser"}
+              defaultOpen={defaultGroupsOpen}
+              item={item}
+            />
           ) : (
             <ProcessActivityRow activity={item.activity} />
           )}
