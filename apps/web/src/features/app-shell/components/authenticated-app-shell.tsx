@@ -53,6 +53,7 @@ export function AuthenticatedAppShell({
   const catalog = useSidebarCatalog(true)
   const {
     activeRecord: activeConversationRecord,
+    activeTurnConversationId,
     applyEvent: applyConversationEvent,
     consumeTurnSpacerAnchor,
     loadConversation,
@@ -236,6 +237,7 @@ export function AuthenticatedAppShell({
           user={user}
           catalog={catalog}
           activeConversationId={activeConversationId}
+          activeTurnConversationId={activeTurnConversationId}
           isDesktop={isDesktop}
           onConversationSelect={onConversationSelect}
           onSignOut={() => void handleSignOut()}

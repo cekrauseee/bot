@@ -26,6 +26,7 @@ import type { User } from "@/features/auth/api"
 
 type AppSidebarProps = {
   activeConversationId: string | null
+  activeTurnConversationId: string | null
   catalog: SidebarCatalogController
   isDesktop: boolean
   onConversationSelect: (conversationId: string | null) => void
@@ -50,6 +51,7 @@ const swappedIds = <T extends { id: string }>(
 
 export function AppSidebar({
   activeConversationId,
+  activeTurnConversationId,
   catalog,
   isDesktop,
   onConversationSelect,
@@ -140,6 +142,7 @@ export function AppSidebar({
       conversation={conversation}
       projects={projects}
       active={activeConversationId === conversation.id}
+      turnActive={activeTurnConversationId === conversation.id}
       pending={catalog.isPending("conversation", conversation.id)}
       onSelect={() => onConversationSelect(conversation.id)}
       onRename={(title) => catalog.renameConversation(conversation.id, title)}

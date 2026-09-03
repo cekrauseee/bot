@@ -23,6 +23,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Spinner } from "@/components/ui/spinner"
 import {
   SidebarMenuAction,
   SidebarMenuButton,
@@ -51,6 +52,7 @@ type SidebarConversationRowProps = {
   pending: boolean
   projects: ProjectSummary[]
   nested?: boolean
+  turnActive: boolean
 }
 
 export function SidebarConversationRow({
@@ -66,6 +68,7 @@ export function SidebarConversationRow({
   pending,
   projects,
   nested = false,
+  turnActive,
 }: SidebarConversationRowProps) {
   const { isMobile, setOpenMobile } = useSidebar()
   const [editing, setEditing] = useState(false)
@@ -107,7 +110,11 @@ export function SidebarConversationRow({
   }
 
   return (
-    <SidebarMenuItem className="overflow-hidden rounded-md group-data-[collapsible=icon]:hidden">
+    <SidebarMenuItem
+      aria-busy={turnActive || undefined}
+      className="overflow-hidden rounded-md group-data-[collapsible=icon]:hidden"
+      data-turn-active={turnActive || undefined}
+    >
       <SidebarMenuButton
         className={cn(
           "group-has-data-[sidebar=menu-action]/menu-item:pr-14 md:group-has-data-[sidebar=menu-action]/menu-item:pr-2",
@@ -121,8 +128,21 @@ export function SidebarConversationRow({
           if (isMobile) setOpenMobile(false)
         }}
       >
-        <SidebarScrollingTitle title={conversation.title} />
+        <SidebarScrollingTitle
+          title={conversation.title}
+          shimmer={turnActive}
+        />
       </SidebarMenuButton>
+
+      {turnActive && (
+        <span
+          aria-hidden="true"
+          data-slot="sidebar-turn-spinner"
+          className="pointer-events-none absolute top-1.5 right-1 z-10 hidden size-5 items-center justify-center text-sidebar-foreground transition-opacity duration-100 md:flex"
+        >
+          <Spinner />
+        </span>
+      )}
 
       <div
         aria-hidden="true"

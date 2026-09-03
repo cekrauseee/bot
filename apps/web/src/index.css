@@ -167,6 +167,16 @@
   opacity: 1;
 }
 
+[data-sidebar="menu-item"]:hover > [data-slot="sidebar-turn-spinner"],
+[data-sidebar="menu-item"]:has(> [data-sidebar="menu-action"]:focus-visible)
+  > [data-slot="sidebar-turn-spinner"],
+[data-sidebar="menu-item"]:has(
+    > [data-sidebar="menu-action"][aria-expanded="true"]
+  )
+  > [data-slot="sidebar-turn-spinner"] {
+  opacity: 0;
+}
+
 .sidebar-title-static,
 .sidebar-title-marquee {
   transition: none;
@@ -233,6 +243,10 @@
 
   [data-slot="sidebar-gap"],
   [data-slot="sidebar-container"] {
+    transition-duration: 0s;
+  }
+
+  [data-slot="sidebar-turn-spinner"] {
     transition-duration: 0s;
   }
 }

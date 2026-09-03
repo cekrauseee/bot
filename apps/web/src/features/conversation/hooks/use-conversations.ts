@@ -127,6 +127,10 @@ export function useConversations(activeConversationId: string | null) {
     activeRecord: activeConversationId
       ? (records[activeConversationId] ?? idleRecord)
       : null,
+    activeTurnConversationId:
+      Object.entries(records).find(
+        ([, record]) => record.activeAssistantId !== undefined
+      )?.[0] ?? null,
     applyEvent,
     consumeTurnSpacerAnchor: consumeSpacerAnchor,
     loadConversation,
