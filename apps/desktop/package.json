@@ -8,8 +8,8 @@
   "scripts": {
     "build": "node scripts/clean-dist.mjs && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "predev": "npm run icons:build --workspace=@my-bot/desktop && node scripts/build-public-config.mjs && npm run build --workspace=@my-bot/web",
-    "dev": "npm run build && electron-forge start",
+    "predev": "npm run icons:build --workspace=@my-bot/desktop && node scripts/build-public-config.mjs",
+    "dev": "node scripts/dev.mjs",
     "icons:build": "node scripts/build-icons.mjs",
     "package": "npm run build && electron-forge package",
     "make": "npm run build && electron-forge make"

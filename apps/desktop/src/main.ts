@@ -26,6 +26,8 @@ const API_ORIGIN = httpOrigin(String(publicConfig.VITE_API_BASE_URL ?? ''), 'VIT
 const WEB_ORIGIN = httpOrigin(String(publicConfig.WEB_BASE_URL ?? ''), 'WEB_BASE_URL')
 const WS_API_ORIGIN = API_ORIGIN.replace(/^http/, 'ws')
 const APP_ORIGIN = 'app://mybot'
+const RENDERER_ORIGIN = app.isPackaged ? APP_ORIGIN : WEB_ORIGIN
+const WS_RENDERER_ORIGIN = WEB_ORIGIN.replace(/^http/, 'ws')
 const DEEP_LINK_SCHEME = 'mybot'
 const DEEP_LINK_PREFIX = `${DEEP_LINK_SCHEME}://auth/callback`
 const SESSION_FILE = 'desktop-session.bin'
@@ -179,7 +181,7 @@ async function startBrowserSignIn() {
 
 async function showDesktopAuthError() {
   if (!mainWindow) await createWindow()
-  await mainWindow?.loadURL(`${APP_ORIGIN}/sign?desktop=error`)
+  await mainWindow?.loadURL(`${RENDERER_ORIGIN}/sign?desktop=error`)
   focusMainWindow()
 }
 
@@ -208,7 +210,7 @@ async function handleDesktopCallback(value: string) {
     await storeSession(exchanged.token)
     await clearPendingDesktopAuth()
     if (!mainWindow) await createWindow()
-    else await mainWindow.loadURL(`${APP_ORIGIN}/`)
+    else await mainWindow.loadURL(`${RENDERER_ORIGIN}/`)
     focusMainWindow()
   } catch {
     await clearPendingDesktopAuth()
@@ -243,9 +245,11 @@ function installSessionBoundary() {
     if (sessionToken && validApiRequest(details.url)) details.requestHeaders.Authorization = `Bearer ${sessionToken}`
     callback({ requestHeaders: details.requestHeaders })
   })
-  session.defaultSession.webRequest.onHeadersReceived({ urls: [`${APP_ORIGIN}/*`] }, (details, callback) => {
+  session.defaultSession.webRequest.onHeadersReceived({ urls: [`${RENDERER_ORIGIN}/*`] }, (details, callback) => {
     const responseHeaders = details.responseHeaders ?? {}
-    responseHeaders['Content-Security-Policy'] = [`default-src 'self'; connect-src 'self' ${API_ORIGIN} ${WS_API_ORIGIN}; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`]
+    const developmentConnectSource = app.isPackaged ? '' : ` ${WS_RENDERER_ORIGIN}`
+    const developmentScriptSource = app.isPackaged ? '' : " 'unsafe-inline'"
+    responseHeaders['Content-Security-Policy'] = [`default-src 'self'; connect-src 'self' ${API_ORIGIN} ${WS_API_ORIGIN}${developmentConnectSource}; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'${developmentScriptSource}; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`]
     callback({ responseHeaders })
   })
 }
@@ -263,10 +267,10 @@ async function createWindow() {
     return { action: 'deny' }
   })
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    if (!url.startsWith(`${APP_ORIGIN}/`)) { event.preventDefault(); if (validExternalUrl(url)) void shell.openExternal(url) }
+    if (!url.startsWith(`${RENDERER_ORIGIN}/`)) { event.preventDefault(); if (validExternalUrl(url)) void shell.openExternal(url) }
   })
   mainWindow.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
-  await mainWindow.loadURL(`${APP_ORIGIN}/`)
+  await mainWindow.loadURL(`${RENDERER_ORIGIN}/`)
 }
 
 registerDeepLinkHandler()
