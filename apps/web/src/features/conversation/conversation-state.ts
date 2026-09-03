@@ -199,6 +199,18 @@ export function parseProcessActivity(value: unknown): ProcessActivity | null {
     }
   }
 
+  if (activity.type === "skill" && typeof activity.name === "string") {
+    return {
+      id,
+      type: "skill",
+      name: activity.name,
+      ...(string(activity.detail) ? { detail: string(activity.detail) } : {}),
+      ...(activityStatus(activity.status)
+        ? { status: activityStatus(activity.status) }
+        : {}),
+    }
+  }
+
   if (activity.type === "trace") {
     return {
       id,
@@ -213,6 +225,19 @@ export function parseProcessActivity(value: unknown): ProcessActivity | null {
   }
 
   const eventType = string(activity.event_type)
+  if (eventType?.startsWith("skill.")) {
+    return {
+      id,
+      type: "skill",
+      name: string(activity.name) ?? string(activity.label) ?? "a skill",
+      ...(string(activity.detail) ? { detail: string(activity.detail) } : {}),
+      ...(activityStatus(activity.status)
+        ? { status: activityStatus(activity.status) }
+        : {
+            status: eventType === "skill.started" ? "in_progress" : "completed",
+          }),
+    }
+  }
   if (eventType?.startsWith("tool.")) {
     return {
       id,
@@ -420,6 +445,9 @@ function mergeActivity(
   if (current.type === "tool" && next.type === "tool") {
     return { ...current, ...next }
   }
+  if (current.type === "skill" && next.type === "skill") {
+    return { ...current, ...next }
+  }
   if (current.type === "trace" && next.type === "trace") {
     return { ...current, ...next }
   }
@@ -431,9 +459,11 @@ function eventActivity(event: TurnStreamEvent): ProcessActivity | null {
     ? "step"
     : event.type.startsWith("tool.")
       ? "tool"
-      : event.type.startsWith("child.")
-        ? "child"
-        : null
+      : event.type.startsWith("skill.")
+        ? "skill"
+        : event.type.startsWith("child.")
+          ? "child"
+          : null
   const raw = key ? record(event.data[key]) : null
   const id = string(raw?.id)
   if (!raw || !id) return null
@@ -465,6 +495,20 @@ function eventActivity(event: TurnStreamEvent): ProcessActivity | null {
       ...(activityStatus(raw.status)
         ? { status: activityStatus(raw.status) }
         : {}),
+    }
+  }
+  if (key === "skill") {
+    return {
+      id,
+      type: "skill",
+      name: string(raw.name) ?? string(raw.label) ?? "a skill",
+      ...(string(raw.detail) ? { detail: string(raw.detail) } : {}),
+      ...(activityStatus(raw.status)
+        ? { status: activityStatus(raw.status) }
+        : {
+            status:
+              event.type === "skill.started" ? "in_progress" : "completed",
+          }),
     }
   }
   if (key === "child") {

@@ -7,6 +7,7 @@ import {
   isProcessFamilyDefaultOpen,
   processActivityGroupLabel,
   processSearchCopy,
+  processSkillCopy,
   processToolCopy,
 } from "@/features/conversation/process-activity-model"
 
@@ -110,6 +111,33 @@ describe("process activity model", () => {
     expect(processActivityGroupLabel("files-read", [tool("a", "read")])).toBe(
       "Read files"
     )
+  })
+
+  it("groups skill lifecycle items and gives them human-readable copy", () => {
+    const activities: ProcessActivity[] = [
+      { id: "s1", name: "calendar", status: "in_progress", type: "skill" },
+      { id: "s2", name: "weather", status: "completed", type: "skill" },
+    ]
+    expect(groupProcessActivities(activities)[0]).toMatchObject({
+      family: "skills",
+      type: "group",
+    })
+    expect(
+      processSkillCopy(
+        activities[0] as Extract<ProcessActivity, { type: "skill" }>
+      )
+    ).toEqual({
+      label: "Loading skill",
+      detail: undefined,
+    })
+    expect(processActivityGroupLabel("skills", activities)).toBe(
+      "Loaded skills"
+    )
+    expect(
+      processActivityGroupLabel("skills", [
+        { id: "s3", name: "calendar", status: "in_progress", type: "skill" },
+      ])
+    ).toBe("Loading skills")
   })
 
   it("shows a safe failure detail for a failed tool", () => {

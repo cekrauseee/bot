@@ -17,6 +17,8 @@ const eventTypes = new Set([
   "tool.started",
   "tool.updated",
   "tool.completed",
+  "skill.started",
+  "skill.completed",
   "child.started",
   "child.completed",
   "turn.completed",

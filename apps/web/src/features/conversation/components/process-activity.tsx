@@ -8,6 +8,7 @@ import {
   MessageSquareIcon,
   PencilLineIcon,
   SearchIcon,
+  SparklesIcon,
   SquareTerminalIcon,
   WaypointsIcon,
   WrenchIcon,
@@ -36,6 +37,7 @@ import {
   processActivityGroupLabel,
   processSearchCopy,
   processToolCopy,
+  processSkillCopy,
   type ProcessActivityFamily,
   type ProcessActivityItem,
 } from "@/features/conversation/process-activity-model"
@@ -131,6 +133,7 @@ const GROUP_ICONS: Record<ProcessActivityFamily, LucideIcon> = {
   "files-read": FileTextIcon,
   "files-updated": PencilLineIcon,
   "web-search": SearchIcon,
+  skills: SparklesIcon,
 }
 
 const TRACE_ICONS: Record<string, LucideIcon> = {
@@ -315,6 +318,22 @@ function ProcessActivityRow({ activity }: { activity: ProcessActivity }) {
 
   if (activity.type === "search") {
     return <SearchActivityRow activity={activity} />
+  }
+
+  if (activity.type === "skill") {
+    const copy = processSkillCopy(activity)
+    return (
+      <ActivityRow
+        icon={<SparklesIcon />}
+        label={copy.label}
+        detail={<span className="font-mono text-xs">{activity.name}</span>}
+        separator="space"
+        active={isProcessActivityActive(activity)}
+        title={[copy.label, activity.name, activity.detail]
+          .filter(Boolean)
+          .join(" · ")}
+      />
+    )
   }
 
   if (activity.type === "tool") {
