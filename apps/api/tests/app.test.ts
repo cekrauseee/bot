@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import net from 'node:net'
 import { createApp } from '../src/app.js'
 import { loadSettings } from '../src/config.js'
 import { signValue } from '../src/security.js'
@@ -349,5 +350,49 @@ describe('HTTP contract', () => {
     const response = await app.handle(new Request('http://localhost/auth/session'))
     expect(response.status).toBe(401)
     expect(await response.json()).toEqual({ detail: { code: 'unauthorized', message: 'Sign in to continue.' } })
+  })
+
+  it('survives an aborted WebSocket upgrade while authentication is pending', async () => {
+    const dependencies = {
+      ...services,
+      database: {
+        transaction: vi.fn(async (callback: (db: unknown) => Promise<unknown>) => callback({})),
+      },
+      sessions: {
+        ...services.sessions,
+        resolve: vi.fn(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 50))
+          return undefined
+        }),
+      },
+    }
+    const app = createApp(settings, dependencies as any)
+    const server = await new Promise<any>((resolve) => app.listen({ port: 0, hostname: '127.0.0.1' }, resolve))
+    try {
+      const nodeServer = server.node.server
+      if (!nodeServer.listening) await new Promise((resolve: (value?: unknown) => void) => nodeServer.once('listening', resolve))
+      const address = nodeServer.address() as { port: number }
+      const socket = net.connect(address.port, '127.0.0.1', () => {
+        socket.write([
+          'GET /agent-runs/subscribe HTTP/1.1',
+          `Host: 127.0.0.1:${address.port}`,
+          'Connection: Upgrade',
+          'Upgrade: websocket',
+          'Sec-WebSocket-Version: 13',
+          'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+          `Origin: ${settings.webOrigin}`,
+          '',
+          '',
+        ].join('\r\n'))
+        setTimeout(() => socket.destroy(), 10)
+      })
+      socket.on('error', () => undefined)
+
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      const health = await fetch(`http://127.0.0.1:${address.port}/health`)
+      expect(health.status).toBe(200)
+    } finally {
+      await server.stop()
+    }
   })
 })

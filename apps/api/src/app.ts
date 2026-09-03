@@ -80,7 +80,18 @@ export type Services = {
 export type PeerResolver = (request: Request) => string | undefined
 
 type NodeRequest = Request & {
-  runtime?: { node?: { req?: { socket?: { remoteAddress?: string } } } }
+  runtime?: {
+    node?: {
+      req?: {
+        socket?: {
+          remoteAddress?: string
+          on(event: 'error', listener: (error: Error) => void): void
+          once(event: 'close', listener: () => void): void
+          off(event: 'error', listener: (error: Error) => void): void
+        }
+      }
+    }
+  }
 }
 
 /** Resolve the actual TCP peer supplied by @elysiajs/node's request adapter. */
@@ -541,7 +552,24 @@ const publicProviderConnection = (connection: ProviderConnection, active: boolea
 export function createApp(settings: Settings, services: Services, peerResolver: PeerResolver = nodeSocketPeer) {
   const requestBodyProfiles = new WeakMap<Request, JsonBodyProfile>()
   const requestContexts = new WeakMap<Request, RequestContext>()
+  const guardedUpgradeSockets = new WeakSet<object>()
   const logger = createLogger(settings)
+  const guardUpgradeSocket = (request: Request) => {
+    if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') return
+    const socket = (request as NodeRequest).runtime?.node?.req?.socket
+    if (!socket || guardedUpgradeSockets.has(socket)) return
+    guardedUpgradeSockets.add(socket)
+
+    // crossws writes rejected upgrade responses directly to the raw Node socket.
+    // If the client disconnects while an async hook is running, that write emits
+    // EPIPE without a library-owned listener and would otherwise terminate Node.
+    const absorbTransportError = () => undefined
+    socket.on('error', absorbTransportError)
+    socket.once('close', () => {
+      socket.off('error', absorbTransportError)
+      guardedUpgradeSockets.delete(socket)
+    })
+  }
   const completeRequest = (
     context: RequestContext,
     request: Request,
@@ -563,6 +591,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   }
   const app = new Elysia({ name: 'mybot-api', adapter: node() })
     .onRequest(async ({ request }) => {
+      guardUpgradeSocket(request)
       const ids = requestIdsFor(request)
       const context: RequestContext = { ...ids, startedAt: performance.now(), httpMethod: request.method }
       requestContexts.set(request, context)
