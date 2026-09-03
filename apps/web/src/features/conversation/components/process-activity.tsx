@@ -11,6 +11,7 @@ import {
   SquareTerminalIcon,
   WaypointsIcon,
   WrenchIcon,
+  type LucideIcon,
 } from "lucide-react"
 import type { ReactNode } from "react"
 
@@ -19,11 +20,21 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
-import type { ProcessActivity } from "@/features/conversation/model"
-import type { BrowserProjection } from "@/features/conversation/model"
+import type {
+  BrowserProjection,
+  ProcessActivity,
+  ProcessSearchSource,
+} from "@/features/conversation/model"
 import {
   groupProcessActivities,
+  isProcessActivityActive,
+  isBrowserProcessActive,
+  isProcessCommandAction,
+  isProcessFamilyDefaultOpen,
+  isSingleSearchGroup,
+  normalizeProcessAction,
   processActivityGroupLabel,
+  processSearchCopy,
   processToolCopy,
   type ProcessActivityFamily,
   type ProcessActivityItem,
@@ -42,6 +53,7 @@ function ActivityIcon({ children }: { children: ReactNode }) {
 }
 
 function ActivityRow({
+  active = false,
   detail,
   icon,
   label,
@@ -49,6 +61,7 @@ function ActivityRow({
   title,
   trailing,
 }: {
+  active?: boolean
   detail?: ReactNode
   icon: ReactNode
   label: ReactNode
@@ -62,7 +75,12 @@ function ActivityRow({
       className="flex min-h-6 w-full min-w-0 items-center gap-2 leading-5"
     >
       <ActivityIcon>{icon}</ActivityIcon>
-      <span className="min-w-0 flex-1 truncate text-muted-foreground">
+      <span
+        className={cn(
+          "min-w-0 flex-1 truncate text-muted-foreground",
+          active && "shimmer"
+        )}
+      >
         {label}
         {detail ? (
           <>
@@ -89,44 +107,137 @@ function StepIcon({ status }: { status?: "active" | "complete" | "pending" }) {
   return <CircleIcon />
 }
 
-function ToolIcon({ action }: { action: string }) {
-  const normalized = action.toLowerCase().replace(/[.\s-]+/g, "_")
-  if (
-    ["filesystem_list", "filesystem_read", "list", "read"].includes(normalized)
-  ) {
-    return <FileTextIcon />
-  }
-  if (["edit", "filesystem_write", "updated", "write"].includes(normalized)) {
-    return <PencilLineIcon />
-  }
-  if (["executed", "run", "shell_exec"].includes(normalized)) {
-    return <SquareTerminalIcon />
-  }
-  if (normalized.startsWith("browser_")) return <Globe2Icon />
-  return <WrenchIcon />
+const TOOL_ICON_RULES: readonly {
+  actions?: readonly string[]
+  icon: LucideIcon
+  prefix?: string
+}[] = [
+  {
+    actions: ["filesystem_list", "filesystem_read", "list", "read"],
+    icon: FileTextIcon,
+  },
+  {
+    actions: ["edit", "filesystem_write", "updated", "write"],
+    icon: PencilLineIcon,
+  },
+  { actions: ["executed", "run", "shell_exec"], icon: SquareTerminalIcon },
+  { icon: Globe2Icon, prefix: "browser_" },
+]
+
+const GROUP_ICONS: Record<ProcessActivityFamily, LucideIcon> = {
+  browser: Globe2Icon,
+  commands: SquareTerminalIcon,
+  "files-inspected": FileTextIcon,
+  "files-read": FileTextIcon,
+  "files-updated": PencilLineIcon,
+  "web-search": SearchIcon,
 }
 
-const isCommandAction = (action: string) =>
-  ["executed", "run", "shell_exec"].includes(
-    action.toLowerCase().replace(/[.\s-]+/g, "_")
+const TRACE_ICONS: Record<string, LucideIcon> = {
+  message: MessageSquareIcon,
+  read: FileTextIcon,
+  request: MessageSquareIcon,
+  run: SquareTerminalIcon,
+  write: PencilLineIcon,
+}
+
+function ToolIcon({ action }: { action: string }) {
+  const normalized = normalizeProcessAction(action)
+  const matchingRule = TOOL_ICON_RULES.find(
+    ({ actions, prefix }) =>
+      actions?.includes(normalized) ||
+      (prefix !== undefined && normalized.startsWith(prefix))
   )
+  const Icon = matchingRule?.icon ?? WrenchIcon
+  return <Icon />
+}
 
 function GroupIcon({ family }: { family: ProcessActivityFamily }) {
-  if (["files-inspected", "files-read"].includes(family)) {
-    return <FileTextIcon />
-  }
-  if (family === "files-updated") return <PencilLineIcon />
-  if (family === "commands") return <SquareTerminalIcon />
-  if (family === "web-search") return <SearchIcon />
-  return <Globe2Icon />
+  const Icon = GROUP_ICONS[family]
+  return <Icon />
 }
 
 function TraceIcon({ kind }: { kind: string }) {
-  if (["message", "request"].includes(kind)) return <MessageSquareIcon />
-  if (kind === "write") return <PencilLineIcon />
-  if (kind === "run") return <SquareTerminalIcon />
-  if (kind === "read") return <FileTextIcon />
-  return <WaypointsIcon />
+  const Icon = TRACE_ICONS[kind] ?? WaypointsIcon
+  return <Icon />
+}
+
+function SearchActivityResults({
+  results,
+}: {
+  results?: readonly ProcessSearchSource[]
+}) {
+  if (!results?.length) return null
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2 ps-5.5">
+      {results.map((result) => {
+        const content = (
+          <>
+            <ActivityIcon>
+              <Globe2Icon />
+            </ActivityIcon>
+            <span className="min-w-0 flex-1 truncate text-muted-foreground">
+              {result.title}
+              {result.domain ? ` · ${result.domain}` : ""}
+            </span>
+          </>
+        )
+
+        return result.url ? (
+          <a
+            key={result.id}
+            href={result.url}
+            title={[result.title, result.domain].filter(Boolean).join(" · ")}
+            className="flex min-h-6 min-w-0 items-center gap-2 rounded-md outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          >
+            {content}
+          </a>
+        ) : (
+          <div
+            key={result.id}
+            title={[result.title, result.domain].filter(Boolean).join(" · ")}
+            className="flex min-h-6 min-w-0 items-center gap-2"
+          >
+            {content}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function SearchActivityRow({
+  activity,
+  showLabel = true,
+}: {
+  activity: Extract<ProcessActivity, { type: "search" }>
+  showLabel?: boolean
+}) {
+  const copy = processSearchCopy(activity)
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      {showLabel ? (
+        <ActivityRow
+          icon={<SearchIcon />}
+          label={copy.verb}
+          detail={copy.query}
+          active={isProcessActivityActive(activity)}
+          separator="space"
+          title={copy.label}
+          trailing={
+            activity.moreCount ? (
+              <span className="text-muted-foreground">
+                +{activity.moreCount} more
+              </span>
+            ) : undefined
+          }
+        />
+      ) : null}
+      <SearchActivityResults results={activity.results} />
+    </div>
+  )
 }
 
 function CommandActivity({
@@ -140,6 +251,7 @@ function CommandActivity({
   if (!command) {
     return (
       <ActivityRow
+        active={isProcessActivityActive(activity)}
         icon={<SquareTerminalIcon />}
         label={copy.label}
         title={copy.label}
@@ -155,14 +267,21 @@ function CommandActivity({
         <ActivityIcon>
           <SquareTerminalIcon />
         </ActivityIcon>
-        <span className="shrink-0 text-muted-foreground">{copy.label}</span>
+        <span
+          className={cn(
+            "inline-flex shrink-0 items-center gap-1.5 text-muted-foreground",
+            isProcessActivityActive(activity) && "shimmer"
+          )}
+        >
+          <span>{copy.label}</span>
+          <ChevronRightIcon
+            aria-hidden="true"
+            className="command-chevron size-3.5 shrink-0 motion-safe:transition-transform"
+          />
+        </span>
         <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
           {summary}
         </span>
-        <ChevronRightIcon
-          aria-hidden="true"
-          className="command-chevron size-3.5 shrink-0 text-muted-foreground motion-safe:transition-transform"
-        />
       </CollapsibleTrigger>
       <CollapsibleContent hiddenUntilFound className="ps-5.5 pt-1">
         <pre className="max-w-full overflow-x-auto rounded-lg border border-border/60 bg-muted/40 px-3 py-2 font-mono text-xs leading-5 text-foreground">
@@ -188,74 +307,18 @@ function ProcessActivityRow({ activity }: { activity: ProcessActivity }) {
         icon={<StepIcon status={activity.status} />}
         label={activity.label}
         detail={activity.meta}
+        active={isProcessActivityActive(activity)}
         title={[activity.label, activity.meta].filter(Boolean).join(" · ")}
       />
     )
   }
 
   if (activity.type === "search") {
-    return (
-      <div className="flex min-w-0 flex-col gap-2">
-        <ActivityRow
-          icon={<SearchIcon />}
-          label="Searched for"
-          detail={`“${activity.query}”`}
-          separator="space"
-          title={`Searched for “${activity.query}”`}
-          trailing={
-            activity.moreCount ? (
-              <span className="text-muted-foreground">
-                +{activity.moreCount} more
-              </span>
-            ) : undefined
-          }
-        />
-        {activity.results?.length ? (
-          <div className="flex min-w-0 flex-col gap-2 ps-5.5">
-            {activity.results.map((result) => {
-              const content = (
-                <>
-                  <ActivityIcon>
-                    <Globe2Icon />
-                  </ActivityIcon>
-                  <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                    {result.title}
-                    {result.domain ? ` · ${result.domain}` : ""}
-                  </span>
-                </>
-              )
-
-              return result.url ? (
-                <a
-                  key={result.id}
-                  href={result.url}
-                  title={[result.title, result.domain]
-                    .filter(Boolean)
-                    .join(" · ")}
-                  className="flex min-h-6 min-w-0 items-center gap-2 rounded-md outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-                >
-                  {content}
-                </a>
-              ) : (
-                <div
-                  key={result.id}
-                  title={[result.title, result.domain]
-                    .filter(Boolean)
-                    .join(" · ")}
-                  className="flex min-h-6 min-w-0 items-center gap-2"
-                >
-                  {content}
-                </div>
-              )
-            })}
-          </div>
-        ) : null}
-      </div>
-    )
+    return <SearchActivityRow activity={activity} />
   }
 
   if (activity.type === "tool") {
-    if (isCommandAction(activity.action)) {
+    if (isProcessCommandAction(activity.action)) {
       return <CommandActivity activity={activity} />
     }
 
@@ -274,6 +337,7 @@ function ProcessActivityRow({ activity }: { activity: ProcessActivity }) {
           ) : undefined
         }
         separator="space"
+        active={isProcessActivityActive(activity)}
         title={[copy.label, copy.detail].filter(Boolean).join(" ")}
         trailing={
           hasChanges ? (
@@ -303,6 +367,7 @@ function ProcessActivityRow({ activity }: { activity: ProcessActivity }) {
             : `Delegated ${taskLabel}`
         }
         detail={activity.detail}
+        active={isProcessActivityActive(activity)}
         title={[activity.label, activity.detail].filter(Boolean).join(" · ")}
       />
     )
@@ -313,6 +378,7 @@ function ProcessActivityRow({ activity }: { activity: ProcessActivity }) {
       icon={<TraceIcon kind={activity.kind} />}
       label={activity.label}
       detail={activity.detail}
+      active={isProcessActivityActive(activity)}
       title={[activity.label, activity.detail].filter(Boolean).join(" · ")}
     />
   )
@@ -334,33 +400,32 @@ function ProcessActivityGroup({
   )
   const last = item.activities.at(-1)
   const active =
-    browserActive ||
-    ((last?.type === "tool" ||
-      last?.type === "search" ||
-      last?.type === "trace") &&
-      last.status === "in_progress")
+    browserActive || (last !== undefined && isProcessActivityActive(last))
+  const singleSearch = isSingleSearchGroup(item)
 
   return (
     <Collapsible
-      defaultOpen={item.family === "browser" ? false : defaultOpen}
+      defaultOpen={isProcessFamilyDefaultOpen(item.family, defaultOpen)}
       className="flex min-w-0 flex-col"
     >
       <CollapsibleTrigger className="group/activity-group -ms-1 flex min-h-6 max-w-full min-w-0 items-center gap-2 rounded-md px-1 text-start leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background data-[panel-open]:[&_.activity-group-chevron]:rotate-90">
         <ActivityIcon>
           <GroupIcon family={item.family} />
         </ActivityIcon>
-        <span
-          className={cn(
-            "min-w-0 truncate text-muted-foreground",
-            active && "shimmer"
-          )}
-        >
-          {label}
+        <span className="inline-flex max-w-full min-w-0 items-center gap-1.5">
+          <span
+            className={cn(
+              "min-w-0 truncate text-muted-foreground",
+              active && "shimmer"
+            )}
+          >
+            {label}
+          </span>
+          <ChevronRightIcon
+            aria-hidden="true"
+            className="activity-group-chevron size-3.5 shrink-0 text-muted-foreground motion-safe:transition-transform"
+          />
         </span>
-        <ChevronRightIcon
-          aria-hidden="true"
-          className="activity-group-chevron size-3.5 shrink-0 text-muted-foreground motion-safe:transition-transform"
-        />
       </CollapsibleTrigger>
       <CollapsibleContent className="pt-1">
         <ol
@@ -369,7 +434,11 @@ function ProcessActivityGroup({
         >
           {item.activities.map((activity) => (
             <li key={activity.id} className="min-w-0">
-              <ProcessActivityRow activity={activity} />
+              {singleSearch && activity.type === "search" ? (
+                <SearchActivityRow activity={activity} showLabel={false} />
+              ) : (
+                <ProcessActivityRow activity={activity} />
+              )}
             </li>
           ))}
         </ol>
@@ -390,9 +459,7 @@ export function ProcessActivityList({
   defaultGroupsOpen?: boolean
 }) {
   const items = groupProcessActivities(activities)
-  const browserActive = ["launching", "live", "awaiting_user"].includes(
-    browserProjection?.state ?? ""
-  )
+  const browserActive = isBrowserProcessActive(browserProjection)
 
   return (
     <ol

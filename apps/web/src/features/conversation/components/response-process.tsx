@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { ChevronRightIcon } from "lucide-react"
 
 import {
@@ -59,9 +59,11 @@ function ProcessLabel({
 export function ResponseProcess({
   hasResponse,
   process,
+  children,
 }: {
   hasResponse: boolean
   process: ResponseProcessData
+  children?: ReactNode
 }) {
   const [disclosure, setDisclosure] = useState(() => ({
     open: process.status === "processing",
@@ -74,44 +76,71 @@ export function ResponseProcess({
   const duration = useProcessDuration(process)
   const hasDisclosure = process.activities.length > 0
 
+  const processDetails = (
+    <div className="flex min-w-0 flex-col gap-4">
+      {hasDisclosure ? (
+        <ProcessActivityList
+          activities={process.activities}
+          browserProjection={process.browserProjection}
+          className="w-full"
+          defaultGroupsOpen={process.status === "processing"}
+        />
+      ) : null}
+      {children}
+    </div>
+  )
+
   if (!hasDisclosure) {
     return (
-      <div className="flex w-full min-w-0 flex-col gap-4">
-        <div className="-ms-1 flex h-7 w-full min-w-0 items-center px-1">
+      <div className="flex w-full min-w-0 flex-col gap-2">
+        <div className="-ms-1 flex min-h-7 w-full min-w-0 items-center px-1">
           <ProcessLabel duration={duration} process={process} />
         </div>
-        {process.status === "processed" && hasResponse ? <Separator /> : null}
+        <Separator />
+        {hasResponse ? processDetails : null}
+      </div>
+    )
+  }
+
+  if (process.status === "processing") {
+    return (
+      <div className="flex w-full min-w-0 flex-col gap-2">
+        <div className="-ms-1 flex min-h-7 w-full min-w-0 items-center px-1">
+          <ProcessLabel duration={duration} process={process} />
+        </div>
+        <Separator />
+        {processDetails}
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <Collapsible
-        open={detailsOpen}
-        onOpenChange={(open) => setDisclosure({ open, status: process.status })}
-        className="flex w-full min-w-0 flex-col gap-4"
-      >
-        <div className="w-full min-w-0">
-          <CollapsibleTrigger className="group/process-trigger -ms-1 flex h-7 max-w-full items-center gap-1 rounded-md px-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background data-[panel-open]:[&_svg]:rotate-90">
-            <ProcessLabel duration={duration} process={process} />
-            <ChevronRightIcon
-              aria-hidden="true"
-              className="size-3.5 shrink-0 text-muted-foreground"
-            />
-          </CollapsibleTrigger>
-        </div>
-        {process.status === "processing" ? <Separator /> : null}
+    <Collapsible
+      open={detailsOpen}
+      onOpenChange={(open) => setDisclosure({ open, status: process.status })}
+      className="flex w-full min-w-0 flex-col gap-2"
+    >
+      <div className="w-full min-w-0">
+        <CollapsibleTrigger className="group/process-trigger -ms-1 flex min-h-7 max-w-full items-center gap-1 rounded-md px-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background data-[panel-open]:[&_svg]:rotate-90">
+          <ProcessLabel duration={duration} process={process} />
+          <ChevronRightIcon
+            aria-hidden="true"
+            className="size-3.5 shrink-0 text-muted-foreground"
+          />
+        </CollapsibleTrigger>
+      </div>
+      <Separator />
+      <div className="flex min-w-0 flex-col gap-4">
         <CollapsibleContent>
           <ProcessActivityList
             activities={process.activities}
             browserProjection={process.browserProjection}
             className="w-full"
-            defaultGroupsOpen={process.status === "processing"}
+            defaultGroupsOpen={false}
           />
         </CollapsibleContent>
-      </Collapsible>
-      {process.status === "processed" && hasResponse ? <Separator /> : null}
-    </div>
+        {children}
+      </div>
+    </Collapsible>
   )
 }

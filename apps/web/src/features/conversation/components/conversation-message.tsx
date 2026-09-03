@@ -22,6 +22,13 @@ function AssistantMessage({
   browserProjection?: BrowserProjection | null
 }) {
   const hasResponse = content.trim().length > 0
+  const responseBody = hasResponse ? (
+    <div className="typeset typeset-docs w-full max-w-none select-text">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml>
+        {content}
+      </ReactMarkdown>
+    </div>
+  ) : null
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-4">
@@ -29,15 +36,11 @@ function AssistantMessage({
         <ResponseProcess
           hasResponse={hasResponse}
           process={{ ...process, browserProjection }}
-        />
+        >
+          {responseBody}
+        </ResponseProcess>
       ) : null}
-      {hasResponse ? (
-        <div className="typeset typeset-docs w-full max-w-none">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml>
-            {content}
-          </ReactMarkdown>
-        </div>
-      ) : null}
+      {!process ? responseBody : null}
     </div>
   )
 }
@@ -69,7 +72,9 @@ export function ConversationMessage({
             )}
           >
             {isUser ? (
-              <p className="whitespace-pre-wrap">{message.content}</p>
+              <p className="whitespace-pre-wrap select-text">
+                {message.content}
+              </p>
             ) : (
               <AssistantMessage
                 content={message.content}

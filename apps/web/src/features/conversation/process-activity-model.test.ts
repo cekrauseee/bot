@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest"
 import type { ProcessActivity } from "@/features/conversation/model"
 import {
   groupProcessActivities,
+  isProcessActivityActive,
+  isProcessFamilyDefaultOpen,
   processActivityGroupLabel,
+  processSearchCopy,
   processToolCopy,
 } from "@/features/conversation/process-activity-model"
 
@@ -38,6 +41,52 @@ describe("process activity model", () => {
     ])
     expect(items[0]).toMatchObject({ family: "files-read" })
     expect(items[3]).toMatchObject({ family: "browser" })
+  })
+
+  it("keeps a search with results as a collapsible family item", () => {
+    const items = groupProcessActivities([
+      {
+        id: "search-1",
+        query: "AI workspace competitors",
+        results: [{ id: "result-1", title: "Example" }],
+        type: "search",
+      },
+    ])
+
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({ family: "web-search", type: "group" })
+  })
+
+  it("centralizes active state, search copy, and family disclosure defaults", () => {
+    expect(
+      isProcessActivityActive({
+        action: "filesystem_read",
+        id: "read",
+        status: "in_progress",
+        type: "tool",
+      })
+    ).toBe(true)
+    expect(
+      isProcessActivityActive({
+        content: "Thinking",
+        id: "reasoning",
+        type: "text",
+      })
+    ).toBe(false)
+    expect(
+      processSearchCopy({
+        id: "search",
+        query: "AI workspace competitors",
+        status: "in_progress",
+        type: "search",
+      })
+    ).toMatchObject({
+      label: "Searching for “AI workspace competitors”",
+      verb: "Searching for",
+    })
+    expect(isProcessFamilyDefaultOpen("browser", true)).toBe(false)
+    expect(isProcessFamilyDefaultOpen("web-search", true)).toBe(false)
+    expect(isProcessFamilyDefaultOpen("commands", true)).toBe(true)
   })
 
   it("uses sentence copy without exposing internal tool identifiers", () => {
