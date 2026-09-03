@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
+from urllib.parse import urlparse
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 ProviderName = Literal["openai"]
 ModelName = Literal[
@@ -30,6 +31,8 @@ NormalizedEventType = Literal[
     "tool.completed",
     "child.started",
     "child.completed",
+    "skill.started",
+    "skill.completed",
     "browser.frame",
     "turn.completed",
     "turn.failed",
@@ -127,6 +130,7 @@ class AgentRequest(BaseModel):
     speed: Speed
     working_directory: str = Field(default="/workspace", max_length=4_096)
     task_plan: list[PlanStep] = Field(default_factory=list, max_length=50)
+    github_mcp: GithubMcpConfig | None = None
 
     @model_validator(mode="after")
     def validate_working_directory(self) -> AgentRequest:
@@ -152,6 +156,30 @@ class AgentRequest(BaseModel):
         resolve_model_settings(self.model, self.reasoning_effort, self.speed)
         return self
 
+
+class GithubMcpConfig(BaseModel):
+    """Internal per-run GitHub connection; never include in prompts or events."""
+    model_config = ConfigDict(extra="forbid")
+    server_url: str
+    authorization: SecretStr
+    allowed_tools: list[
+        Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=128,
+                pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            ),
+        ]
+    ] | None = Field(default=None, max_length=50)
+
+    @field_validator("server_url")
+    @classmethod
+    def validate_server_url(cls, value: str) -> str:
+        parsed = urlparse(value)
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise ValueError("server_url must be an absolute HTTPS URL")
+        return value
 
 class ConversationTitleRequest(BaseModel):
     """Strict internal request for first-message title generation."""

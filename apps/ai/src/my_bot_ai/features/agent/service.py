@@ -21,6 +21,7 @@ from my_bot_ai.config import Settings
 from my_bot_ai.features.agent.contracts import (
     MODEL_CAPABILITIES,
     AgentRequest,
+    GithubMcpConfig,
     ModelName,
     NormalizedEvent,
     PlanStep,
@@ -35,6 +36,11 @@ from my_bot_ai.features.agent.errors import (
 from my_bot_ai.features.agent.models import build_chat_model, provider_builtin_tools
 from my_bot_ai.features.agent.runtime import RuntimeClient, RuntimeContext, build_runtime_tools
 from my_bot_ai.features.agent.tools import build_child_delegation_tool, build_core_tools
+from my_bot_ai.features.skills.capabilities import DEFAULT_TOOL_REGISTRY
+from my_bot_ai.features.skills.mcp import github_mcp_tool
+from my_bot_ai.features.skills.registry import default_skill_registry
+from my_bot_ai.features.skills.resolution import skill_catalog
+from my_bot_ai.features.skills.tools import build_load_skill_tool
 
 MAX_TOOL_CALL_ID_LENGTH = 200
 MAX_CHILD_AGENT_DEPTH = 4
@@ -437,6 +443,26 @@ def _normalized_plan(value: Any) -> list[dict[str, str]]:
 
 def _tool_event(event: dict[str, Any]) -> NormalizedEvent | None:
     kind = event.get("event")
+    if kind == "on_custom_event" and event.get("name") in {"skill.started", "skill.completed"}:
+        data = event.get("data")
+        skill = data.get("skill") if isinstance(data, dict) else None
+        if (
+            not isinstance(skill, dict)
+            or not isinstance(skill.get("id"), str)
+            or not isinstance(skill.get("name"), str)
+        ):
+            return None
+        event_type = "skill.started" if event.get("name") == "skill.started" else "skill.completed"
+        return NormalizedEvent(
+            type=event_type,
+            data={
+                "skill": {
+                    key: skill[key]
+                    for key in ("id", "name", "detail", "status")
+                    if key in skill
+                }
+            },
+        )
     if kind == "on_custom_event" and event.get("name") == "browser.frame":
         frame = event.get("data")
         if not isinstance(frame, dict):
@@ -718,7 +744,6 @@ async def stream_model(
                 },
             }
         return
-
 def _result_text(result: Any) -> str:
     messages = result.get("messages", []) if isinstance(result, dict) else []
     if not messages:
@@ -778,6 +803,7 @@ def build_model(
     runtime_tools: Sequence[BaseTool] = (),
     task_plan: Sequence[PlanStep] = (),
     working_directory: str = "/workspace",
+    github_mcp: GithubMcpConfig | None = None,
 ) -> tuple[Any, ProviderName]:
     """Build the sole LangChain/LangGraph orchestrator for one durable run."""
 
@@ -799,6 +825,15 @@ def build_model(
             settings, selected_model, selected_effort, selected_speed
         )
         hosted_tools = provider_builtin_tools(resolved)
+        if github_mcp is not None and depth == 0:
+            hosted_tools.append(
+                github_mcp_tool(
+                    github_mcp.server_url,
+                    github_mcp.authorization,
+                    allowed_tools=github_mcp.allowed_tools,
+                    tool_registry=DEFAULT_TOOL_REGISTRY,
+                )
+            )
 
         async def run_child(
             task: str,
@@ -858,7 +893,12 @@ def build_model(
             delegation,
         ]
         if depth == 0:
-            tools = [*hosted_tools, *build_core_tools(run_child), *runtime_tools]
+            tools = [
+                *hosted_tools,
+                *build_core_tools(run_child),
+                *runtime_tools,
+                build_load_skill_tool(default_skill_registry()),
+            ]
         system_prompt = (
             "The shared workspace root is /workspace. "
             f"Your working directory is {working_directory}. "
@@ -892,6 +932,8 @@ def build_model(
                 separators=(",", ":"),
             )
             system_prompt += f" Current task plan (context only): {serialized_plan}"
+        if depth == 0:
+            system_prompt += " " + skill_catalog(default_skill_registry())
         graph = create_agent(
             model=llm,
             tools=tools,
@@ -993,6 +1035,7 @@ async def prepare_agent_request(
         runtime_tools=runtime_tools,
         task_plan=body.task_plan,
         working_directory=body.working_directory,
+        github_mcp=body.github_mcp,
     )
     config = graph_config(body.run_id)
     snapshot = await graph.aget_state(config)
