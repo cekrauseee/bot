@@ -255,7 +255,7 @@ async function createWindow() {
   installSessionBoundary()
   mainWindow = new BrowserWindow({
     width: 1200, height: 800, minWidth: 720, minHeight: 520,
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   })
   mainWindow.on('closed', () => { mainWindow = undefined })
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
