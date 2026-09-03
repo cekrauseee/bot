@@ -35,15 +35,11 @@ def create_app(
     configure_logging(resolved_settings.environment)
     if resolved_settings.environment == "production":
         token = resolved_settings.ai_service_token
-        provider_keys = (
-            resolved_settings.openai_api_key or "",
-            resolved_settings.xai_api_key or "",
-            resolved_settings.openrouter_api_key or "",
-        )
+        provider_key = resolved_settings.openai_api_key or ""
         if _is_placeholder(token) or token == "dev-ai-service-token" or len(token) < 32:
             raise ValueError("AI_SERVICE_TOKEN must be a strong production secret")
-        if not any(not _is_placeholder(key) and len(key) >= 20 for key in provider_keys):
-            raise ValueError("An AI provider key must be configured in production")
+        if _is_placeholder(provider_key) or len(provider_key) < 20:
+            raise ValueError("OPENAI_API_KEY must be configured in production")
         if checkpointer is None and not resolved_settings.database_url:
             raise ValueError("DATABASE_URL must be configured in production")
         runtime_token = resolved_settings.runtime_service_token or ""

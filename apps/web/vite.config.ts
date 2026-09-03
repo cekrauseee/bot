@@ -1,26 +1,25 @@
-import path from 'node:path'
-import tailwindcss from '@tailwindcss/vite'
-import react from '@vitejs/plugin-react'
-import { defineConfig, loadEnv } from 'vite'
+import path from "node:path"
+import tailwindcss from "@tailwindcss/vite"
+import react from "@vitejs/plugin-react"
+import { defineConfig } from "vite"
 
-// https://vite.dev/config/
+import { loadEnv } from "vite"
+
+const envDir = path.resolve(import.meta.dirname, "../..")
+
 export default defineConfig(({ mode }) => {
-  const envDir = path.resolve(import.meta.dirname, '../..')
-  const environment = loadEnv(mode, envDir, '')
-  if (!environment.WEB_BASE_URL) throw new Error('WEB_BASE_URL is required')
-  const webOrigin = new URL(environment.WEB_BASE_URL)
-
+  const env = loadEnv(mode, envDir, "")
+  const webUrl = new URL(env.WEB_BASE_URL ?? "http://localhost:5173")
   return {
     envDir,
+    plugins: [react(), tailwindcss()],
     server: {
-      host: webOrigin.hostname,
-      port: 5174,
+      port: Number(webUrl.port || 5173),
       strictPort: true,
     },
-    plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
-        '@': path.resolve(import.meta.dirname, './src'),
+        "@": path.resolve(import.meta.dirname, "./src"),
       },
     },
   }

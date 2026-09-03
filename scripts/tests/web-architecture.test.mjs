@@ -1,86 +1,36 @@
 import assert from 'node:assert/strict'
-import { access, readFile, readdir } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import { projectRoot } from '../lib/project.mjs'
 
 const webSource = `${projectRoot}/apps/web/src`
-const chatFeature = `${webSource}/features/chat`
 
-async function filesUnder(directory) {
-  const entries = await readdir(directory, { withFileTypes: true })
-  const nested = await Promise.all(
-    entries.map((entry) => {
-      const path = `${directory}/${entry.name}`
-      return entry.isDirectory() ? filesUnder(path) : [path]
-    }),
-  )
-  return nested.flat()
-}
-
-test('pages consume only the public chat feature entrypoint', async () => {
-  const homePage = await readFile(`${webSource}/pages/chat/page.tsx`, 'utf8')
-
-  assert.match(homePage, /from ['"]@\/features\/chat['"]/)
-  assert.doesNotMatch(homePage, /from ['"]@\/features\/chat\//)
+test('canonical web app owns the route tree', async () => {
+  const router = await readFile(`${webSource}/routes/router.tsx`, 'utf8')
+  assert.match(router, /Route path="sign"/)
+  await access(`${projectRoot}/apps/web/package.json`)
+  await access(`${projectRoot}/apps/web/src`)
 })
 
-test('chat models and fixtures remain serializable and presentation-independent', async () => {
-  const dataFiles = [
-    `${chatFeature}/model.ts`,
-    ...(await filesUnder(`${chatFeature}/fixtures`)),
-    ...(await filesUnder(`${chatFeature}/state`)),
-  ]
-
-  for (const file of dataFiles) {
-    const source = await readFile(file, 'utf8')
-    assert.doesNotMatch(source, /from ['"]react['"]/, file)
-    assert.doesNotMatch(source, /@\/components\//, file)
-    assert.doesNotMatch(source, /@\/features\/chat\/components\//, file)
-  }
+test('sign-in uses semantic controls and preserves desktop transaction context', async () => {
+  const page = await readFile(`${webSource}/routes/sign/page.tsx`, 'utf8')
+  const card = await readFile(`${webSource}/features/auth/components/sign-in-card.tsx`, 'utf8')
+  const handoff = await readFile(`${webSource}/features/auth/components/desktop-browser-handoff.tsx`, 'utf8')
+  const callback = await readFile(`${webSource}/features/auth/desktop-callback.ts`, 'utf8')
+  assert.match(page, /desktop_transaction/)
+  assert.match(page, /DesktopBrowserHandoff/)
+  assert.match(handoff, /completeDesktop/)
+  assert.match(callback, /mybot:/)
+  assert.match(handoff, /Open myBot/)
+  assert.match(card, /desktopTransaction/)
+  assert.match(card, /aria-invalid/)
+  assert.match(card, /window\.location\.assign/)
+  assert.doesNotMatch(card, /desktop_transaction: desktopTransaction/)
 })
 
-test('the route and keyed controller own conversation selection and async writes', async () => {
-  const controller = await readFile(
-    `${chatFeature}/state/conversation-controller.ts`,
-    'utf8',
-  )
-  const hook = await readFile(
-    `${chatFeature}/hooks/use-conversation-controller.ts`,
-    'utf8',
-  )
-  const transport = await readFile(
-    `${chatFeature}/services/conversation-api.ts`,
-    'utf8',
-  )
-
-  assert.doesNotMatch(controller, /\bactiveConversationId\b/)
-  assert.match(controller, /conversationsById/)
-  assert.match(controller, /operationId/)
-  assert.match(hook, /conversationRouteIdentity\(conversationId\)/)
-  assert.doesNotMatch(hook, /routeConversationRef|streamConversationRef/)
-  assert.doesNotMatch(transport, /from ['"]react['"]|\buseConversation\b/)
-})
-
-test('registry-owned agent primitives stay isolated from page composition', async () => {
-  await access(`${webSource}/components/agents`)
-  const chatPage = await readFile(`${webSource}/pages/chat/page.tsx`, 'utf8')
-  assert.doesNotMatch(chatPage, /@\/components\/agents/)
-
-  const chatFiles = await filesUnder(chatFeature)
-  for (const file of chatFiles) {
-    const source = await readFile(file, 'utf8')
-    assert.doesNotMatch(file, /chat-app|mock-conversations|approval-card|tool-result/)
-    assert.doesNotMatch(source, /\bChatApp\b|beui\.dev\/components\/agents/)
-  }
-})
-
-test('the chat public entrypoint contains exports only', async () => {
-  const entrypoint = await readFile(`${chatFeature}/index.ts`, 'utf8')
-  const statements = entrypoint
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-
-  assert.ok(statements.every((line) => line.startsWith('export ')))
+test('desktop sign-in exposes only one browser handoff action', async () => {
+  const source = await readFile(`${webSource}/features/auth/components/desktop-sign-in.tsx`, 'utf8')
+  assert.match(source, /Continue in browser/)
+  assert.doesNotMatch(source, /client_secret|sessionToken|Authorization/)
 })

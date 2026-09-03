@@ -1510,13 +1510,13 @@ const processActivities = (
         type: 'tool',
         action: 'shell_exec',
         target:
-          'npm run test --workspace=@my-bot/web-rebuild -- response-process.test.ts',
+          'npm run test --workspace=@my-bot/web -- response-process.test.ts',
         status: 'completed',
       }),
       activity('typecheck', {
         type: 'tool',
         action: 'shell_exec',
-        target: 'npm run typecheck --workspace=@my-bot/web-rebuild',
+        target: 'npm run typecheck --workspace=@my-bot/web',
         status: 'completed',
       }),
       risk,

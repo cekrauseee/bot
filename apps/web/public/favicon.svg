@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="myBot">
+  <rect width="24" height="24" rx="5" fill="#f8fafc"/>
+  <path d="M12 8V4H8" fill="none" stroke="#172033" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect width="16" height="12" x="4" y="8" rx="2" fill="#172033" stroke="#172033" stroke-width="1.5"/>
+  <path d="M2 14h2M20 14h2M15 13v2M9 13v2" fill="none" stroke="#f8fafc" stroke-width="1.7" stroke-linecap="round"/>
+</svg>

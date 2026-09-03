@@ -2,6 +2,11 @@
 
 # JavaScript
 node_modules/
+apps/desktop/out/
+apps/desktop/assets/generated/
+apps/desktop/assets/icon.icns
+apps/desktop/assets/icon.ico
+apps/web/dist/
 .turbo/
 dist/
 

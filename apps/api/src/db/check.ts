@@ -34,6 +34,8 @@ const columns: Record<string, ColumnContract[]> = {
     { name: 'created_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
     { name: 'updated_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
     { name: 'default_model', type: 'character varying', length: 32, nullable: false, defaultValue: "'gpt-5.6-sol'::character varying" },
+    { name: 'default_reasoning_effort', type: 'character varying', length: 20, nullable: false, defaultValue: "'medium'::character varying" },
+    { name: 'default_speed', type: 'character varying', length: 20, nullable: false, defaultValue: "'standard'::character varying" },
   ],
   oauth_identities: [
     { name: 'id', type: 'uuid', length: null, nullable: false, defaultValue: 'gen_random_uuid()' },
@@ -84,6 +86,8 @@ const columns: Record<string, ColumnContract[]> = {
     { name: 'title_updated_at', type: 'timestamp with time zone', length: null, nullable: true, defaultValue: null },
     { name: 'model', type: 'character varying', length: 32, nullable: false, defaultValue: null },
     { name: 'model_updated_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
+    { name: 'reasoning_effort', type: 'character varying', length: 20, nullable: false, defaultValue: "'medium'::character varying" },
+    { name: 'speed', type: 'character varying', length: 20, nullable: false, defaultValue: "'standard'::character varying" },
   ],
   messages: [
     { name: 'id', type: 'uuid', length: null, nullable: false, defaultValue: 'gen_random_uuid()' },

@@ -3,22 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta
-      name="description"
-      content="Sign in to myBot."
-    />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>myBot</title>
-    <script>
-      (() => {
-        // Theme selection is system-only. Clear the legacy manual preference
-        // before next-themes initializes so it cannot override the OS setting.
-        localStorage.removeItem('my-bot-theme')
-        const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-
-        document.documentElement.classList.toggle('dark', isDark)
-        document.documentElement.style.colorScheme = isDark ? 'dark' : 'light'
-      })()
-    </script>
   </head>
   <body>
     <div id="root"></div>

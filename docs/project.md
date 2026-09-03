@@ -1,45 +1,18 @@
 # Project
 
-## Purpose
+myBot is a portfolio project for a durable cloud agent. The repository keeps the browser/desktop renderer, application API, AI provider boundary, runtime tools, and email package independently managed in one monorepo.
 
-myBot is a portfolio project for an AI agent inspired by the clarity and restraint of products such as ChatGPT and Grok. The product uses a React frontend, a Node.js application API, and a separate Python AI service while keeping provider and infrastructure decisions explicit.
+## Current scope
 
-## Scope
-
-The current implementation includes:
-
-- a Vite and React frontend;
-- lazy-loaded public login and protected conversation routes;
-- light and dark appearances with the system preference as the default;
-- beUI inputs, buttons, and theme transition installed through its shadcn registry;
-- an Elysia application API with health, authentication, conversation, and streaming endpoints;
-- an authenticated FastAPI boundary using LangChain with OpenAI, xAI, and OpenRouter integrations;
-- durable LangGraph checkpoints, resumable questions, plans, and recursive child agents;
-- a private runtime using local Docker in development and Vercel Sandbox in production for a global filesystem, unprivileged processes, and run-scoped browsers;
-- passwordless email OTP and Google OpenID Connect login;
-- PostgreSQL user, identity, and session persistence;
-- Redis-backed OTP challenges and abuse limits;
-- a repository-owned React Email component rendered locally and sent through Resend;
-- persistent multi-conversation text chat with reasoning summaries, web search, and Markdown responses;
-- GPT-5.6 Sol, Terra, and Luna, Grok 4.6 and 4.3, and GLM 5.2 through OpenRouter with provider-aware reasoning and processing controls;
-- durable background runs, cursor-based replay, and transient browser picture-in-picture frames.
-
-Production deployment is not implemented yet. Real model calls require the corresponding server-side provider key. Development runtime tools require Docker; the production runtime requires Vercel Sandbox credentials.
-
-## Core Concepts
-
-- **Polyglot monorepo:** web, application API, email, and AI services share one product lifecycle while retaining appropriate runtimes and package managers.
-- **Feature-based frontend:** pages compose domain features, while reusable infrastructure and brand components remain shared.
-- **Registry-owned UI source:** beUI components are copied into the application by the shadcn CLI and reviewed as local source.
-- **Separated backends:** Node.js owns product data and HTTP behavior; Python is reserved for model-provider and AI workloads.
-- **Global agent workspace:** conversations share one durable user filesystem, while browsers and run state retain explicit ownership.
-- **Project folders:** projects associate conversations with stable workspace directories. Runs start there without restricting access to other workspace files; folder creation is lazy and no filesystem interface is exposed.
-- **Progressive backend:** each service exposes only verified behavior; new domains add their own feature modules and tests.
+- Vite and React web application with lazy public and protected routes.
+- Official shadcn/Base UI components, Tailwind CSS 4 semantic tokens, and system light/dark appearance.
+- Elysia API with passwordless email OTP, Google OpenID Connect, sessions, conversations, projects, and provider connections.
+- PostgreSQL durable state and Redis short-lived auth/fanout state.
+- FastAPI AI boundary and isolated local Docker or Vercel Sandbox runtime.
+- Electron desktop shell that packages the exact web build and uses an independent encrypted desktop session.
 
 ## Boundaries
 
-- Browser authentication uses opaque `HttpOnly` cookies. It does not store credentials in web storage.
-- The web and API origins must be sibling subdomains in production.
-- beUI components must be added or updated through the `@beui` registry, not copied manually.
-- Light and dark colors come from semantic Tailwind tokens, not component-level color overrides.
-- Foundational dependencies use current stable releases unless a documented constraint requires otherwise.
+Pages compose feature-owned logic; reusable UI remains domain-neutral. Node/Elysia owns product HTTP and persistence, Python owns model-provider calls, and the runtime owns isolated tools. Browser and desktop authentication secrets are never stored in web storage, URLs, or Redis transaction state.
+
+The canonical root `.env` is the environment contract. Desktop builds embed only validated `WEB_BASE_URL` and `VITE_API_BASE_URL` origins. Provider credentials and internal service secrets remain server-side.

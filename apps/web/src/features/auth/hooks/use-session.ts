@@ -1,40 +1,50 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from "react"
 
-import { AuthApiError, authApi, type AuthUser } from '@/features/auth/services/auth-api'
+import { authApi, type User } from "@/features/auth/api"
+import { ApiError } from "@/lib/api"
 
-export function useSession() {
-  const [user, setUser] = useState<AuthUser | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [isUnauthorized, setIsUnauthorized] = useState(false)
+type SessionState =
+  | { status: "loading" }
+  | { status: "authenticated"; user: User }
+  | { status: "unauthenticated" }
+  | { status: "error"; retry: () => void }
+
+export function useSession(): SessionState {
+  const [session, setSession] = useState<SessionState>({ status: "loading" })
+  const [attempt, setAttempt] = useState(0)
+  const retrying = useRef(false)
 
   useEffect(() => {
     let active = true
-    authApi
-      .getSession()
-      .then((session) => {
-        if (!active) return
-        setUser(session)
-        setError('')
+
+    void authApi
+      .session()
+      .then((user) => {
+        retrying.current = false
+        if (active) setSession({ status: "authenticated", user })
       })
-      .catch((reason: unknown) => {
+      .catch((error: unknown) => {
         if (!active) return
-        const apiError = reason instanceof AuthApiError ? reason : null
-        setIsUnauthorized(apiError?.status === 401)
-        setError(
-          apiError?.status === 401
-            ? ''
-            : 'We could not load your session. Check your connection and try again.',
-        )
-      })
-      .finally(() => {
-        if (active) setIsLoading(false)
+        retrying.current = false
+        if (error instanceof ApiError && error.status === 401) {
+          setSession({ status: "unauthenticated" })
+        } else {
+          setSession({
+            status: "error",
+            retry: () => {
+              if (retrying.current) return
+              retrying.current = true
+              setSession({ status: "loading" })
+              setAttempt((value) => value + 1)
+            },
+          })
+        }
       })
 
     return () => {
       active = false
     }
-  }, [])
+  }, [attempt])
 
-  return { error, isLoading, isUnauthorized, user }
+  return session
 }

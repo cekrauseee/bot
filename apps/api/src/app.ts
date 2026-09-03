@@ -19,6 +19,7 @@ import type { Database } from './db/database.js'
 import { GoogleOAuthService } from './modules/auth/oauth.js'
 import { OtpService } from './modules/auth/otp.js'
 import { SessionManager } from './modules/auth/sessions.js'
+import { DesktopAuthService } from './modules/auth/desktop.js'
 import {
   ProviderConnectionError,
   type ProviderConnection,
@@ -62,10 +63,13 @@ import {
   type RequestOutcome,
 } from './logger.js'
 
+const DESKTOP_RENDERER_ORIGIN = 'app://mybot'
+
 export type Services = {
   database: Database
   otp: OtpService
   sessions: SessionManager
+  desktopAuth?: DesktopAuthService
   google: GoogleOAuthService
   ai?: AiClient
   agentRuns?: AgentRunExecutor
@@ -121,6 +125,8 @@ const userSchema = t.Object({
   last_name: t.Union([t.String(), t.Null()]),
   avatar_url: t.Union([t.String(), t.Null()]),
   default_model: t.String(),
+  default_reasoning_effort: t.String(),
+  default_speed: t.String(),
 })
 const providerLimitWindowSchema = t.Object({
   used_percent: t.Number({ minimum: 0, maximum: 100 }),
@@ -480,13 +486,23 @@ const cookieValue = (request: Request, name: string) => {
   return undefined
 }
 
-const userResponse = (user: Pick<User, 'id' | 'email' | 'firstName' | 'lastName' | 'avatarUrl' | 'defaultModel'>) => ({
+const bearerValue = (request: Request) => {
+  const value = request.headers.get('authorization')
+  if (!value) return undefined
+  const match = /^Bearer ([A-Za-z0-9_-]{32,256})$/.exec(value)
+  if (!match) throw new AuthError('unauthorized', 'Sign in to continue.', 401)
+  return match[1]
+}
+
+const userResponse = (user: Pick<User, 'id' | 'email' | 'firstName' | 'lastName' | 'avatarUrl' | 'defaultModel' | 'defaultReasoningEffort' | 'defaultSpeed'>) => ({
   id: user.id,
   email: user.email,
   first_name: user.firstName,
   last_name: user.lastName,
   avatar_url: user.avatarUrl,
   default_model: user.defaultModel,
+  default_reasoning_effort: user.defaultReasoningEffort,
+  default_speed: user.defaultSpeed,
 })
 
 const publicProviderConnection = (connection: ProviderConnection, active: boolean) => ({
@@ -556,10 +572,10 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       }
     })
     .use(cors({
-      origin: settings.webOrigin,
+      origin: [settings.webOrigin, DESKTOP_RENDERER_ORIGIN],
       credentials: true,
       methods: ['GET', 'POST', 'PATCH', 'DELETE'],
-      allowedHeaders: ['Content-Type', 'X-Request-Id', 'X-Correlation-Id'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id', 'X-Correlation-Id'],
       exposeHeaders: ['X-Request-Id', 'X-Correlation-Id'],
     }))
     .use(openapi({ documentation: { info: { title: 'myBot API', version: '0.1.0' } } }))
@@ -622,22 +638,91 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
 
   const browserOrigin = (request: Request) => {
     const origin = request.headers.get('origin')
-    if (origin === settings.webOrigin || (settings.environment !== 'production' && !origin)) return
+    if (origin === settings.webOrigin || origin === DESKTOP_RENDERER_ORIGIN || (settings.environment !== 'production' && !origin)) return
     throw new AuthError('invalid_origin', 'This request did not come from an allowed origin.', 403)
   }
+  const webBrowserOrigin = (request: Request) => {
+    const origin = request.headers.get('origin')
+    if (origin === settings.webOrigin) return
+    throw new AuthError('invalid_origin', 'This request did not come from the web application.', 403)
+  }
   const websocketOrigin = (request: Request) => {
-    if (request.headers.get('origin') === settings.webOrigin) return
+    if (bearerValue(request)) return
+    if (request.headers.get('origin') === settings.webOrigin || request.headers.get('origin') === DESKTOP_RENDERER_ORIGIN) return
     throw new AuthError('invalid_origin', 'This request did not come from an allowed origin.', 403)
   }
 
   const oauthStateCookieName = settings.environment === 'production' ? '__Host-mybot_oauth_state' : 'mybot_oauth_state'
+  const desktopTransactionCookieName = 'mybot_desktop_transaction'
   const oauthStateCookie = (state: string) => `${oauthStateCookieName}=${encodeURIComponent(signValue(state, settings.sessionSecret))}; Max-Age=600; Path=/; HttpOnly; SameSite=Lax${settings.secureCookies ? '; Secure' : ''}`
   const clearOauthStateCookie = () => `${oauthStateCookieName}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax${settings.secureCookies ? '; Secure' : ''}`
+  const desktopRequestOrigin = (request: Request) => {
+    const origin = request.headers.get('origin')
+    if (!origin || origin === settings.webOrigin || origin === DESKTOP_RENDERER_ORIGIN) return
+    throw new AuthError('invalid_origin', 'This request did not come from an allowed origin.', 403)
+  }
+
+  const desktopTransactionSchema = t.Object({
+    transaction_id: t.String({ minLength: 32, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$' }),
+    client_secret: t.String({ minLength: 32, maxLength: 128 }),
+  })
+  const desktopStartSchema = t.Object({
+    transaction_id: t.String(),
+    client_secret: t.String(),
+    verification_url: t.String({ format: 'uri' }),
+    expires_in_seconds: t.Integer(),
+  })
+  const desktopCompletionBodySchema = t.Object({
+    transaction_id: t.String({ minLength: 32, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$' }),
+  })
+  const desktopCompletionSchema = t.Object({
+    callback_url: t.String({ format: 'uri' }),
+  })
 
   app.get('/health', () => ({ status: 'ok' as const }), { response: t.Object({ status: t.Literal('ok') }) })
 
+  app.post('/auth/desktop/start', async ({ request, set }) => {
+    desktopRequestOrigin(request)
+    if (!services.desktopAuth) throw new AuthError('desktop_auth_unavailable', 'Desktop sign-in is unavailable.', 503)
+    const result = await services.desktopAuth.start()
+    set.headers['cache-control'] = 'no-store'
+    return {
+      transaction_id: result.transactionId,
+      client_secret: result.clientSecret,
+      verification_url: result.verificationUrl,
+      expires_in_seconds: result.expiresInSeconds,
+    }
+  }, { response: { 200: desktopStartSchema, 403: detailSchema, 503: detailSchema } })
+
+  app.post('/auth/desktop/exchange', async ({ request, body, set }) => {
+    desktopRequestOrigin(request)
+    if (!services.desktopAuth) throw new AuthError('desktop_auth_unavailable', 'Desktop sign-in is unavailable.', 503)
+    const userId = await services.desktopAuth.exchange(body.transaction_id, body.client_secret)
+    if (!userId) throw new AuthError('invalid_desktop_transaction', 'This desktop sign-in request is invalid, expired, or already used.', 400)
+    const issued = await services.database.transaction(async (db) => services.sessions.issue(new AuthRepository(db), userId))
+    set.headers['cache-control'] = 'no-store'
+    return { token: issued.token }
+  }, { body: desktopTransactionSchema, response: { 200: t.Object({ token: t.String() }), 400: detailSchema, 403: detailSchema, 503: detailSchema } })
+
+  app.post('/auth/desktop/complete', async ({ request, body, set }) => {
+    webBrowserOrigin(request)
+    if (!services.desktopAuth) throw new AuthError('desktop_auth_unavailable', 'Desktop sign-in is unavailable.', 503)
+    const token = cookieValue(request, settings.sessionCookieName)
+    if (!token) throw new AuthError('unauthorized', 'Sign in to continue.', 401)
+    const active = await services.database.transaction(async (db) => {
+      const session = await services.sessions.resolve(new AuthRepository(db), token)
+      if (!session) throw new AuthError('unauthorized', 'Sign in to continue.', 401)
+      return session
+    })
+    const userId = active.user?.id
+    if (!userId) throw new AuthError('unauthorized', 'Sign in to continue.', 401)
+    const result = await services.desktopAuth.complete(body.transaction_id, userId)
+    set.headers['cache-control'] = 'no-store'
+    return { callback_url: result.callbackUrl }
+  }, { body: desktopCompletionBodySchema, response: { 200: desktopCompletionSchema, 400: detailSchema, 401: detailSchema, 403: detailSchema, 503: detailSchema } })
+
   app.post('/auth/otp/request', async ({ request, body, set }) => {
-    browserOrigin(request)
+    webBrowserOrigin(request)
     const challenge = await services.otp.issue(normalizeEmail(body.email), clientIp(request, peerResolver))
     set.status = 202
     set.headers['cache-control'] = 'no-store'
@@ -652,7 +737,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   }, { body: otpRequestBody, response: otpRequestResponses })
 
   app.post('/auth/otp/verify', async ({ request, body, set }) => {
-    browserOrigin(request)
+    webBrowserOrigin(request)
     const reservation = await services.otp.reserve(body.challenge_id, body.code, clientIp(request, peerResolver))
     let issued: { user: Parameters<typeof userResponse>[0]; session: { token: string } }
     try {
@@ -679,11 +764,14 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     return { user: userResponse(issued.user) }
   }, { body: otpVerifyBody, response: otpVerifyResponses })
 
-  app.get('/auth/google/start', async ({ set }) => {
+  app.get('/auth/google/start', async ({ request, set }) => {
     const result = await services.google.start()
     set.status = 303
     set.headers.Location = result.url
-    set.headers['set-cookie'] = [oauthStateCookie(result.state)] as any
+    const transactionId = new URL(request.url).searchParams.get('desktop_transaction')
+    set.headers['set-cookie'] = [oauthStateCookie(result.state), ...(transactionId && /^[A-Za-z0-9_-]{32,64}$/.test(transactionId)
+      ? [`${desktopTransactionCookieName}=${encodeURIComponent(transactionId)}; Max-Age=600; Path=/; HttpOnly; SameSite=Lax${settings.secureCookies ? '; Secure' : ''}`]
+      : [])] as any
     return undefined
   }, { response: { 303: t.Void(), 503: detailSchema } })
 
@@ -705,20 +793,26 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
         })
         return services.sessions.issue(repository, user.id)
       })
+      const transactionId = cookieValue(request, desktopTransactionCookieName)
       set.status = 303
-      set.headers.Location = `${settings.webOrigin}/`
-      set.headers['set-cookie'] = [services.sessions.cookie(issued.token), clearOauthStateCookie()] as any
+      set.headers.Location = transactionId
+        ? `${settings.webOrigin}/sign?desktop_transaction=${encodeURIComponent(transactionId)}`
+        : `${settings.webOrigin}/`
+      set.headers['set-cookie'] = [services.sessions.cookie(issued.token), clearOauthStateCookie(), `${desktopTransactionCookieName}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax`] as any
       return undefined
     } catch {
       set.status = 303
-      set.headers.Location = `${settings.webOrigin}/login?error=google`
-      set.headers['set-cookie'] = [clearOauthStateCookie()] as any
+      const transactionId = cookieValue(request, desktopTransactionCookieName)
+      set.headers.Location = transactionId
+        ? `${settings.webOrigin}/sign?desktop_transaction=${encodeURIComponent(transactionId)}&error=google`
+        : `${settings.webOrigin}/login?error=google`
+      set.headers['set-cookie'] = [clearOauthStateCookie(), ...(transactionId ? [`${desktopTransactionCookieName}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax`] : [])] as any
       return undefined
     }
   }, { response: { 303: t.Void() } })
 
   app.get('/auth/session', async ({ request }) => {
-    const token = cookieValue(request, settings.sessionCookieName)
+    const token = bearerValue(request) ?? cookieValue(request, settings.sessionCookieName)
     const session = await services.database.transaction(async (db) => {
       const repository = new AuthRepository(db)
       const active = await services.sessions.resolve(repository, token)
@@ -730,12 +824,14 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   }, { response: { 200: userSchema, 401: detailSchema } })
 
   app.post('/auth/sign-out', async ({ request }) => {
-    browserOrigin(request)
-    const token = cookieValue(request, settings.sessionCookieName)
+    const bearer = bearerValue(request)
+    if (!bearer) browserOrigin(request)
+    const token = bearer ?? cookieValue(request, settings.sessionCookieName)
     if (token) {
       await services.database.transaction(async (db) => {
         const repository = new AuthRepository(db)
         const session = await services.sessions.resolve(repository, token)
+        if (bearer && !session) throw new AuthError('unauthorized', 'Sign in to continue.', 401)
         if (session) await repository.revokeSession(session.id)
       })
     }
@@ -761,7 +857,41 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   const conversationTitleBody = t.Object({
     title: t.String({ minLength: 1, maxLength: 120 }),
   })
-  const modelPreferenceBody = t.Object({ model: modelSchema })
+  const preferenceBody = t.Object({
+    model: modelSchema,
+    reasoning_effort: t.Optional(t.Union([
+      t.Literal('none'),
+      t.Literal('low'),
+      t.Literal('medium'),
+      t.Literal('high'),
+      t.Literal('xhigh'),
+      t.Literal('max'),
+    ])),
+    speed: t.Optional(t.Union([t.Literal('standard'), t.Literal('fast')])),
+  })
+  const resolvePreferenceBody = (
+    model: string,
+    current: { reasoningEffort: string; speed: string },
+    requested: { reasoning_effort?: string; speed?: string },
+  ) => {
+    const definition = modelDefinition(model)
+    if (!definition) return undefined
+    const reasoningEfforts = definition.reasoningEfforts as readonly string[]
+    const processingModes = definition.processingModes as readonly string[]
+    return {
+      model: definition.id,
+      reasoningEffort: requested.reasoning_effort ?? (
+        reasoningEfforts.includes(current.reasoningEffort)
+          ? current.reasoningEffort
+          : definition.defaultReasoningEffort
+      ),
+      speed: requested.speed ?? (
+        processingModes.includes(current.speed)
+          ? current.speed
+          : definition.defaultProcessingMode
+      ),
+    }
+  }
   const projectOrderBody = t.Object({
     project_ids: t.Array(t.String({ format: 'uuid' })),
   })
@@ -787,7 +917,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     speed: t.Union([t.Literal('standard'), t.Literal('fast')]),
   })
   const sessionUser = async (request: Request) => {
-    const token = cookieValue(request, settings.sessionCookieName)
+    const token = bearerValue(request) ?? cookieValue(request, settings.sessionCookieName)
     return services.database.transaction(async (db) => {
       const active = await services.sessions.resolve(new AuthRepository(db), token)
       if (!active) throw new AuthError('unauthorized', 'Sign in to continue.', 401)
@@ -886,12 +1016,31 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   app.patch('/preferences/model', async ({ request, body }) => {
     browserOrigin(request)
     const user = await sessionUser(request)
+    const preferences = resolvePreferenceBody(body.model, {
+      reasoningEffort: user.defaultReasoningEffort,
+      speed: user.defaultSpeed,
+    }, body)
+    if (!preferences || !validModelSelection(
+      preferences.model,
+      preferences.reasoningEffort,
+      preferences.speed,
+    )) {
+      throw new AuthError(
+        'invalid_model_options',
+        'The selected reasoning effort or processing mode is not available for this model.',
+        400,
+      )
+    }
     const updated = await services.database.transaction(async (db) => {
-      return new AuthRepository(db).updateDefaultModel(user.id, body.model)
+      return new AuthRepository(db).updateDefaultPreferences(user.id, {
+        model: preferences.model,
+        reasoningEffort: preferences.reasoningEffort,
+        speed: preferences.speed,
+      })
     })
     if (!updated) throw new AuthError('not_found', 'Not Found', 404)
     return userResponse(updated)
-  }, { body: modelPreferenceBody })
+  }, { body: preferenceBody })
 
   const connectionParams = t.Object({
     connectionId: t.String({ minLength: 1, maxLength: 100 }),
@@ -1243,15 +1392,34 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       const repository = new ConversationRepository(db)
       const owned = await repository.lockOwned(user.id, params.conversationId)
       if (!owned) return undefined
-      if (owned.model === body.model) return owned
-      return repository.updateModel(user.id, owned, body.model)
+      const preferences = resolvePreferenceBody(body.model, {
+        reasoningEffort: owned.reasoningEffort,
+        speed: owned.speed,
+      }, body)
+      if (!preferences || !validModelSelection(
+        preferences.model,
+        preferences.reasoningEffort,
+        preferences.speed,
+      )) {
+        throw new AuthError(
+          'invalid_model_options',
+          'The selected reasoning effort or processing mode is not available for this model.',
+          400,
+        )
+      }
+      if (
+        owned.model === preferences.model &&
+        owned.reasoningEffort === preferences.reasoningEffort &&
+        owned.speed === preferences.speed
+      ) return owned
+      return repository.updatePreferences(user.id, owned, preferences)
     })
     if (!conversation) {
       set.status = 404
       return { detail: { code: 'not_found', message: 'Not Found' } }
     }
     return publicConversation(conversation)
-  }, { params: conversationParams, body: modelPreferenceBody })
+  }, { params: conversationParams, body: preferenceBody })
 
   app.delete('/conversations/:conversationId', async ({ request, params, set }) => {
     browserOrigin(request)
@@ -1377,12 +1545,32 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
           )
         }
         if (!conversationId) {
-          conversation = await repository.create(user.id, conversationTitle(message), definition.id)
-          if (user.defaultModel !== definition.id) {
-            await new AuthRepository(db).updateDefaultModel(user.id, definition.id)
+          conversation = await repository.create(user.id, conversationTitle(message), {
+            model: definition.id,
+            reasoningEffort: options.reasoning_effort,
+            speed: options.speed,
+          })
+          if (
+            user.defaultModel !== definition.id ||
+            user.defaultReasoningEffort !== options.reasoning_effort ||
+            user.defaultSpeed !== options.speed
+          ) {
+            await new AuthRepository(db).updateDefaultPreferences(user.id, {
+              model: definition.id,
+              reasoningEffort: options.reasoning_effort,
+              speed: options.speed,
+            })
           }
-        } else if (conversation && conversation.model !== definition.id) {
-          conversation = await repository.updateModel(user.id, conversation, definition.id)
+        } else if (conversation && (
+          conversation.model !== definition.id ||
+          conversation.reasoningEffort !== options.reasoning_effort ||
+          conversation.speed !== options.speed
+        )) {
+          conversation = await repository.updatePreferences(user.id, conversation, {
+            model: definition.id,
+            reasoningEffort: options.reasoning_effort,
+            speed: options.speed,
+          })
         }
         if (!conversation) throw new AuthError('not_found', 'Not Found', 404)
         const modelOptions = {

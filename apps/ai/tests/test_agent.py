@@ -9,7 +9,6 @@ import anyio
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage
-from langchain_xai import ChatXAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 from pydantic import ValidationError
@@ -154,28 +153,12 @@ class ResultChunk:
     content_blocks = [{"type": "server_tool_result", "tool_call_id": "ws1", "status": "completed"}]
 
 
-class XAIChunk:
-    content = ""
-    content_blocks = [{"type": "reasoning", "reasoning": "raw secret reasoning"}]
-    additional_kwargs = {
-        "reasoning_content": "raw secret reasoning",
-        "reasoning_summary": [{"text": "Safe xAI summary"}],
-    }
-    response_metadata = {"model_provider": "xai"}
-
-
 class FakeGraph:
     async def astream_events(self, _input, version, **_kwargs):
         assert version == "v2"
         assert _kwargs["durability"] == "sync"
         yield {"event": "on_chat_model_stream", "data": {"chunk": Chunk()}}
         yield {"event": "on_chat_model_stream", "data": {"chunk": ResultChunk()}}
-
-
-class XAIStream:
-    async def astream_events(self, _input, version, **_kwargs):
-        assert version == "v2"
-        yield {"event": "on_chat_model_stream", "data": {"chunk": XAIChunk()}}
 
 
 class ActivityStream:
@@ -296,18 +279,6 @@ def test_stream_normalizes_reasoning_text_and_web_sources() -> None:
             "domain": "example.com",
         }
     ]
-
-
-def test_xai_stream_exposes_only_explicit_reasoning_summaries() -> None:
-    events = collect(stream_model(XAIStream(), [], provider="xai"))
-    assert events == [{"type": "reasoning.delta", "data": {"delta": "Safe xAI summary"}}]
-    assert "raw secret reasoning" not in json.dumps(events)
-
-
-def test_openrouter_stream_excludes_raw_reasoning_blocks() -> None:
-    events = collect(stream_model(XAIStream(), [], provider="openrouter"))
-    assert events == [{"type": "reasoning.delta", "data": {"delta": "Safe xAI summary"}}]
-    assert "raw secret reasoning" not in json.dumps(events)
 
 
 def test_plan_tool_and_child_events_are_normalized() -> None:
@@ -659,61 +630,13 @@ def test_stream_rejects_bad_auth_and_extra_fields() -> None:
     assert response.status_code == 422
 
 
-@pytest.mark.parametrize(
-    ("model", "effort", "speed"),
-    [
-        ("grok-4.6", "high", "fast"),
-        ("grok-4.3", "xhigh", "standard"),
-        ("glm-5.2", "medium", "standard"),
-    ],
-)
-def test_request_validates_provider_capabilities(model, effort, speed) -> None:
+def test_request_rejects_unsupported_models() -> None:
     response = client().post(
         "/agent/stream",
-        json={**PAYLOAD, "model": model, "reasoning_effort": effort, "speed": speed},
+        json={**PAYLOAD, "model": "unsupported-model"},
         headers={"Authorization": "Bearer test-token"},
     )
     assert response.status_code == 422
-
-
-def test_missing_xai_provider_is_safe() -> None:
-    application = create_app(
-        Settings(environment="test", ai_service_token="test-token", xai_api_key="")
-    )
-    response = TestClient(application).post(
-        "/agent/stream",
-        json={**PAYLOAD, "model": "grok-4.6", "reasoning_effort": "high"},
-        headers={"Authorization": "Bearer test-token"},
-    )
-    assert response.status_code == 503
-    assert response.json() == {
-        "detail": {
-            "code": "provider_missing",
-            "message": "The selected AI provider is not configured.",
-        }
-    }
-
-
-def test_missing_openrouter_provider_is_safe() -> None:
-    application = create_app(
-        Settings(
-            environment="test",
-            ai_service_token="test-token",
-            openrouter_api_key="",
-        )
-    )
-    response = TestClient(application).post(
-        "/agent/stream",
-        json={**PAYLOAD, "model": "glm-5.2", "reasoning_effort": "high"},
-        headers={"Authorization": "Bearer test-token"},
-    )
-    assert response.status_code == 503
-    assert response.json() == {
-        "detail": {
-            "code": "provider_missing",
-            "message": "The selected AI provider is not configured.",
-        }
-    }
 
 
 def test_provider_constructors_receive_only_supported_settings() -> None:
@@ -728,33 +651,6 @@ def test_provider_constructors_receive_only_supported_settings() -> None:
     assert openai["service_tier"] == "fast"
     assert openai["store"] is False
     assert provider_builtin_tools(openai_settings) == [{"type": "web_search"}]
-
-    with patch("my_bot_ai.features.agent.models.ChatXAI", side_effect=lambda **kwargs: kwargs):
-        xai, xai_settings = build_chat_model(
-            Settings(xai_api_key="xai-key"), "grok-4.6", None, "standard"
-        )
-    assert xai["reasoning_effort"] == "high"
-    assert "service_tier" not in xai
-    assert "use_responses_api" not in xai
-    assert provider_builtin_tools(xai_settings) == []
-
-    with patch(
-        "my_bot_ai.features.agent.models.ChatOpenAI", side_effect=lambda **kwargs: kwargs
-    ):
-        glm, glm_settings = build_chat_model(
-            Settings(openrouter_api_key="openrouter-key"),
-            "glm-5.2",
-            None,
-            "standard",
-        )
-    assert glm["model"] == "z-ai/glm-5.2:free"
-    assert glm["base_url"] == "https://openrouter.ai/api/v1"
-    assert glm["use_responses_api"] is False
-    assert glm["extra_body"] == {
-        "reasoning": {"effort": "high", "exclude": True}
-    }
-    assert "store" not in glm
-    assert provider_builtin_tools(glm_settings) == []
 
     assert resolve_model_settings("gpt-5.6-terra", "none", "standard").reasoning_effort == "none"
 
@@ -916,17 +812,6 @@ def test_child_agents_are_recursive_configurable_and_checkpoint_led() -> None:
     assert child_thread_id(RUN, "child-call-1") == child_thread_id(RUN, "child-call-1")
     with pytest.raises(ValueError):
         child_thread_id(RUN, "x" * (MAX_TOOL_CALL_ID_LENGTH + 1))
-
-
-def test_grok_46_registry_overrides_missing_langchain_profile_and_payload_is_correct() -> None:
-    resolved = resolve_model_settings("grok-4.6", None, "standard")
-    assert resolved.reasoning_effort == "high"
-
-    model = ChatXAI(model="grok-4.6", api_key="test-xai-key", reasoning_effort="xhigh")
-    assert model._resolve_model_profile() is None
-    payload = model._get_request_payload([HumanMessage(content="hello")])
-    assert payload["extra_body"]["reasoning_effort"] == "xhigh"
-    assert "reasoning_effort" not in payload
 
 
 class AskState(TypedDict, total=False):

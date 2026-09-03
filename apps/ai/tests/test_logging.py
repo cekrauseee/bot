@@ -159,7 +159,7 @@ def test_provider_quota_is_distinct_from_rate_limit() -> None:
         status_code = 429
 
     quota = classify_error(QuotaError(), "openai")
-    limited = classify_error(RateLimitError(), "xai")
+    limited = classify_error(RateLimitError(), "openai")
     assert quota == {
         "error_type": "QuotaError",
         "error_category": "provider_quota",
@@ -170,7 +170,7 @@ def test_provider_quota_is_distinct_from_rate_limit() -> None:
     }
     assert limited["error_category"] == "provider_rate_limit"
     assert limited["retryable"] is True
-    assert limited["provider"] == "xai"
+    assert limited["provider"] == "openai"
 
 
 def test_public_error_codes_are_allowlisted() -> None:

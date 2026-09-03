@@ -128,7 +128,7 @@
         <div class="flow" role="group" aria-label="Requests flow from the web app to the API, the agent service, and the isolated tool runtime">
           <article class="node">
             <span class="number">01</span><h3>Web interface</h3>
-            <span class="tech">Vite · React · beUI</span>
+            <span class="tech">Vite · React · shadcn/Base UI</span>
             <p>Messages, model controls, task-plan badge, questions, Stop, and browser preview.</p>
             <p><code>apps/web</code> · port 5173</p>
           </article>
@@ -198,7 +198,7 @@
           <summary>Ask for input and resume<small>Structured questions with a durable waiting state.</small></summary>
           <ul>
             <li><code>ask_user</code> interrupts the graph for one or more sequential questions.</li>
-            <li>Questions support single choice, multiple choice, descriptions, and optional custom answers through beUI.</li>
+            <li>Questions support single choice, multiple choice, descriptions, and optional custom answers through the web interface.</li>
             <li>Answers retain their string or array shape. A matching answer resumes the checkpoint once.</li>
             <li>Stop remains available while waiting. Cancellation disables the pending question and ends the browser preview.</li>
           </ul>
@@ -213,12 +213,12 @@
           </ul>
         </details>
         <details>
-          <summary>Continue beyond the current view<small>Background execution, reconnect, provider-aware output.</small></summary>
+          <summary>Continue beyond the current view<small>Background execution, reconnect, and normalized output.</small></summary>
           <ul>
             <li>Leaving a task detaches the view without cancelling its run. Returning hydrates the active run, plan, and pending question.</li>
             <li>The interface subscribes to the selected run and reconnects using a durable decimal event cursor.</li>
             <li>Text, safe reasoning summaries, searches, runtime tools, and child activity have normalized events. OpenAI also has built-in web search.</li>
-            <li>Model selection adapts reasoning and Fast controls. xAI raw reasoning is not displayed as a summary.</li>
+            <li>Model selection adapts reasoning and Fast controls for the supported GPT models.</li>
           </ul>
         </details>
       </div>
@@ -267,12 +267,10 @@
       <h2 id="models-heading">Model controls in this implementation</h2>
       <div class="table-wrap" role="region" aria-label="Model capability table" tabindex="0">
         <table>
-          <caption>Catalog snapshot from the application code, not a live provider-availability check. Grok uses xAI, not the Groq provider.</caption>
+          <caption>Catalog snapshot from the application code, not a live provider-availability check.</caption>
           <thead><tr><th scope="col">Provider / models</th><th scope="col">Reasoning effort</th><th scope="col">Default</th><th scope="col">Speed</th></tr></thead>
           <tbody>
             <tr><td><strong>OpenAI</strong><br>GPT-5.6 Sol · Terra · Luna</td><td>none · low · medium · high · xhigh · max</td><td>medium</td><td>standard · fast</td></tr>
-            <tr><td><strong>xAI</strong> · Grok 4.6</td><td>low · medium · high · xhigh</td><td>high</td><td>standard</td></tr>
-            <tr><td><strong>xAI</strong> · Grok 4.3</td><td>none · low · medium · high</td><td>medium</td><td>standard</td></tr>
           </tbody>
         </table>
       </div>
@@ -295,7 +293,7 @@
         </table>
       </div>
       <aside class="note" aria-label="Technology decisions">
-        <p><strong>One current stack:</strong> LangChain/LangGraph for orchestration; Node/Elysia for the product API; Node + Vercel Sandbox for tools; PostgreSQL for durable state; Redis for fanout; React/beUI for the interface.</p>
+        <p><strong>One current stack:</strong> LangChain/LangGraph for orchestration; Node/Elysia for the product API; Node + Vercel Sandbox for tools; PostgreSQL for durable state; Redis for fanout; React with shadcn/Base UI for the interface.</p>
         <p>Just Bash, a separate app-level Playwright integration, per-user Docker provisioning, and a custom behavior harness were not added. Turbo owns JavaScript tasks; <code>uv</code> owns Python dependencies. Local Docker Compose runs PostgreSQL and Redis.</p>
       </aside>
     </section>

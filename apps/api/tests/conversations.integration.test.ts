@@ -202,8 +202,8 @@ describe('PostgreSQL conversation flow', () => {
       )
     const turn = {
       message: 'Use the persisted model',
-      reasoning_effort: 'medium',
-      speed: 'standard',
+      reasoning_effort: 'high',
+      speed: 'fast',
     }
 
     try {
@@ -211,12 +211,26 @@ describe('PostgreSQL conversation flow', () => {
         default_model: 'gpt-5.6-sol',
       })
 
+      const legacyPreference = await request('/preferences/model', 'PATCH', {
+        model: 'gpt-5.6-sol',
+      })
+      expect(legacyPreference.status).toBe(200)
+      expect(await legacyPreference.json()).toMatchObject({
+        default_model: 'gpt-5.6-sol',
+        default_reasoning_effort: 'medium',
+        default_speed: 'standard',
+      })
+
       const preference = await request('/preferences/model', 'PATCH', {
         model: 'gpt-5.6-luna',
+        reasoning_effort: 'high',
+        speed: 'fast',
       })
       expect(preference.status).toBe(200)
       expect(await preference.json()).toMatchObject({
         default_model: 'gpt-5.6-luna',
+        default_reasoning_effort: 'high',
+        default_speed: 'fast',
       })
 
       const firstEvents = await parseEvents(await request('/conversations/turns', 'POST', turn))
@@ -225,17 +239,34 @@ describe('PostgreSQL conversation flow', () => {
         model: string
       }
       expect(first.model).toBe('gpt-5.6-luna')
+      expect(first).toMatchObject({ reasoning_effort: 'high', speed: 'fast' })
       expect(firstEvents[0].data.assistant_message).toMatchObject({
         model: 'gpt-5.6-luna',
       })
 
       expect(
-        (await request(`/conversations/${first.id}/model`, 'PATCH', { model: 'gpt-5.6-terra' }, other.cookie)).status,
+        (await request(`/conversations/${first.id}/model`, 'PATCH', {
+          model: 'gpt-5.6-terra', reasoning_effort: 'high', speed: 'fast',
+        }, other.cookie)).status,
       ).toBe(404)
-      const changed = await request(`/conversations/${first.id}/model`, 'PATCH', { model: 'gpt-5.6-terra' })
+      const legacyConversationPreference = await request(`/conversations/${first.id}/model`, 'PATCH', {
+        model: 'gpt-5.6-sol',
+      })
+      expect(legacyConversationPreference.status).toBe(200)
+      expect(await legacyConversationPreference.json()).toMatchObject({
+        id: first.id,
+        model: 'gpt-5.6-sol',
+        reasoning_effort: 'high',
+        speed: 'fast',
+      })
+      const changed = await request(`/conversations/${first.id}/model`, 'PATCH', {
+        model: 'gpt-5.6-terra', reasoning_effort: 'high', speed: 'fast',
+      })
       expect(await changed.json()).toMatchObject({
         id: first.id,
         model: 'gpt-5.6-terra',
+        reasoning_effort: 'high',
+        speed: 'fast',
       })
 
       const continuedEvents = await parseEvents(
@@ -246,13 +277,19 @@ describe('PostgreSQL conversation flow', () => {
       )
       expect(continuedEvents[0].data.conversation).toMatchObject({
         model: 'gpt-5.6-terra',
+        reasoning_effort: 'high',
+        speed: 'fast',
       })
       expect(continuedEvents[0].data.assistant_message).toMatchObject({
         model: 'gpt-5.6-terra',
+        reasoning_effort: 'high',
+        speed: 'fast',
       })
 
       expect(await (await request('/auth/session')).json()).toMatchObject({
         default_model: 'gpt-5.6-luna',
+        default_reasoning_effort: 'high',
+        default_speed: 'fast',
       })
       const secondEvents = await parseEvents(
         await request('/conversations/turns', 'POST', {
@@ -262,6 +299,8 @@ describe('PostgreSQL conversation flow', () => {
       )
       expect(secondEvents[0].data.conversation).toMatchObject({
         model: 'gpt-5.6-luna',
+        reasoning_effort: 'high',
+        speed: 'fast',
       })
     } finally {
       await pool.query('delete from users where id = any($1::uuid[])', [[owner.id, other.id]])
@@ -293,7 +332,7 @@ describe('PostgreSQL conversation flow', () => {
         },
         body: JSON.stringify({
           message: '  First persistent conversation  ',
-          model: 'glm-5.2',
+          model: 'gpt-5.6-sol',
           reasoning_effort: 'high',
           speed: 'standard',
         }),
@@ -345,7 +384,7 @@ describe('PostgreSQL conversation flow', () => {
         content: 'A **streamed** answer.\n\n```ts\nconst ready = true\n```',
         reasoning: 'Checked the request.',
         status: 'completed',
-        model: 'glm-5.2',
+        model: 'gpt-5.6-sol',
         reasoning_effort: 'high',
         speed: 'standard',
         activities: [
@@ -826,7 +865,7 @@ describe('PostgreSQL conversation flow', () => {
           },
           body: JSON.stringify({
             message: 'Continue this seeded conversation.',
-            model: 'glm-5.2',
+            model: 'gpt-5.6-sol',
             reasoning_effort: 'high',
             speed: 'standard',
           }),
@@ -1048,9 +1087,6 @@ describe('PostgreSQL conversation flow', () => {
           { id: 'gpt-5.6-sol', provider: 'openai' },
           { id: 'gpt-5.6-terra', provider: 'openai' },
           { id: 'gpt-5.6-luna', provider: 'openai' },
-          { id: 'grok-4.6', provider: 'xai' },
-          { id: 'grok-4.3', provider: 'xai' },
-          { id: 'glm-5.2', provider: 'openrouter' },
         ],
       })
 
@@ -1062,38 +1098,23 @@ describe('PostgreSQL conversation flow', () => {
           { id: 'gpt-5.6-sol', provider: 'openai', active: true },
           { id: 'gpt-5.6-terra', provider: 'openai', active: true },
           { id: 'gpt-5.6-luna', provider: 'openai', active: true },
-          { id: 'grok-4.6', provider: 'xai', active: true },
-          { id: 'grok-4.3', provider: 'xai', active: true },
-          { id: 'glm-5.2', provider: 'openrouter', active: true },
         ],
       })
 
       const fallbackPreference = await request('/preferences/model', {
         method: 'PATCH',
         headers: { origin: settings.webOrigin, 'content-type': 'application/json' },
-        body: JSON.stringify({ model: 'gpt-5.6-sol' }),
-      })
-      expect(fallbackPreference.status).toBe(200)
-
-      const invalid = await request('/conversations/turns', {
-        method: 'POST',
-        headers: { origin: settings.webOrigin, 'content-type': 'application/json' },
         body: JSON.stringify({
-          message: 'Must not create a run', model: 'grok-4.6',
-          reasoning_effort: 'high', speed: 'fast',
+          model: 'gpt-5.6-sol', reasoning_effort: 'medium', speed: 'standard',
         }),
       })
-      expect(invalid.status).toBe(400)
-      const invalidRuns = await pool.query<{ count: string }>(
-        'select count(*) from agent_runs where user_id = $1', [owner.id],
-      )
-      expect(Number(invalidRuns.rows[0].count)).toBe(0)
+      expect(fallbackPreference.status).toBe(200)
 
       const started = await request('/conversations/turns', {
         method: 'POST',
         headers: { origin: settings.webOrigin, 'content-type': 'application/json' },
         body: JSON.stringify({
-          message: 'Pause for input', model: 'grok-4.6',
+          message: 'Pause for input', model: 'gpt-5.6-terra',
           reasoning_effort: 'high', speed: 'standard',
         }),
       })
@@ -1119,8 +1140,8 @@ describe('PostgreSQL conversation flow', () => {
       }
       expect(waitingState).toMatchObject({
         status: 'waiting',
-        model: 'grok-4.6',
-        provider: 'xai',
+        model: 'gpt-5.6-terra',
+        provider: 'openai',
         reasoning_effort: 'high',
         speed: 'standard',
         plan: [{ id: 'inspect', title: 'Inspect the task', status: 'in_progress' }],
@@ -1139,8 +1160,8 @@ describe('PostgreSQL conversation flow', () => {
           plan: [{ id: 'inspect', title: 'Inspect the task', status: 'in_progress' }],
           pending_question: { question_id: 'question-1', prompt: 'Continue?' },
           browser_projection: null,
-          model: 'grok-4.6',
-          provider: 'xai',
+          model: 'gpt-5.6-terra',
+          provider: 'openai',
           reasoning_effort: 'high',
           speed: 'standard',
         },
@@ -1222,7 +1243,7 @@ describe('PostgreSQL conversation flow', () => {
         version: 2,
         run_id: runId,
         workspace_id: waitingState.workspace_id,
-        model: 'grok-4.6',
+        model: 'gpt-5.6-terra',
         reasoning_effort: 'high',
         speed: 'standard',
       })
@@ -1270,7 +1291,7 @@ describe('PostgreSQL conversation flow', () => {
         method: 'POST',
         headers: { origin: settings.webOrigin, 'content-type': 'application/json' },
         body: JSON.stringify({
-          message: 'Continue the task', model: 'grok-4.6',
+          message: 'Continue the task', model: 'gpt-5.6-terra',
           reasoning_effort: 'high', speed: 'standard',
         }),
       })
@@ -1331,12 +1352,13 @@ describe('PostgreSQL conversation flow', () => {
       const conversations = new ConversationRepository(db)
       const projects = new ProjectRepository(db)
       const project = await projects.create(owner.id, 'Pinned project', 'pinned-project')
-      const first = await conversations.create(owner.id, 'First pinned', 'gpt-5.6-sol')
-      const second = await conversations.create(owner.id, 'Second pinned', 'gpt-5.6-sol')
-      const third = await conversations.create(owner.id, 'Third pinned', 'gpt-5.6-sol')
-      const fourth = await conversations.create(owner.id, 'Fourth pinned', 'gpt-5.6-sol')
+      const preferences = { model: 'gpt-5.6-sol', reasoningEffort: 'medium', speed: 'standard' }
+      const first = await conversations.create(owner.id, 'First pinned', preferences)
+      const second = await conversations.create(owner.id, 'Second pinned', preferences)
+      const third = await conversations.create(owner.id, 'Third pinned', preferences)
+      const fourth = await conversations.create(owner.id, 'Fourth pinned', preferences)
       const foreignUser = await new AuthRepository(db).findUserByEmail(other.email)
-      const foreign = await conversations.create(foreignUser!.id, 'Foreign conversation', 'gpt-5.6-sol')
+      const foreign = await conversations.create(foreignUser!.id, 'Foreign conversation', preferences)
       await conversations.assignProject(owner.id, first.id, project!.id)
       return { first, second, third, fourth, foreign, project: project! }
     })
@@ -1406,7 +1428,9 @@ describe('PostgreSQL conversation flow', () => {
       const conversations = new ConversationRepository(db)
       const projects = new ProjectRepository(db)
       const project = await projects.create(owner.id, 'Rename project', 'rename-project')
-      const conversation = await conversations.create(owner.id, 'Original title', 'gpt-5.6-sol')
+      const conversation = await conversations.create(owner.id, 'Original title', {
+        model: 'gpt-5.6-sol', reasoningEffort: 'medium', speed: 'standard',
+      })
       await conversations.assignProject(owner.id, conversation.id, project!.id)
       return { conversation, project: project! }
     })

@@ -35,8 +35,6 @@ class Settings(BaseSettings):
     ai_base_url: AnyHttpUrl
     database_url: str | None = None
     openai_api_key: str | None = None
-    xai_api_key: str | None = None
-    openrouter_api_key: str | None = None
     ai_service_token: str
     runtime_base_url: AnyHttpUrl
     runtime_service_token: str | None = None

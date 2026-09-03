@@ -4,7 +4,7 @@ export const commandSections = [
     commands: [
       ['help', 'Show this command guide'],
       ['setup', 'Prepare a fresh development environment'],
-      ['dev', 'Run the web, API, AI, and runtime services together'],
+      ['dev', 'Run the web, desktop, API, AI, and runtime applications together'],
     ],
   },
   {
@@ -61,7 +61,11 @@ export const commandSections = [
     title: 'Web',
     commands: [
       ['web:dev', 'Run the Vite application'],
-      ['web:rebuild:dev', 'Run the rebuilt Vite application'],
+      ['desktop:dev', 'Run the Electron application'],
+      ['desktop:package', 'Package the Electron application'],
+      ['desktop:make', 'Build Electron distributables'],
+      ['desktop:install', 'Build and install the macOS application'],
+      ['icons:build', 'Generate canonical application icons'],
       ['web:lint', 'Lint the web application'],
       ['web:typecheck', 'Type-check the web application'],
       ['web:test', 'Run web application unit tests'],

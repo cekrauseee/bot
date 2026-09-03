@@ -5,6 +5,7 @@ import { Database } from './db/database.js'
 import { ResendOtpEmailSender } from './email.js'
 import { GoogleOAuthService } from './modules/auth/oauth.js'
 import { OtpService } from './modules/auth/otp.js'
+import { DesktopAuthService } from './modules/auth/desktop.js'
 import { SessionManager } from './modules/auth/sessions.js'
 import { CodexAppServerManager } from './modules/codex-app-server.js'
 import { DatabaseProviderConnectionSettings } from './modules/provider-connections.js'
@@ -44,6 +45,7 @@ const app = createApp(
     database,
     otp: new OtpService(redis, new ResendOtpEmailSender(settings.resendApiKey, settings.resendFrom), settings),
     sessions: new SessionManager(settings),
+    desktopAuth: new DesktopAuthService(redis, settings),
     google: new GoogleOAuthService(redis, settings),
     agentRuns,
     providerConnectionAdapters: {

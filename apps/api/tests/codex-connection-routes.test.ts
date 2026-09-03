@@ -11,6 +11,8 @@ const user = {
   lastName: null,
   avatarUrl: null,
   defaultModel: 'gpt-5.6-sol',
+  defaultReasoningEffort: 'medium',
+  defaultSpeed: 'standard',
 }
 
 const connected = {
