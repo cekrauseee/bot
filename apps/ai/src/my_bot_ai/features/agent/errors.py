@@ -37,7 +37,14 @@ class CheckpointMissingError(AgentServiceError):
 
 
 class RuntimeCallError(AgentServiceError):
-    public_error = PublicAgentError("runtime_error", "The runtime tool failed.", True)
+    def __init__(
+        self,
+        code: str = "runtime_error",
+        message: str = "The runtime tool failed.",
+        retryable: bool = True,
+    ) -> None:
+        self.public_error = PublicAgentError(code, message, retryable)
+        super().__init__(message)
 
 
 class RuntimeRecoveryRequiredError(AgentServiceError):

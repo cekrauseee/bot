@@ -9,6 +9,7 @@ import anyio
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 from pydantic import ValidationError
@@ -22,10 +23,19 @@ from my_bot_ai.features.agent.contracts import (
     PlanStep,
     resolve_model_settings,
 )
-from my_bot_ai.features.agent.errors import CheckpointMissingError, InvalidResumeError
+from my_bot_ai.features.agent.errors import (
+    CheckpointMissingError,
+    InvalidResumeError,
+    RuntimeCallError,
+)
 from my_bot_ai.features.agent.models import build_chat_model, provider_builtin_tools
 from my_bot_ai.features.agent.service import (
+    GRAPH_RECURSION_LIMIT,
+    GRAPH_RECURSION_MARGIN,
     MAX_TOOL_CALL_ID_LENGTH,
+    MAX_TOOL_CALLS_PER_RUN,
+    _safe_tool_error,
+    _tool_error_middleware,
     build_model,
     child_thread_id,
     prepare_agent_request,
@@ -246,10 +256,53 @@ class BrowserFrameStream:
         }
 
 
+class RecoveredBrowserFailureStream:
+    async def astream_events(self, _input, version, **_kwargs):
+        assert version == "v2"
+        yield {
+            "event": "on_tool_end",
+            "name": "browser_click",
+            "run_id": "browser-recovery-1",
+            "data": {
+                "output": SimpleNamespace(
+                    content=json.dumps(
+                        {
+                            "ok": False,
+                            "error": {
+                                "code": "browser_action_failed",
+                                "message": "The browser action could not be completed.",
+                                "retryable": True,
+                            },
+                        }
+                    )
+                )
+            },
+        }
+
+
 class CancelledGraph:
     async def astream_events(self, _input, version, **_kwargs):
         assert version == "v2"
         raise asyncio.CancelledError
+        yield  # pragma: no cover
+
+
+class RecursionLimitedGraph:
+    async def astream_events(self, _input, version, **_kwargs):
+        assert version == "v2"
+        raise GraphRecursionError("recursion limit reached")
+        yield  # pragma: no cover
+
+    async def aget_state(self, _config):
+        return SimpleNamespace(
+            values={"messages": [HumanMessage("hello"), AIMessage("Partial answer")]}
+        )
+
+
+class EmptyRecursionLimitedGraph:
+    async def astream_events(self, _input, version, **_kwargs):
+        assert version == "v2"
+        raise GraphRecursionError("recursion limit reached")
         yield  # pragma: no cover
 
 
@@ -279,6 +332,54 @@ def test_stream_normalizes_reasoning_text_and_web_sources() -> None:
             "domain": "example.com",
         }
     ]
+
+
+def test_recursion_limit_emits_saved_partial_answer_as_truthful_completion() -> None:
+    events = collect(
+        stream_model(
+            RecursionLimitedGraph(), [], config={"recursion_limit": GRAPH_RECURSION_LIMIT}
+        )
+    )
+
+    assert events == [
+        {"type": "text.delta", "data": {"delta": "Partial answer"}},
+        {
+            "type": "turn.completed",
+            "data": {
+                "outcome": "recursion_limit",
+                "partial": True,
+                "message": (
+                    "The execution budget was reached; the answer above is the latest "
+                    "saved result."
+                ),
+            },
+        },
+    ]
+
+
+def test_recursion_limit_without_output_is_a_specific_failure() -> None:
+    events = collect(
+        stream_model(
+            EmptyRecursionLimitedGraph(), [], config={"recursion_limit": GRAPH_RECURSION_LIMIT}
+        )
+    )
+
+    assert events == [
+        {
+            "type": "turn.failed",
+            "data": {
+                "error": {
+                    "code": "execution_budget_exhausted",
+                    "message": "The execution budget was reached before a useful answer was saved.",
+                    "retryable": False,
+                }
+            },
+        }
+    ]
+
+
+def test_tool_budget_leaves_recursion_margin_for_finalization() -> None:
+    assert 2 * MAX_TOOL_CALLS_PER_RUN + 2 + GRAPH_RECURSION_MARGIN <= GRAPH_RECURSION_LIMIT
 
 
 def test_plan_tool_and_child_events_are_normalized() -> None:
@@ -329,6 +430,76 @@ def test_browser_tool_events_project_truthful_durable_status() -> None:
         "control": "agent",
         "message": "The browser operation failed.",
     }
+
+
+def test_recovered_tool_failure_remains_visible_to_the_agent_and_user() -> None:
+    events = collect(stream_model(RecoveredBrowserFailureStream(), []))
+    assert events == [
+        {
+            "type": "tool.completed",
+            "data": {
+                "tool": {
+                    "id": "browser-recovery-1",
+                    "name": "browser_click",
+                    "label": "Could not interact with the page",
+                    "status": "failed",
+                    "detail": "The browser action could not be completed.",
+                },
+                "browser_projection": {
+                    "state": "failed",
+                    "control": "agent",
+                    "message": "The browser action could not be completed.",
+                },
+            },
+        }
+    ]
+
+
+def test_tool_failures_are_safe_structured_feedback() -> None:
+    browser = json.loads(_safe_tool_error(RuntimeCallError(), "browser_click"))
+    generic = json.loads(_safe_tool_error(RuntimeError("private"), "filesystem_read"))
+
+    assert browser == {
+        "ok": False,
+        "error": {
+            "code": "browser_action_failed",
+            "message": (
+                "The browser action could not be completed. Inspect the latest page "
+                "state and choose another safe interaction."
+            ),
+            "retryable": True,
+        },
+    }
+    assert generic == {
+        "ok": False,
+        "error": {
+            "code": "tool_execution_failed",
+            "message": "The tool could not complete this action.",
+            "retryable": True,
+        },
+    }
+
+
+def test_tool_error_middleware_returns_failures_to_the_model() -> None:
+    async def run() -> None:
+        middleware = _tool_error_middleware()
+
+        async def failing_handler(_request):
+            raise RuntimeCallError
+
+        result = await middleware.awrap_tool_call(
+            SimpleNamespace(
+                tool=SimpleNamespace(name="browser_click"),
+                tool_call={"id": "call-1", "name": "browser_click"},
+            ),
+            failing_handler,
+        )
+        assert result.status == "error"
+        assert json.loads(result.content) == json.loads(
+            _safe_tool_error(RuntimeCallError(), "browser_click")
+        )
+
+    anyio.run(run)
 
 
 def test_browser_frames_are_normalized_as_transient_events() -> None:
@@ -789,6 +960,8 @@ def test_child_agents_are_recursive_configurable_and_checkpoint_led() -> None:
         assert "The shared workspace root is /workspace." in prompt
         assert f"Your working directory is {working_directory}." in prompt
         assert "Other files in /workspace remain accessible." in prompt
+        assert "A tool failure is returned as JSON with ok:false" in prompt
+        assert len(call["middleware"]) == 1
     assert "Current task plan (context only)" in created[0]["system_prompt"]
     assert all(
         "Current task plan (context only)" not in call["system_prompt"] for call in created[1:]

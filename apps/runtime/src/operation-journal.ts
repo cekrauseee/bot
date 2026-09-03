@@ -47,6 +47,7 @@ const RECOVERY_POLICIES: Readonly<Record<RuntimeToolName, RecoveryPolicy>> = {
   'browser.snapshot': 'safe_read',
   'browser.click': 'manual',
   'browser.type': 'manual',
+  'browser.press': 'manual',
   'browser.request_user_control': 'manual',
   'browser.release_control': 'manual',
   'browser.close': 'manual',

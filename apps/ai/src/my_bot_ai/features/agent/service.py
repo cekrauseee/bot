@@ -5,13 +5,17 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any, Literal
 from uuid import UUID
 
 from langchain.agents import create_agent
+from langchain.agents.middleware import ToolErrorMiddleware
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool
+from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
 from my_bot_ai.config import Settings
@@ -25,7 +29,11 @@ from my_bot_ai.features.agent.contracts import (
     ReasoningEffort,
     Speed,
 )
-from my_bot_ai.features.agent.errors import CheckpointMissingError
+from my_bot_ai.features.agent.errors import (
+    AgentServiceError,
+    CheckpointMissingError,
+    RuntimeCallError,
+)
 from my_bot_ai.features.agent.models import build_chat_model, provider_builtin_tools
 from my_bot_ai.features.agent.runtime import RuntimeClient, RuntimeContext, build_runtime_tools
 from my_bot_ai.features.agent.tools import (
@@ -36,6 +44,12 @@ from my_bot_ai.features.agent.tools import (
 
 MAX_TOOL_CALL_ID_LENGTH = 200
 MAX_CHILD_AGENT_DEPTH = 4
+GRAPH_RECURSION_LIMIT = 64
+GRAPH_RECURSION_MARGIN = 4
+# A normal tool cycle consumes at least one model step and one tool step. Keep
+# two additional steps for the model's final summary and boundary handling.
+MAX_TOOL_CALLS_PER_RUN = max(1, (GRAPH_RECURSION_LIMIT - GRAPH_RECURSION_MARGIN - 2) // 2)
+MAX_TOOL_FAILURES_PER_RUN = 8
 CheckpointPhase = Literal["absent", "runnable", "interrupted", "completed"]
 _DEFAULT_INVOCATION = object()
 
@@ -191,7 +205,12 @@ def _tool_target(name: str, data: dict[str, Any]) -> str | None:
     return value[:4_096] if isinstance(value, str) and value else None
 
 
-def _tool_activity(event: dict[str, Any], data: dict[str, Any], status: str) -> dict[str, Any]:
+def _tool_activity(
+    event: dict[str, Any],
+    data: dict[str, Any],
+    status: str,
+    detail: str | None = None,
+) -> dict[str, Any]:
     name = _event_name(event, data)
     target = _tool_target(name, data)
     return {
@@ -200,6 +219,7 @@ def _tool_activity(event: dict[str, Any], data: dict[str, Any], status: str) -> 
         "label": _tool_label(name, status),
         "status": status,
         **({"target": target} if target else {}),
+        **({"detail": detail} if detail else {}),
     }
 
 
@@ -216,6 +236,144 @@ def _object_output(value: Any) -> dict[str, Any] | None:
     except ValueError:
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def _tool_failure(output: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(output, dict) or output.get("ok") is not False:
+        return None
+    error = output.get("error")
+    if not isinstance(error, dict):
+        return None
+    code = error.get("code")
+    message = error.get("message")
+    if not isinstance(code, str) or not isinstance(message, str):
+        return None
+    return {
+        "code": code[:200],
+        "message": message[:2_000],
+        "retryable": bool(error.get("retryable", True)),
+    }
+
+
+def _output_failure(value: Any) -> dict[str, Any] | None:
+    failure = _tool_failure(_object_output(value))
+    if failure:
+        return failure
+    if getattr(value, "status", None) == "error":
+        return {
+            "code": "tool_execution_failed",
+            "message": "The tool could not complete this action.",
+            "retryable": True,
+        }
+    return None
+
+
+def _safe_tool_error(error: Exception, tool_name: str) -> str:
+    if isinstance(error, RuntimeCallError) and tool_name.startswith("browser_"):
+        public = error.public_error
+        code = public.code if public.code != "runtime_error" else "browser_action_failed"
+        message = public.message if public.code != "runtime_error" else (
+            "The browser action could not be completed. Inspect the latest page "
+            "state and choose another safe interaction."
+        )
+        payload = {
+            "ok": False,
+            "error": {
+                "code": code,
+                "message": message,
+                "retryable": public.retryable,
+            },
+        }
+    elif isinstance(error, AgentServiceError):
+        public = error.public_error
+        payload = {
+            "ok": False,
+            "error": {
+                "code": public.code,
+                "message": public.message,
+                "retryable": public.retryable,
+            },
+        }
+    elif tool_name.startswith("browser_"):
+        payload = {
+            "ok": False,
+            "error": {
+                "code": "browser_action_failed",
+                "message": (
+                    "The browser action could not be completed. Inspect the latest page "
+                    "state and choose another safe interaction."
+                ),
+                "retryable": True,
+            },
+        }
+    else:
+        payload = {
+            "ok": False,
+            "error": {
+                "code": "tool_execution_failed",
+                "message": "The tool could not complete this action.",
+                "retryable": True,
+            },
+        }
+    return json.dumps(payload, separators=(",", ":"))
+
+
+def _tool_error_middleware() -> ToolErrorMiddleware:
+    failure_count = 0
+    tool_call_count = 0
+
+    def on_error(error: Exception, request: Any) -> str:
+        nonlocal failure_count
+        failure_count += 1
+        if failure_count > MAX_TOOL_FAILURES_PER_RUN:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": {
+                        "code": "tool_failure_budget_exhausted",
+                        "message": (
+                            "The tool failure budget is exhausted; summarize the blocker and stop."
+                        ),
+                        "retryable": False,
+                    },
+                },
+                separators=(",", ":"),
+            )
+        tool = getattr(request, "tool", None)
+        tool_name = getattr(tool, "name", None)
+        if not isinstance(tool_name, str):
+            tool_call = getattr(request, "tool_call", {})
+            tool_name = tool_call.get("name") if isinstance(tool_call, dict) else None
+        return _safe_tool_error(error, tool_name if isinstance(tool_name, str) else "tool")
+
+    class BudgetedToolErrorMiddleware(ToolErrorMiddleware):
+        async def awrap_tool_call(self, request: Any, handler: Any) -> Any:
+            nonlocal tool_call_count
+            tool_call_count += 1
+            if tool_call_count > MAX_TOOL_CALLS_PER_RUN:
+                call = getattr(request, "tool_call", {})
+                return ToolMessage(
+                    content=json.dumps(
+                        {
+                            "ok": False,
+                            "error": {
+                                "code": "tool_call_budget_exhausted",
+                                "message": (
+                                    "The tool-call budget is exhausted; summarize the work "
+                                    "completed."
+                                ),
+                                "retryable": False,
+                            },
+                        },
+                        separators=(",", ":"),
+                    ),
+                    tool_call_id=str(call.get("id", "unknown")),
+                    name=str(call.get("name", "tool")),
+                    status="error",
+                )
+            return await super().awrap_tool_call(request, handler)
+
+    return BudgetedToolErrorMiddleware(on_error=on_error)
 
 
 def _browser_tool_projection(
@@ -243,14 +401,22 @@ def _browser_tool_projection(
         }
     if kind != "on_tool_end":
         return None
-    output = _object_output(data.get("output"))
-    if output is None:
+    output = data.get("output")
+    failure = _output_failure(output)
+    if failure:
+        return {
+            "state": "failed",
+            "control": "agent",
+            "message": failure["message"],
+        }
+    parsed = _object_output(output)
+    if parsed is None:
         return None
-    status = output.get("status")
+    status = parsed.get("status")
     if not isinstance(status, dict):
         return None
     projection = dict(status)
-    url = output.get("url")
+    url = parsed.get("url")
     if isinstance(url, str):
         projection["url"] = url
     if name == "browser_request_user_control":
@@ -325,20 +491,27 @@ def _tool_event(event: dict[str, Any]) -> NormalizedEvent | None:
             return NormalizedEvent(type="plan.updated", data={"plan": plan})
         return None
 
+    failure = _output_failure(data.get("output"))
     status = {
         "on_tool_start": "in_progress",
         "on_tool_stream": "in_progress",
         "on_tool_end": "completed",
         "on_tool_error": "failed",
     }[kind]
+    if failure:
+        status = "failed"
     if name == "delegate_to_child_agent":
         event_type = "child.started" if kind == "on_tool_start" else "child.completed"
         if kind == "on_tool_stream":
             return None
-        child = _tool_activity(event, data, status)
+        child = _tool_activity(event, data, status, failure["message"] if failure else None)
         child["name"] = "child_agent"
         child["label"] = (
-            "Delegating a task" if status == "in_progress" else "Delegated a task"
+            "Delegating a task"
+            if status == "in_progress"
+            else "Could not delegate the task"
+            if status == "failed"
+            else "Delegated a task"
         )
         return NormalizedEvent(type=event_type, data={"child": child})
 
@@ -352,7 +525,7 @@ def _tool_event(event: dict[str, Any]) -> NormalizedEvent | None:
     return NormalizedEvent(
         type=event_type,
         data={
-            "tool": _tool_activity(event, data, status),
+            "tool": _tool_activity(event, data, status, failure["message"] if failure else None),
             **({"browser_projection": projection} if projection else {}),
         },
     )
@@ -465,87 +638,128 @@ async def stream_model(
         invocation = Command(resume=resume) if resume is not None else {"messages": messages}
     searches: dict[str, dict[str, Any]] = {}
     pending_sources: list[dict[str, str]] = []
+    emitted_text: list[str] = []
     stream_kwargs: dict[str, Any] = {"version": "v2", "durability": "sync"}
     if config is not None:
         stream_kwargs["config"] = config
-    async for event in graph.astream_events(invocation, **stream_kwargs):
-        kind = event.get("event", "")
-        data = event.get("data") or {}
-        if not isinstance(data, dict):
-            data = {}
-        chunk = data.get("chunk")
-        if kind == "on_chat_model_stream" and chunk is not None:
-            blocks = _blocks(chunk)
-            emitted_text = False
-            for block in blocks:
-                if block.get("type") == "text" and block.get("text"):
-                    emitted_text = True
-                    yield {"type": "text.delta", "data": {"delta": str(block["text"])}}
-                annotations = block.get("annotations") or []
-                if annotations:
-                    citations = _sources(annotations)
-                    if citations and searches:
-                        search_id = next(reversed(searches))
-                        searches[search_id]["sources"] = citations
-                        yield {
-                            "type": "step.updated",
-                            "data": {"step": searches[search_id]},
-                        }
-                    elif citations:
-                        pending_sources = citations
-            if not emitted_text:
-                plain_text = getattr(chunk, "content", "")
-                if isinstance(plain_text, str) and plain_text:
-                    yield {"type": "text.delta", "data": {"delta": plain_text}}
+    try:
+        async for event in graph.astream_events(invocation, **stream_kwargs):
+            kind = event.get("event", "")
+            data = event.get("data") or {}
+            if not isinstance(data, dict):
+                data = {}
+            chunk = data.get("chunk")
+            if kind == "on_chat_model_stream" and chunk is not None:
+                blocks = _blocks(chunk)
+                chunk_emitted_text = False
+                for block in blocks:
+                    if block.get("type") == "text" and block.get("text"):
+                        chunk_emitted_text = True
+                        delta = str(block["text"])
+                        emitted_text.append(delta)
+                        yield {"type": "text.delta", "data": {"delta": delta}}
+                    annotations = block.get("annotations") or []
+                    if annotations:
+                        citations = _sources(annotations)
+                        if citations and searches:
+                            search_id = next(reversed(searches))
+                            searches[search_id]["sources"] = citations
+                            yield {
+                                "type": "step.updated",
+                                "data": {"step": searches[search_id]},
+                            }
+                        elif citations:
+                            pending_sources = citations
+                if not chunk_emitted_text:
+                    plain_text = getattr(chunk, "content", "")
+                    if isinstance(plain_text, str) and plain_text:
+                        emitted_text.append(plain_text)
+                        yield {"type": "text.delta", "data": {"delta": plain_text}}
 
-            for summary in _reasoning_summaries(chunk, provider):
-                yield {"type": "reasoning.delta", "data": {"delta": summary}}
+                for summary in _reasoning_summaries(chunk, provider):
+                    yield {"type": "reasoning.delta", "data": {"delta": summary}}
 
-            for block in blocks:
-                block_type = block.get("type")
-                if block_type not in {
-                    "server_tool_call",
-                    "server_tool_call_chunk",
-                    "server_tool_result",
-                }:
+                for block in blocks:
+                    block_type = block.get("type")
+                    if block_type not in {
+                        "server_tool_call",
+                        "server_tool_call_chunk",
+                        "server_tool_result",
+                    }:
+                        continue
+                    block_id = str(block.get("id") or block.get("tool_call_id") or "")
+                    name = str(block.get("name", "")).lower()
+                    if (
+                        "web_search" not in name
+                        and block_id not in searches
+                        and block_type not in {"server_tool_call", "server_tool_call_chunk"}
+                    ):
+                        continue
+                    search_id = block_id or "web-search"
+                    existing = searches.get(search_id)
+                    step = existing or {
+                        "id": search_id,
+                        "kind": "web_search",
+                        "status": "in_progress",
+                        "label": "Web search",
+                    }
+                    args = block.get("args") or {}
+                    if isinstance(args, dict) and args.get("query"):
+                        step["query"] = str(args["query"])
+                    sources = _sources(block.get("output") or block.get("result"))
+                    if not sources and pending_sources:
+                        sources = pending_sources
+                        pending_sources = []
+                    if sources:
+                        step["sources"] = sources
+                    if block_type == "server_tool_result":
+                        step["status"] = "completed"
+                        event_type = "step.completed"
+                    else:
+                        event_type = "step.updated" if existing else "step.started"
+                    searches[search_id] = step
+                    yield {"type": event_type, "data": {"step": step}}
                     continue
-                block_id = str(block.get("id") or block.get("tool_call_id") or "")
-                name = str(block.get("name", "")).lower()
-                if (
-                    "web_search" not in name
-                    and block_id not in searches
-                    and block_type not in {"server_tool_call", "server_tool_call_chunk"}
-                ):
-                    continue
-                search_id = block_id or "web-search"
-                existing = searches.get(search_id)
-                step = existing or {
-                    "id": search_id,
-                    "kind": "web_search",
-                    "status": "in_progress",
-                    "label": "Web search",
-                }
-                args = block.get("args") or {}
-                if isinstance(args, dict) and args.get("query"):
-                    step["query"] = str(args["query"])
-                sources = _sources(block.get("output") or block.get("result"))
-                if not sources and pending_sources:
-                    sources = pending_sources
-                    pending_sources = []
-                if sources:
-                    step["sources"] = sources
-                if block_type == "server_tool_result":
-                    step["status"] = "completed"
-                    event_type = "step.completed"
-                else:
-                    event_type = "step.updated" if existing else "step.started"
-                searches[search_id] = step
-                yield {"type": event_type, "data": {"step": step}}
-            continue
 
-        normalized_tool = _tool_event(event)
-        if normalized_tool is not None:
-            yield normalized_tool.model_dump(mode="json")
+            normalized_tool = _tool_event(event)
+            if normalized_tool is not None:
+                yield normalized_tool.model_dump(mode="json")
+    except GraphRecursionError:
+        # Recursion is an execution boundary, not an upstream provider failure.
+        # Read the durable checkpoint and finish with whatever answer was saved.
+        partial = ""
+        if config is not None and hasattr(graph, "aget_state"):
+            with suppress(Exception):
+                partial = _checkpoint_content(await graph.aget_state(config))
+        already_emitted = "".join(emitted_text)
+        if partial and partial.startswith(already_emitted) and len(partial) > len(already_emitted):
+            yield {"type": "text.delta", "data": {"delta": partial[len(already_emitted):]}}
+        if partial or already_emitted:
+            yield {
+                "type": "turn.completed",
+                "data": {
+                    "outcome": "recursion_limit",
+                    "partial": True,
+                    "message": (
+                        "The execution budget was reached; the answer above is the latest "
+                        "saved result."
+                    ),
+                },
+            }
+        else:
+            yield {
+                "type": "turn.failed",
+                "data": {
+                    "error": {
+                        "code": "execution_budget_exhausted",
+                        "message": (
+                            "The execution budget was reached before a useful answer was saved."
+                        ),
+                        "retryable": False,
+                    }
+                },
+            }
+        return
 
     if config is not None and hasattr(graph, "aget_state"):
         for question in await pending_questions(graph, config):
@@ -659,7 +873,10 @@ def build_model(
                 depth + 1,
                 (),
             )
-            child_config = {"configurable": {"thread_id": next_thread_id}}
+            child_config = {
+                "configurable": {"thread_id": next_thread_id},
+                "recursion_limit": GRAPH_RECURSION_LIMIT,
+            }
             snapshot = await child.aget_state(child_config)
             if not _checkpoint_exists(snapshot):
                 invocation: Any = {"messages": [{"role": "user", "content": task}]}
@@ -667,11 +884,18 @@ def build_model(
                 invocation = None
             else:
                 return _result_text(getattr(snapshot, "values", {}))
-            result = await child.ainvoke(
-                invocation,
-                config=child_config,
-                durability="sync",
-            )
+            try:
+                result = await child.ainvoke(
+                    invocation,
+                    config=child_config,
+                    durability="sync",
+                )
+            except GraphRecursionError:
+                # Child runs get the same truthful boundary treatment as the root.
+                snapshot = await child.aget_state(child_config)
+                return _checkpoint_content(snapshot) or (
+                    "The child agent reached its execution budget without a final answer."
+                )
             return _result_text(result)
 
         delegation = build_child_delegation_tool(run_child)
@@ -685,7 +909,16 @@ def build_model(
         system_prompt = (
             "The shared workspace root is /workspace. "
             f"Your working directory is {working_directory}. "
-            "Other files in /workspace remain accessible."
+            "Other files in /workspace remain accessible. "
+            f"Execution budgets: at most {MAX_TOOL_CALLS_PER_RUN} tool calls and "
+            f"{MAX_TOOL_FAILURES_PER_RUN} recoverable tool failures in this run. "
+            f"Keep the final {GRAPH_RECURSION_MARGIN} execution steps available to summarize "
+            "and finish the response. "
+            "A tool failure is returned as JSON with ok:false and a safe error object. "
+            "Treat it as a failed action, not a successful result. Choose a safe alternative "
+            "when one exists; for a browser failure, inspect the latest page before another "
+            "interaction. If you cannot continue, explain the blocker and a useful next step "
+            "to the user."
         )
         if depth == 0 and current_task_plan:
             serialized_plan = json.dumps(
@@ -697,6 +930,7 @@ def build_model(
             model=llm,
             tools=tools,
             system_prompt=system_prompt,
+            middleware=[_tool_error_middleware()],
             checkpointer=checkpointer,
             name="my-bot-agent" if depth == 0 else f"my-bot-child-{depth}",
         )
@@ -708,7 +942,12 @@ def build_model(
 def graph_config(run_id: UUID) -> dict[str, Any]:
     """Map the stable application run ID directly to LangGraph's thread ID."""
 
-    return {"configurable": {"thread_id": str(run_id)}}
+    return {
+        "configurable": {"thread_id": str(run_id)},
+        # Reserve a small margin so a recursion boundary can be finalized with
+        # the latest durable answer instead of surfacing provider_error.
+        "recursion_limit": GRAPH_RECURSION_LIMIT,
+    }
 
 
 async def stream_agent_request(

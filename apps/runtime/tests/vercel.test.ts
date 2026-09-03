@@ -190,6 +190,54 @@ describe('Vercel provider boundaries', () => {
     }
   })
 
+  it('propagates cancellation from optional frame capture', async () => {
+    const test = createSandboxDouble({ lookup: 'existing', userExists: true })
+    const controller = new AbortController()
+    const importModule = async (specifier: string) => {
+      const module = await test.importModule(specifier) as Record<string, unknown>
+      if (specifier !== '@agent-browser/sandbox/vercel') return module
+      const runAgentBrowserCommand = module.runAgentBrowserCommand as (...args: unknown[]) => Promise<unknown>
+      return {
+        ...module,
+        runAgentBrowserCommand: async (_session: unknown, args: readonly string[], options?: unknown) => {
+          if (args[0] === 'open') controller.abort()
+          return runAgentBrowserCommand(_session, args, options)
+        },
+      }
+    }
+    const provider = await createVercelProviderFactory({
+      env: { VERCEL_OIDC_TOKEN: 'present' },
+      importModule,
+    })('workspace-1')
+
+    await expect(provider.createBrowser('run-1').open('https://example.com/', controller.signal))
+      .rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  it('redacts secrets from actionable browser command errors', async () => {
+    const test = createSandboxDouble({ lookup: 'existing', userExists: true })
+    const importModule = async (specifier: string) => {
+      const module = await test.importModule(specifier) as Record<string, unknown>
+      if (specifier !== '@agent-browser/sandbox/vercel') return module
+      return {
+        ...module,
+        runAgentBrowserCommand: async (_session: unknown, args: readonly string[]) => {
+          if (args[0] === 'click') return { exitCode: 1, stdout: '', stderr: 'token=private-value', json: null }
+          return (module.runAgentBrowserCommand as (...args: unknown[]) => Promise<unknown>)(_session, args)
+        },
+      }
+    }
+    const provider = await createVercelProviderFactory({
+      env: { VERCEL_OIDC_TOKEN: 'present' },
+      importModule,
+    })('workspace-1')
+
+    await expect(provider.createBrowser('run-1').click('#submit')).rejects.toMatchObject({
+      code: 'browser_action_failed',
+      message: 'The browser click failed: token=[REDACTED]',
+    })
+  })
+
   it('derives deterministic provider-safe names without raw workspace data', () => {
     const name = deriveSandboxName('prod/eu west', 'workspace/user/with-sensitive-data')
     expect(name).toBe(deriveSandboxName('prod/eu west', 'workspace/user/with-sensitive-data'))

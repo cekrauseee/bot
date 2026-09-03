@@ -33,6 +33,7 @@ export type ProcessActivity =
       action: string
       additions?: number
       deletions?: number
+      detail?: string
       id: string
       status?: ProcessActivityStatus
       target?: string

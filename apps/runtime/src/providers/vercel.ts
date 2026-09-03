@@ -15,7 +15,7 @@ import type {
   ShellProvider,
   ShellResult,
 } from '../contracts.js'
-import { RuntimeUnavailableError } from '../errors.js'
+import { BrowserActionError, RuntimeUnavailableError } from '../errors.js'
 import {
   INTERNAL_PARENT_ROOT,
   INTERNAL_STAGING_ROOT,
@@ -324,6 +324,7 @@ class VercelBrowser implements BrowserProvider {
   snapshot(signal?: AbortSignal): Promise<BrowserCommandResult> { return this.run(['snapshot', '-i', '-c'], { json: true }, signal) }
   click(selector: string, signal?: AbortSignal): Promise<BrowserCommandResult> { return this.run(['click', selector], undefined, signal) }
   type(selector: string, text: string, signal?: AbortSignal): Promise<BrowserCommandResult> { return this.run(['type', selector, text], undefined, signal) }
+  press(key: string, signal?: AbortSignal): Promise<BrowserCommandResult> { return this.run(['press', key], undefined, signal) }
   async captureFrame(signal?: AbortSignal): Promise<BrowserFrameCapture | undefined> {
     const context = await this.runtime()
     const module = (await this.importModule('@agent-browser/sandbox/vercel')) as AgentBrowserModule
@@ -337,11 +338,14 @@ class VercelBrowser implements BrowserProvider {
       const context = await this.runtime()
       signal?.throwIfAborted()
       const result = await module.runAgentBrowserCommand(browserSession(context.sandbox, signal), args, { ...options, session: this.sessionName })
+      if (result.exitCode !== 0) {
+        throw new BrowserActionError(actionFailureMessage(result.stderr, args[0]))
+      }
       const frame = args[0] === 'close' ? undefined : await this.captureFrameWithContext(context, module, signal)
       return { stdout: redact(result.stdout), stderr: redact(result.stderr), json: sanitizeJson(result.json), ...(frame ? { frame } : {}) }
     } catch (error) {
       signal?.throwIfAborted()
-      if (error instanceof RuntimeUnavailableError) throw error
+      if (error instanceof RuntimeUnavailableError || error instanceof BrowserActionError) throw error
       throw new RuntimeUnavailableError()
     }
   }
@@ -367,12 +371,30 @@ class VercelBrowser implements BrowserProvider {
       const base64 = content.toString('base64')
       if (Buffer.byteLength(base64, 'utf8') > MAX_BROWSER_FRAME_BASE64_BYTES) return undefined
       return { base64, mime_type: 'image/png', captured_at: new Date().toISOString() }
-    } catch {
+    } catch (error) {
+      throwIfAborted(error, signal)
       return undefined
     } finally {
       await removePrivileged(context.sandbox, screenshotPath)
     }
   }
+}
+
+function actionFailureMessage(detail: string | undefined, action = 'browser action'): string {
+  const safeDetail = detail && [...redactSensitiveText(detail)]
+    .map((character) => {
+      const code = character.charCodeAt(0)
+      return code <= 31 || code === 127 ? ' ' : character
+    })
+    .join('')
+    .trim()
+    .slice(0, 300)
+  return safeDetail ? `The browser ${action} failed: ${safeDetail}` : `The browser ${action} could not be completed.`
+}
+
+function throwIfAborted(error: unknown, signal?: AbortSignal): void {
+  signal?.throwIfAborted()
+  if (error && typeof error === 'object' && 'name' in error && error.name === 'AbortError') throw error
 }
 
 // The browser helper accepts a session adapter, not an AbortSignal option.

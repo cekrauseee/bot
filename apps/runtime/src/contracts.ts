@@ -11,6 +11,7 @@ export type RuntimeToolName =
   | 'browser.snapshot'
   | 'browser.click'
   | 'browser.type'
+  | 'browser.press'
   | 'browser.request_user_control'
   | 'browser.release_control'
   | 'browser.close'
@@ -85,6 +86,7 @@ export interface BrowserProvider {
   snapshot(signal?: AbortSignal): Promise<BrowserCommandResult>
   click(selector: string, signal?: AbortSignal): Promise<BrowserCommandResult>
   type(selector: string, text: string, signal?: AbortSignal): Promise<BrowserCommandResult>
+  press(key: string, signal?: AbortSignal): Promise<BrowserCommandResult>
   captureFrame?(signal?: AbortSignal): Promise<BrowserFrameCapture | undefined>
   close(signal?: AbortSignal): Promise<void>
 }
