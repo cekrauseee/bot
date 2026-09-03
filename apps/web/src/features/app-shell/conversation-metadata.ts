@@ -27,6 +27,8 @@ export function mergeConversationTitle(
     : {
         ...merged,
         model: current.model,
+        reasoning_effort: current.reasoning_effort,
+        speed: current.speed,
         model_updated_at: current.model_updated_at,
       }
 }
@@ -56,6 +58,8 @@ export function parseConversationSummary(
     typeof conversation.id !== "string" ||
     typeof conversation.title !== "string" ||
     typeof conversation.model !== "string" ||
+    typeof conversation.reasoning_effort !== "string" ||
+    (conversation.speed !== "fast" && conversation.speed !== "standard") ||
     typeof conversation.model_updated_at !== "string" ||
     (conversation.project_id !== null &&
       typeof conversation.project_id !== "string") ||
@@ -75,6 +79,8 @@ export function parseConversationSummary(
     id: conversation.id,
     title: conversation.title,
     model: conversation.model,
+    reasoning_effort: conversation.reasoning_effort,
+    speed: conversation.speed,
     model_updated_at: conversation.model_updated_at,
     project_id: conversation.project_id,
     pinned_order: conversation.pinned_order,

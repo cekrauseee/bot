@@ -28,6 +28,8 @@ export const publicConversation = (conversation: Conversation) => ({
   id: conversation.id,
   title: conversation.title,
   model: conversation.model,
+  reasoning_effort: conversation.reasoningEffort,
+  speed: conversation.speed,
   model_updated_at: iso(conversation.modelUpdatedAt),
   project_id: conversation.projectId,
   pinned_order: conversation.pinnedOrder,

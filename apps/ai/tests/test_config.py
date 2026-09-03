@@ -57,7 +57,7 @@ def test_production_rejects_placeholder_secrets_and_missing_database() -> None:
             )
         )
 
-    with pytest.raises(ValueError, match="provider key"):
+    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
         create_app(
             Settings(
                 environment="production",
@@ -65,8 +65,6 @@ def test_production_rejects_placeholder_secrets_and_missing_database() -> None:
                 runtime_base_url="https://runtime.example.com",
                 ai_service_token="a-strong-service-token-that-is-long-enough",
                 openai_api_key="replace-with-an-openai-key",
-                xai_api_key="",
-                openrouter_api_key="",
             )
         )
 

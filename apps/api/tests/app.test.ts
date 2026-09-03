@@ -245,9 +245,6 @@ describe('HTTP contract', () => {
         'gpt-5.6-sol',
         'gpt-5.6-terra',
         'gpt-5.6-luna',
-        'grok-4.6',
-        'grok-4.3',
-        'glm-5.2',
       ])
   })
 

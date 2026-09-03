@@ -4,6 +4,7 @@ import { validateConstraintContract, validateIndexContract } from '../src/db/che
 import { compareMigrationHistory, readMigrationManifest } from '../src/db/migrations.js'
 
 const migration = new URL('../drizzle/0000_compatibility.sql', import.meta.url)
+const preferencesMigration = new URL('../drizzle/0013_normalize-gpt-model-preferences.sql', import.meta.url)
 
 describe('compatibility migration', () => {
   it('is versioned and preserves named auth constraints on fresh schemas', async () => {
@@ -23,9 +24,16 @@ describe('compatibility migration', () => {
     expect(sql).toContain('RENAME CONSTRAINT')
   })
 
+  it('normalizes removed model preferences to GPT defaults', async () => {
+    const sql = await readFile(preferencesMigration, 'utf8')
+    expect(sql).toContain('UPDATE "conversations"')
+    expect(sql).toContain("\"model\" = 'gpt-5.6-sol'")
+    expect(sql).toContain('UPDATE "agent_runs"')
+  })
+
   it('derives ordered hashes from the journal and detects pending, mismatched, and out-of-order history', async () => {
     const expected = await readMigrationManifest(new URL('../drizzle/', import.meta.url))
-    expect(expected).toHaveLength(11)
+    expect(expected).toHaveLength(14)
     expect(compareMigrationHistory(expected, [])).toMatchObject({ ok: false, reason: 'pending' })
     expect(compareMigrationHistory(expected, [{ hash: 'wrong' }])).toMatchObject({ ok: false, reason: 'mismatch' })
     expect(compareMigrationHistory(expected, [{ hash: expected[0].hash }]))

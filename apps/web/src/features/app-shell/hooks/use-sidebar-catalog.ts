@@ -250,12 +250,15 @@ export function useSidebarCatalog(enabled: boolean) {
     [replaceConversation, runMutation]
   )
 
-  const setConversationModel = useCallback(
-    (conversationId: string, model: string) =>
+  const setConversationPreferences = useCallback(
+    (
+      conversationId: string,
+      preferences: { model: string; reasoningEffort: string; fastMode: boolean }
+    ) =>
       runMutation(
         `conversation-model:${conversationId}`,
-        "Unable to save this conversation model. Try again.",
-        () => appShellApi.setConversationModel(conversationId, model),
+        "Unable to save these conversation preferences. Try again.",
+        () => appShellApi.setConversationPreferences(conversationId, preferences),
         replaceConversation,
         false
       ),
@@ -365,7 +368,7 @@ export function useSidebarCatalog(enabled: boolean) {
     renameProject,
     reorderPinnedConversations,
     reorderProjects,
-    setConversationModel,
+    setConversationPreferences,
     setConversationPinned,
     upsertConversation,
   }

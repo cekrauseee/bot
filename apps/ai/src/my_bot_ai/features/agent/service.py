@@ -91,8 +91,6 @@ def _reasoning_summaries(chunk: Any, provider: ProviderName | None) -> list[str]
     summaries: list[str] = []
     metadata = getattr(chunk, "response_metadata", {}) or {}
     additional = getattr(chunk, "additional_kwargs", {}) or {}
-    inferred_provider = provider or metadata.get("model_provider")
-
     for source in (metadata, additional):
         summaries.extend(_explicit_summary_values(source.get("reasoning_summary")))
 
@@ -100,10 +98,6 @@ def _reasoning_summaries(chunk: Any, provider: ProviderName | None) -> list[str]
         if block.get("type") != "reasoning":
             continue
         summaries.extend(_explicit_summary_values(block.get("summary")))
-        if inferred_provider in {"xai", "openrouter"}:
-            # Compatible adapters can map streamed raw reasoning to a generic
-            # reasoning block. Only explicit summary fields are safe to expose.
-            continue
         for key in ("reasoning", "text"):
             value = block.get(key)
             if isinstance(value, str) and value:

@@ -297,7 +297,7 @@ def classify_error(error: BaseException, provider: str | None = None) -> dict[st
         "error_summary": _ERROR_SUMMARIES[category],
         "retryable": retryable,
     }
-    if provider in {"openai", "xai", "openrouter"}:
+    if provider == "openai":
         result["provider"] = provider
     if status_code is not None and 100 <= status_code <= 599:
         result["error_status_code"] = status_code
@@ -328,7 +328,7 @@ def classify_public_error(
         "error_summary": _ERROR_SUMMARIES[category],
         "retryable": retryable,
     }
-    if provider in {"openai", "xai", "openrouter"}:
+    if provider == "openai":
         fields["provider"] = provider
     return fields
 

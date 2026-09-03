@@ -15,6 +15,8 @@ function conversation(
     id: "conversation-id",
     title,
     model: "gpt-5.6-sol",
+    reasoning_effort: "medium",
+    speed: "standard",
     model_updated_at: "2026-09-02T10:00:00.000Z",
     project_id: null,
     pinned_order: null,
@@ -60,6 +62,8 @@ describe("conversation title metadata", () => {
     const current = {
       ...conversation("Conversation", null),
       model: "gpt-5.6-terra",
+      reasoning_effort: "high",
+      speed: "fast" as const,
       model_updated_at: "2026-09-02T10:00:03.000Z",
     }
     const stale = {
@@ -70,6 +74,8 @@ describe("conversation title metadata", () => {
 
     expect(mergeConversationTitle(current, stale)).toMatchObject({
       model: current.model,
+      reasoning_effort: current.reasoning_effort,
+      speed: current.speed,
       model_updated_at: current.model_updated_at,
     })
   })

@@ -29,36 +29,6 @@ export const modelCatalog = [
     processingModes: ['standard', 'fast'],
     defaultProcessingMode: 'standard',
   },
-  {
-    id: 'grok-4.6',
-    provider: 'xai',
-    company: 'xAI',
-    label: 'Grok 4.6',
-    reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
-    defaultReasoningEffort: 'high',
-    processingModes: ['standard'],
-    defaultProcessingMode: 'standard',
-  },
-  {
-    id: 'grok-4.3',
-    provider: 'xai',
-    company: 'xAI',
-    label: 'Grok 4.3',
-    reasoningEfforts: ['none', 'low', 'medium', 'high'],
-    defaultReasoningEffort: 'medium',
-    processingModes: ['standard'],
-    defaultProcessingMode: 'standard',
-  },
-  {
-    id: 'glm-5.2',
-    provider: 'openrouter',
-    company: 'Z.ai',
-    label: 'GLM 5.2',
-    reasoningEfforts: ['high', 'xhigh'],
-    defaultReasoningEffort: 'high',
-    processingModes: ['standard'],
-    defaultProcessingMode: 'standard',
-  },
 ] as const
 
 export type ModelDefinition = (typeof modelCatalog)[number]

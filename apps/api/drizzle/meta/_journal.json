@@ -78,6 +78,27 @@
       "when": 1788378748919,
       "tag": "0010_noisy_korvac",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788436375793,
+      "tag": "0011_careless_the_hunter",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788437502866,
+      "tag": "0012_model_preference_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788437961529,
+      "tag": "0013_normalize-gpt-model-preferences",
+      "breakpoints": true
     }
   ]
 }

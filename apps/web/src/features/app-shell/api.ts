@@ -5,6 +5,8 @@ export type ConversationSummary = {
   id: string
   title: string
   model: string
+  reasoning_effort: string
+  speed: "fast" | "standard"
   model_updated_at: string
   project_id: string | null
   pinned_order: number | null
@@ -85,12 +87,19 @@ export const appShellApi = {
       method: "PATCH",
       body: JSON.stringify({ title }),
     }),
-  setConversationModel: (conversationId: string, model: string) =>
+  setConversationPreferences: (
+    conversationId: string,
+    preferences: { model: string; reasoningEffort: string; fastMode: boolean }
+  ) =>
     apiRequest<ConversationSummary>(
       `/conversations/${conversationId}/model`,
       {
         method: "PATCH",
-        body: JSON.stringify({ model }),
+        body: JSON.stringify({
+          model: preferences.model,
+          reasoning_effort: preferences.reasoningEffort,
+          speed: preferences.fastMode ? "fast" : "standard",
+        }),
       }
     ),
   renameProject: (projectId: string, name: string) =>

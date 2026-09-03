@@ -125,6 +125,8 @@ const userSchema = t.Object({
   last_name: t.Union([t.String(), t.Null()]),
   avatar_url: t.Union([t.String(), t.Null()]),
   default_model: t.String(),
+  default_reasoning_effort: t.String(),
+  default_speed: t.String(),
 })
 const providerLimitWindowSchema = t.Object({
   used_percent: t.Number({ minimum: 0, maximum: 100 }),
@@ -492,13 +494,15 @@ const bearerValue = (request: Request) => {
   return match[1]
 }
 
-const userResponse = (user: Pick<User, 'id' | 'email' | 'firstName' | 'lastName' | 'avatarUrl' | 'defaultModel'>) => ({
+const userResponse = (user: Pick<User, 'id' | 'email' | 'firstName' | 'lastName' | 'avatarUrl' | 'defaultModel' | 'defaultReasoningEffort' | 'defaultSpeed'>) => ({
   id: user.id,
   email: user.email,
   first_name: user.firstName,
   last_name: user.lastName,
   avatar_url: user.avatarUrl,
   default_model: user.defaultModel,
+  default_reasoning_effort: user.defaultReasoningEffort,
+  default_speed: user.defaultSpeed,
 })
 
 const publicProviderConnection = (connection: ProviderConnection, active: boolean) => ({
@@ -853,7 +857,41 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   const conversationTitleBody = t.Object({
     title: t.String({ minLength: 1, maxLength: 120 }),
   })
-  const modelPreferenceBody = t.Object({ model: modelSchema })
+  const preferenceBody = t.Object({
+    model: modelSchema,
+    reasoning_effort: t.Optional(t.Union([
+      t.Literal('none'),
+      t.Literal('low'),
+      t.Literal('medium'),
+      t.Literal('high'),
+      t.Literal('xhigh'),
+      t.Literal('max'),
+    ])),
+    speed: t.Optional(t.Union([t.Literal('standard'), t.Literal('fast')])),
+  })
+  const resolvePreferenceBody = (
+    model: string,
+    current: { reasoningEffort: string; speed: string },
+    requested: { reasoning_effort?: string; speed?: string },
+  ) => {
+    const definition = modelDefinition(model)
+    if (!definition) return undefined
+    const reasoningEfforts = definition.reasoningEfforts as readonly string[]
+    const processingModes = definition.processingModes as readonly string[]
+    return {
+      model: definition.id,
+      reasoningEffort: requested.reasoning_effort ?? (
+        reasoningEfforts.includes(current.reasoningEffort)
+          ? current.reasoningEffort
+          : definition.defaultReasoningEffort
+      ),
+      speed: requested.speed ?? (
+        processingModes.includes(current.speed)
+          ? current.speed
+          : definition.defaultProcessingMode
+      ),
+    }
+  }
   const projectOrderBody = t.Object({
     project_ids: t.Array(t.String({ format: 'uuid' })),
   })
@@ -978,12 +1016,31 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   app.patch('/preferences/model', async ({ request, body }) => {
     browserOrigin(request)
     const user = await sessionUser(request)
+    const preferences = resolvePreferenceBody(body.model, {
+      reasoningEffort: user.defaultReasoningEffort,
+      speed: user.defaultSpeed,
+    }, body)
+    if (!preferences || !validModelSelection(
+      preferences.model,
+      preferences.reasoningEffort,
+      preferences.speed,
+    )) {
+      throw new AuthError(
+        'invalid_model_options',
+        'The selected reasoning effort or processing mode is not available for this model.',
+        400,
+      )
+    }
     const updated = await services.database.transaction(async (db) => {
-      return new AuthRepository(db).updateDefaultModel(user.id, body.model)
+      return new AuthRepository(db).updateDefaultPreferences(user.id, {
+        model: preferences.model,
+        reasoningEffort: preferences.reasoningEffort,
+        speed: preferences.speed,
+      })
     })
     if (!updated) throw new AuthError('not_found', 'Not Found', 404)
     return userResponse(updated)
-  }, { body: modelPreferenceBody })
+  }, { body: preferenceBody })
 
   const connectionParams = t.Object({
     connectionId: t.String({ minLength: 1, maxLength: 100 }),
@@ -1335,15 +1392,34 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       const repository = new ConversationRepository(db)
       const owned = await repository.lockOwned(user.id, params.conversationId)
       if (!owned) return undefined
-      if (owned.model === body.model) return owned
-      return repository.updateModel(user.id, owned, body.model)
+      const preferences = resolvePreferenceBody(body.model, {
+        reasoningEffort: owned.reasoningEffort,
+        speed: owned.speed,
+      }, body)
+      if (!preferences || !validModelSelection(
+        preferences.model,
+        preferences.reasoningEffort,
+        preferences.speed,
+      )) {
+        throw new AuthError(
+          'invalid_model_options',
+          'The selected reasoning effort or processing mode is not available for this model.',
+          400,
+        )
+      }
+      if (
+        owned.model === preferences.model &&
+        owned.reasoningEffort === preferences.reasoningEffort &&
+        owned.speed === preferences.speed
+      ) return owned
+      return repository.updatePreferences(user.id, owned, preferences)
     })
     if (!conversation) {
       set.status = 404
       return { detail: { code: 'not_found', message: 'Not Found' } }
     }
     return publicConversation(conversation)
-  }, { params: conversationParams, body: modelPreferenceBody })
+  }, { params: conversationParams, body: preferenceBody })
 
   app.delete('/conversations/:conversationId', async ({ request, params, set }) => {
     browserOrigin(request)
@@ -1469,12 +1545,32 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
           )
         }
         if (!conversationId) {
-          conversation = await repository.create(user.id, conversationTitle(message), definition.id)
-          if (user.defaultModel !== definition.id) {
-            await new AuthRepository(db).updateDefaultModel(user.id, definition.id)
+          conversation = await repository.create(user.id, conversationTitle(message), {
+            model: definition.id,
+            reasoningEffort: options.reasoning_effort,
+            speed: options.speed,
+          })
+          if (
+            user.defaultModel !== definition.id ||
+            user.defaultReasoningEffort !== options.reasoning_effort ||
+            user.defaultSpeed !== options.speed
+          ) {
+            await new AuthRepository(db).updateDefaultPreferences(user.id, {
+              model: definition.id,
+              reasoningEffort: options.reasoning_effort,
+              speed: options.speed,
+            })
           }
-        } else if (conversation && conversation.model !== definition.id) {
-          conversation = await repository.updateModel(user.id, conversation, definition.id)
+        } else if (conversation && (
+          conversation.model !== definition.id ||
+          conversation.reasoningEffort !== options.reasoning_effort ||
+          conversation.speed !== options.speed
+        )) {
+          conversation = await repository.updatePreferences(user.id, conversation, {
+            model: definition.id,
+            reasoningEffort: options.reasoning_effort,
+            speed: options.speed,
+          })
         }
         if (!conversation) throw new AuthError('not_found', 'Not Found', 404)
         const modelOptions = {

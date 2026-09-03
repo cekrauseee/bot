@@ -13,7 +13,7 @@
 - `src/modules/agent-control-plane.ts`: leased execution, checkpoint projection, event replay, Redis fanout, and WebSocket transport.
 - `src/modules/provider-connections.ts`: provider-agnostic connection contracts, adapter registry types, errors, and persisted activation settings.
 - `src/modules/codex-app-server.ts`: isolated Codex process lifecycle, ChatGPT browser or device login, account state, and rate-limit projection.
-- `src/modules/models.ts`: provider-aware public model capability catalog.
+- `src/modules/models.ts`: OpenAI GPT model capability catalog.
 - `src/db`: Drizzle schema, repository, connection, migration, drift checks, and local application seed.
 - `src/email.ts`: React Email composition and Resend delivery.
 - `drizzle`: versioned, non-destructive SQL migrations.
@@ -68,7 +68,7 @@ Agent control routes are:
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/models` | Return provider-aware model, reasoning, and speed capabilities |
+| `GET` | `/models` | Return supported GPT model, reasoning, and speed capabilities |
 | `GET` | `/agent-runs` | List the current user's active runs for reload and global tracking |
 | `GET` | `/agent-runs/:runId` | Load one owned run projection |
 | `GET` | `/agent-runs/:runId/events?after=` | Replay a bounded page of durable events |

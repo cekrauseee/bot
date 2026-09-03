@@ -36,10 +36,19 @@ export class AuthRepository {
     return user
   }
 
-  async updateDefaultModel(userId: string, model: string) {
+  async updateDefaultPreferences(userId: string, preferences: {
+    model: string
+    reasoningEffort: string
+    speed: string
+  }) {
     const [user] = await this.db
       .update(users)
-      .set({ defaultModel: model, updatedAt: new Date() })
+      .set({
+        defaultModel: preferences.model,
+        defaultReasoningEffort: preferences.reasoningEffort,
+        defaultSpeed: preferences.speed,
+        updatedAt: new Date(),
+      })
       .where(eq(users.id, userId))
       .returning()
     return user
@@ -334,18 +343,37 @@ export class ConversationRepository {
       .where(eq(users.id, userId)).for('update')
     return user
   }
-  async create(userId: string, title: string, model: string) {
-    const [row] = await this.db.insert(conversations).values({ userId, title, model }).returning()
+  async create(userId: string, title: string, preferences: {
+    model: string
+    reasoningEffort: string
+    speed: string
+  }) {
+    const [row] = await this.db.insert(conversations).values({
+      userId,
+      title,
+      model: preferences.model,
+      reasoningEffort: preferences.reasoningEffort,
+      speed: preferences.speed,
+    }).returning()
     return row
   }
 
-  async updateModel(userId: string, conversation: Conversation, model: string) {
+  async updatePreferences(userId: string, conversation: Conversation, preferences: {
+    model: string
+    reasoningEffort: string
+    speed: string
+  }) {
     const modelUpdatedAt = new Date(Math.max(
       Date.now(),
       conversation.modelUpdatedAt.getTime() + 1,
     ))
     const [row] = await this.db.update(conversations)
-      .set({ model, modelUpdatedAt })
+      .set({
+        model: preferences.model,
+        reasoningEffort: preferences.reasoningEffort,
+        speed: preferences.speed,
+        modelUpdatedAt,
+      })
       .where(and(eq(conversations.id, conversation.id), eq(conversations.userId, userId)))
       .returning()
     return row

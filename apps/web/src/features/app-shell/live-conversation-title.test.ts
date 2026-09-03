@@ -16,6 +16,8 @@ function conversation(): ConversationSummary {
     id: conversationId,
     title: "Generated title",
     model: "gpt-5.6-sol",
+    reasoning_effort: "medium",
+    speed: "standard",
     model_updated_at: "2026-09-02T10:00:00.000Z",
     project_id: null,
     pinned_order: null,

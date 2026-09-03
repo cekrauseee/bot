@@ -9,14 +9,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-ProviderName = Literal["openai", "xai", "openrouter"]
+ProviderName = Literal["openai"]
 ModelName = Literal[
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
-    "grok-4.6",
-    "grok-4.3",
-    "glm-5.2",
 ]
 ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
 Speed = Literal["standard", "fast"]
@@ -71,24 +68,6 @@ MODEL_CAPABILITIES: dict[ModelName, ModelCapabilities] = {
         OPENAI_EFFORTS,
         frozenset({"standard", "fast"}),
         default_reasoning_effort="medium",
-    ),
-    "grok-4.6": ModelCapabilities(
-        "xai",
-        frozenset({"low", "medium", "high", "xhigh"}),
-        frozenset({"standard"}),
-        default_reasoning_effort="high",
-    ),
-    "grok-4.3": ModelCapabilities(
-        "xai",
-        frozenset({"none", "low", "medium", "high"}),
-        frozenset({"standard"}),
-        default_reasoning_effort="medium",
-    ),
-    "glm-5.2": ModelCapabilities(
-        "openrouter",
-        frozenset({"high", "xhigh"}),
-        frozenset({"standard"}),
-        default_reasoning_effort="high",
     ),
 }
 

@@ -44,6 +44,14 @@ const SELECTABLE_MODEL_IDS = new Set([
   "gpt-5.6-luna",
 ])
 
+const MODEL_LABELS: Record<string, string> = {
+  "gpt-5.6-sol": "GPT-5.6 Sol",
+  "gpt-5.6-terra": "GPT-5.6 Terra",
+  "gpt-5.6-luna": "GPT-5.6 Luna",
+}
+
+const modelLabel = (value: string) => MODEL_LABELS[value] ?? value
+
 const reasoningEffortLabel = (value: string) => {
   if (value === "none") return "None"
   if (value === "xhigh") return "Extra high"
@@ -60,14 +68,45 @@ export type ComposerSubmission = {
   reasoningEffort: string
 }
 
+export type ComposerPreferences = {
+  fastMode: boolean
+  model: string
+  reasoningEffort: string
+}
+
+function preferencesForModel(
+  models: ComposerModel[],
+  model: string,
+  current: ComposerPreferences
+): ComposerPreferences {
+  const nextModel = models.find((item) => item.id === model)
+  if (!nextModel) return { ...current, model }
+
+  return {
+    model,
+    reasoningEffort: nextModel.reasoning_efforts.options.includes(
+      current.reasoningEffort
+    )
+      ? current.reasoningEffort
+      : nextModel.reasoning_efforts.default,
+    fastMode: nextModel.processing_modes.options.includes(
+      current.fastMode ? "fast" : "standard"
+    )
+      ? current.fastMode
+      : nextModel.processing_modes.default === "fast",
+  }
+}
+
 type ComposerProps = {
   model: string
+  reasoningEffort: string
+  fastMode: boolean
   models: ComposerModel[]
   modelContextKey: string
   modelDisabled?: boolean
   providerDisabled?: boolean
   modelScope: "conversation" | "default"
-  onModelChange: (model: string) => Promise<void>
+  onPreferencesChange: (preferences: ComposerPreferences) => Promise<void>
   onSubmit?: (
     submission: ComposerSubmission,
     onAccepted: () => void
@@ -76,12 +115,14 @@ type ComposerProps = {
 
 export function Composer({
   model,
+  reasoningEffort: persistedReasoningEffort,
+  fastMode: persistedFastMode,
   models,
   modelContextKey,
   modelDisabled = false,
   providerDisabled = false,
   modelScope,
-  onModelChange,
+  onPreferencesChange,
   onSubmit,
 }: ComposerProps) {
   const [message, setMessage] = useState("")
@@ -96,45 +137,57 @@ export function Composer({
     contextKey: string
     message: string
   } | null>(null)
-  const [pendingModel, setPendingModel] = useState<{
+  const [pendingPreferences, setPendingPreferences] = useState<{
     contextKey: string
     model: string
+    reasoningEffort: string
+    fastMode: boolean
   } | null>(null)
   const [modelChanging, setModelChanging] = useState(false)
   const modelChangingRef = useRef(false)
-  const [reasoningEffort, setReasoningEffort] = useState("medium")
-  const [fastMode, setFastMode] = useState(false)
   const effectiveModel =
-    pendingModel?.contextKey === modelContextKey ? pendingModel.model : model
+    pendingPreferences?.contextKey === modelContextKey
+      ? pendingPreferences.model
+      : model
+  const requestedReasoningEffort =
+    pendingPreferences?.contextKey === modelContextKey
+      ? pendingPreferences.reasoningEffort
+      : persistedReasoningEffort
+  const requestedFastMode =
+    pendingPreferences?.contextKey === modelContextKey
+      ? pendingPreferences.fastMode
+      : persistedFastMode
   const visibleModelError =
     modelError?.contextKey === modelContextKey ? modelError.message : null
   const selectedModel = models.find((item) => item.id === effectiveModel)
   const availableReasoningEfforts =
-    selectedModel?.reasoning_efforts.options ?? [reasoningEffort]
+    selectedModel?.reasoning_efforts.options ?? [requestedReasoningEffort]
   const effectiveReasoningEffort = availableReasoningEfforts.includes(
-    reasoningEffort
+    requestedReasoningEffort
   )
-    ? reasoningEffort
-    : (selectedModel?.reasoning_efforts.default ?? reasoningEffort)
+    ? requestedReasoningEffort
+    : (selectedModel?.reasoning_efforts.default ?? requestedReasoningEffort)
   const selectedReasoningEffortLabel = reasoningEffortLabel(
     effectiveReasoningEffort
   )
-  const requestedProcessingMode = fastMode ? "fast" : "standard"
+  const requestedProcessingMode = requestedFastMode ? "fast" : "standard"
   const effectiveProcessingMode = selectedModel?.processing_modes.options.includes(
     requestedProcessingMode
   )
     ? requestedProcessingMode
     : (selectedModel?.processing_modes.default ?? "standard")
   const effectiveFastMode = effectiveProcessingMode === "fast"
-  const selectedModelLabel = selectedModel?.label ?? effectiveModel
+  const selectedModelLabel = selectedModel?.label ?? modelLabel(effectiveModel)
 
   const error = submitError ?? visibleModelError
 
   useGlobalComposerInput(textareaRef, !submitting && !modelChanging)
 
-  const handleModelChange = async (value: string) => {
+  const handlePreferencesChange = async (preferences: ComposerPreferences) => {
     if (
-      value === effectiveModel ||
+      (preferences.model === effectiveModel &&
+        preferences.reasoningEffort === effectiveReasoningEffort &&
+        preferences.fastMode === effectiveFastMode) ||
       submittingRef.current ||
       modelChangingRef.current ||
       modelDisabled
@@ -145,22 +198,22 @@ export function Composer({
     modelChangingRef.current = true
     setModelChanging(true)
     setModelError(null)
-    setPendingModel({ contextKey: modelContextKey, model: value })
+    setPendingPreferences({ contextKey: modelContextKey, ...preferences })
 
     try {
-      await onModelChange(value)
+      await onPreferencesChange(preferences)
     } catch (changeError) {
       setModelError({
         contextKey: modelContextKey,
         message:
           changeError instanceof Error
             ? changeError.message
-            : "Unable to save the selected model. Try again.",
+            : "Unable to save the selected preferences. Try again.",
       })
     } finally {
       modelChangingRef.current = false
       setModelChanging(false)
-      setPendingModel(null)
+      setPendingPreferences(null)
     }
   }
 
@@ -241,7 +294,7 @@ export function Composer({
         {
           fastMode: effectiveFastMode,
           message: trimmedMessage,
-          model,
+          model: effectiveModel,
           reasoningEffort: effectiveReasoningEffort,
         },
         () => setMessage("")
@@ -365,7 +418,13 @@ export function Composer({
                             <DropdownMenuRadioGroup
                               value={effectiveModel}
                               onValueChange={(value) =>
-                                void handleModelChange(value)
+                                void handlePreferencesChange(
+                                  preferencesForModel(models, value, {
+                                    model: effectiveModel,
+                                    reasoningEffort: effectiveReasoningEffort,
+                                    fastMode: effectiveFastMode,
+                                  })
+                                )
                               }
                             >
                               {models
@@ -398,7 +457,13 @@ export function Composer({
                           <DropdownMenuGroup>
                             <DropdownMenuRadioGroup
                               value={effectiveReasoningEffort}
-                              onValueChange={setReasoningEffort}
+                              onValueChange={(value) =>
+                                void handlePreferencesChange({
+                                  model: effectiveModel,
+                                  reasoningEffort: value,
+                                  fastMode: effectiveFastMode,
+                                })
+                              }
                             >
                               {availableReasoningEfforts.map((value) => (
                                 <DropdownMenuRadioItem
@@ -425,7 +490,11 @@ export function Composer({
                             <DropdownMenuRadioGroup
                               value={effectiveProcessingMode}
                               onValueChange={(value) =>
-                                setFastMode(value === "fast")
+                                void handlePreferencesChange({
+                                  model: effectiveModel,
+                                  reasoningEffort: effectiveReasoningEffort,
+                                  fastMode: value === "fast",
+                                })
                               }
                             >
                               {(selectedModel?.processing_modes.options ?? [

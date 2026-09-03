@@ -18,6 +18,7 @@ import { authApi, type User } from "@/features/auth/api"
 import { startConversationTurn } from "@/features/composer/api"
 import {
   Composer,
+  type ComposerPreferences,
   type ComposerSubmission,
 } from "@/features/composer/components/composer"
 import { useConversations } from "@/features/conversation/hooks/use-conversations"
@@ -39,7 +40,11 @@ export function AuthenticatedAppShell({
 }: AuthenticatedAppShellProps) {
   const [signingOut, setSigningOut] = useState(false)
   const [signOutFailed, setSignOutFailed] = useState(false)
-  const [defaultModel, setDefaultModel] = useState(user.default_model)
+  const [defaultPreferences, setDefaultPreferences] = useState({
+    model: user.default_model,
+    reasoningEffort: user.default_reasoning_effort,
+    fastMode: user.default_speed === "fast",
+  })
   const turnController = useRef<AbortController | null>(null)
   const shellRef = useRef<HTMLElement>(null)
   const composerDockRef = useRef<HTMLElement>(null)
@@ -51,7 +56,7 @@ export function AuthenticatedAppShell({
     loadConversation,
   } = useConversations(activeConversationId)
   const refreshCatalog = catalog.refresh
-  const setConversationModel = catalog.setConversationModel
+  const setConversationPreferences = catalog.setConversationPreferences
   const upsertConversation = catalog.upsertConversation
   const activeConversation =
     catalog.conversations.find(
@@ -200,17 +205,21 @@ export function AuthenticatedAppShell({
     ]
   )
 
-  const handleModelChange = useCallback(
-    async (model: string) => {
+  const handlePreferencesChange = useCallback(
+    async (preferences: ComposerPreferences) => {
       if (activeConversationId) {
-        await setConversationModel(activeConversationId, model)
+        await setConversationPreferences(activeConversationId, preferences)
         return
       }
 
-      const updated = await authApi.setDefaultModel(model)
-      setDefaultModel(updated.default_model)
+      const updated = await authApi.setDefaultPreferences(preferences)
+      setDefaultPreferences({
+        model: updated.default_model,
+        reasoningEffort: updated.default_reasoning_effort,
+        fastMode: updated.default_speed === "fast",
+      })
     },
-    [activeConversationId, setConversationModel]
+    [activeConversationId, setConversationPreferences]
   )
 
   return (
@@ -258,7 +267,16 @@ export function AuthenticatedAppShell({
                 </h1>
               )}
               <Composer
-                model={activeConversation?.model ?? defaultModel}
+                model={activeConversation?.model ?? defaultPreferences.model}
+                reasoningEffort={
+                  activeConversation?.reasoning_effort ??
+                  defaultPreferences.reasoningEffort
+                }
+                fastMode={
+                  activeConversation
+                    ? activeConversation.speed === "fast"
+                    : defaultPreferences.fastMode
+                }
                 models={catalog.models}
                 modelContextKey={activeConversationId ?? "new"}
                 modelDisabled={
@@ -268,11 +286,12 @@ export function AuthenticatedAppShell({
                 providerDisabled={
                   catalog.models.find(
                     (item) =>
-                      item.id === (activeConversation?.model ?? defaultModel)
+                      item.id ===
+                      (activeConversation?.model ?? defaultPreferences.model)
                   )?.active === false
                 }
                 modelScope={activeConversationId ? "conversation" : "default"}
-                onModelChange={handleModelChange}
+                onPreferencesChange={handlePreferencesChange}
                 onSubmit={handleComposerSubmit}
               />
             </div>

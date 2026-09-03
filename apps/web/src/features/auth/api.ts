@@ -7,6 +7,8 @@ export type User = {
   last_name: string | null
   avatar_url: string | null
   default_model: string
+  default_reasoning_effort: string
+  default_speed: "fast" | "standard"
 }
 
 export type OtpChallenge = {
@@ -21,10 +23,18 @@ export { ApiError as AuthApiError }
 export const authApi = {
   googleStartUrl: `${apiBaseUrl}/auth/google/start`,
   session: () => apiRequest<User>("/auth/session"),
-  setDefaultModel: (model: string) =>
+  setDefaultPreferences: (preferences: {
+    model: string
+    reasoningEffort: string
+    fastMode: boolean
+  }) =>
     apiRequest<User>("/preferences/model", {
       method: "PATCH",
-      body: JSON.stringify({ model }),
+      body: JSON.stringify({
+        model: preferences.model,
+        reasoning_effort: preferences.reasoningEffort,
+        speed: preferences.fastMode ? "fast" : "standard",
+      }),
     }),
   requestOtp: (email: string) =>
     apiRequest<OtpChallenge>("/auth/otp/request", {
