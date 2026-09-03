@@ -54,7 +54,7 @@ export function ConversationView({
                   key={message.id}
                   messageId={message.id}
                   role="listitem"
-                  className="-mx-1 w-[calc(100%+0.5rem)] px-1"
+                  className="w-full"
                 >
                   <ConversationMessage message={message} />
                 </MessageScrollerItem>

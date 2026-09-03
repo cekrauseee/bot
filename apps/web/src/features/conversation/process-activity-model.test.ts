@@ -57,4 +57,19 @@ describe("process activity model", () => {
       "Read files"
     )
   })
+
+  it("shows a safe failure detail for a failed tool", () => {
+    expect(
+      processToolCopy({
+        action: "browser_click",
+        detail: "The browser action could not be completed.",
+        id: "click",
+        status: "failed",
+        type: "tool",
+      })
+    ).toEqual({
+      label: "Could not interact with the page",
+      detail: "The browser action could not be completed.",
+    })
+  })
 })

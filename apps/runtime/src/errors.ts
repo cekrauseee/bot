@@ -6,6 +6,8 @@ export type RuntimeErrorCode =
   | 'idempotency_conflict'
   | 'manual_recovery_required'
   | 'runtime_unavailable'
+  | 'runtime_timeout'
+  | 'browser_action_failed'
   | 'operation_failed'
 
 export class RuntimeError extends Error {
@@ -31,6 +33,19 @@ export class InvalidRequestError extends RuntimeError {
 export class RuntimeUnavailableError extends RuntimeError {
   constructor() {
     super('runtime_unavailable', 'The runtime is temporarily unavailable.', 503, true)
+  }
+}
+
+/** A browser command failed, but the browser session itself is still usable. */
+export class BrowserActionError extends RuntimeError {
+  constructor(message = 'The browser action could not be completed.', retryable = true) {
+    super('browser_action_failed', message, 502, retryable)
+  }
+}
+
+export class RuntimeTimeoutError extends RuntimeError {
+  constructor(operation = 'runtime operation') {
+    super('runtime_timeout', `The ${operation} timed out.`, 504, true)
   }
 }
 
@@ -60,5 +75,6 @@ export class ManualRecoveryRequiredError extends RuntimeError {
 
 export function toPublicError(error: unknown): RuntimeError {
   if (error instanceof RuntimeError) return error
+  if (error instanceof DOMException && error.name === 'AbortError') throw error
   return new RuntimeError('operation_failed', 'The runtime operation failed.', 502, true)
 }

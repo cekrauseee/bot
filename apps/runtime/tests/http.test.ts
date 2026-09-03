@@ -91,6 +91,7 @@ describe('runtime HTTP boundary', () => {
   it.each([
     ['shell.exec', { command: 'printf', argv: ['must not execute'] }],
     ['browser.click', { selector: '#submit' }],
+    ['browser.press', { key: 'Enter' }],
   ] as const)('never dispatches queued %s after the client disconnects', async (tool, args) => {
     const provider = createFakeRuntimeProvider()
     const service = new RuntimeService({ providerFactory: async () => provider })

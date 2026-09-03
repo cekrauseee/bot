@@ -24,7 +24,7 @@ Browser controllers and agent-browser session names are scoped by `run_id`. Conc
 
 - list, read, and replace one file inside `/workspace`;
 - execute one process with explicit `command`, `argv`, and `cwd`;
-- open, inspect, click, type in, and close a run-scoped browser.
+- open, inspect, click, type in, press keys, and close a run-scoped browser.
 
 The runtime retains a private handoff foundation, but user-control tools are not exposed to models until the API and web application provide an authenticated lease channel.
 
@@ -35,6 +35,10 @@ Every model tool call carries a deterministic `operation_id`. Before an external
 Request cancellation propagates to the workspace queue and provider calls. A cancelled queued operation is checked again after acquiring its slot and after journal I/O, before dispatching any external effect. Already-started remote process termination remains subject to the provider's cancellation semantics.
 
 Browser actions may attach a bounded PNG capture to their immediate response. The AI service removes the image before returning the tool result to the model and emits it as a transient frame. Frames cross API instances through Redis Pub/Sub and WebSocket fanout; they are never stored in PostgreSQL or the operation journal.
+
+Browser command failures are typed as actionable `browser_action_failed` errors. They keep the run-scoped browser session live so the next model step can inspect the page and recover; provider/lifecycle failures remain fatal and mark the controller unavailable. Runtime calls are bounded by action-specific deadlines rather than one blanket timeout.
+
+Browser key presses let an agent submit a focused form without clicking a page element that may be covered by dynamic content.
 
 ## Health
 

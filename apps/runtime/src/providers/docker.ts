@@ -19,7 +19,7 @@ import type {
   ShellProvider,
   ShellResult,
 } from '../contracts.js'
-import { RuntimeUnavailableError } from '../errors.js'
+import { BrowserActionError, RuntimeUnavailableError } from '../errors.js'
 import { OPERATION_JOURNAL_ROOT } from '../internal-paths.js'
 import { redactSensitiveText } from '../security.js'
 import type { ProviderFactory } from './types.js'
@@ -322,6 +322,7 @@ class DockerBrowser implements BrowserProvider {
   snapshot(signal?: AbortSignal): Promise<BrowserCommandResult> { return this.run(['snapshot', '-i', '-c'], signal) }
   click(selector: string, signal?: AbortSignal): Promise<BrowserCommandResult> { return this.run(['click', selector], signal) }
   type(selector: string, text: string, signal?: AbortSignal): Promise<BrowserCommandResult> { return this.run(['type', selector, text], signal) }
+  press(key: string, signal?: AbortSignal): Promise<BrowserCommandResult> { return this.run(['press', key], signal) }
   captureFrame(signal?: AbortSignal): Promise<BrowserFrameCapture | undefined> { return this.capture(signal) }
   async close(signal?: AbortSignal): Promise<void> { await this.run(['close'], signal) }
 
@@ -329,11 +330,13 @@ class DockerBrowser implements BrowserProvider {
     try {
       const workspace = await this.workspace()
       const argv = buildAgentBrowserArgv(args, { session: this.sessionName })
-      const command = await checked(
-        workspace.runner,
+      const command = await workspace.runner.run(
         execArgs(workspace.container, ['agent-browser', ...argv]),
         { signal },
       )
+      if (command.exitCode !== 0) {
+        throw new BrowserActionError(actionFailureMessage(command.stderr.toString('utf8'), args[0]))
+      }
       const stdout = command.stdout.toString('utf8')
       const stderr = command.stderr.toString('utf8')
       const parsed = createAgentBrowserCommandResult({ command: 'agent-browser', exitCode: 0, stdout, stderr })
@@ -346,7 +349,7 @@ class DockerBrowser implements BrowserProvider {
       }
     } catch (error) {
       signal?.throwIfAborted()
-      if (error instanceof RuntimeUnavailableError) throw error
+      if (error instanceof RuntimeUnavailableError || error instanceof BrowserActionError) throw error
       throw new RuntimeUnavailableError()
     }
   }
@@ -379,7 +382,9 @@ class DockerBrowser implements BrowserProvider {
       const base64 = content.stdout.toString('base64')
       if (Buffer.byteLength(base64, 'utf8') > MAX_BROWSER_FRAME_BASE64_BYTES) return undefined
       return { base64, mime_type: 'image/png', captured_at: new Date().toISOString() }
-    } catch {
+    } catch (error) {
+      signal?.throwIfAborted()
+      if (error && typeof error === 'object' && 'name' in error && error.name === 'AbortError') throw error
       return undefined
     } finally {
       const workspace = await this.workspace().catch(() => undefined)
@@ -388,6 +393,18 @@ class DockerBrowser implements BrowserProvider {
       }
     }
   }
+}
+
+function actionFailureMessage(detail: string | undefined, action = 'browser action'): string {
+  const safeDetail = detail && [...redactSensitiveText(detail)]
+    .map((character) => {
+      const code = character.charCodeAt(0)
+      return code <= 31 || code === 127 ? ' ' : character
+    })
+    .join('')
+    .trim()
+    .slice(0, 300)
+  return safeDetail ? `The browser ${action} failed: ${safeDetail}` : `The browser ${action} could not be completed.`
 }
 
 function execArgs(container: string, command: readonly string[], user?: string): string[] {

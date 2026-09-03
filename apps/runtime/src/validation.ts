@@ -11,6 +11,7 @@ const TOOL_NAMES = new Set<RuntimeToolName>([
   'browser.snapshot',
   'browser.click',
   'browser.type',
+  'browser.press',
   'browser.request_user_control',
   'browser.release_control',
   'browser.close',
@@ -96,6 +97,9 @@ export function validateArguments(tool: RuntimeToolName, args: JsonObject, worki
     case 'browser.type':
       assertExactKeys(args, ['selector', 'text', 'leaseId'], tool)
       return { selector: stringField(args.selector, 'selector', 4_096), text: stringField(args.text, 'text', 100_000), ...(args.leaseId === undefined ? {} : { leaseId: stringField(args.leaseId, 'leaseId', 200) }) }
+    case 'browser.press':
+      assertExactKeys(args, ['key', 'leaseId'], tool)
+      return { key: stringField(args.key, 'key', 128), ...(args.leaseId === undefined ? {} : { leaseId: stringField(args.leaseId, 'leaseId', 200) }) }
     case 'browser.request_user_control':
       assertExactKeys(args, ['reason'], tool)
       return args.reason === undefined ? {} : { reason: stringField(args.reason, 'reason', 2_000) }

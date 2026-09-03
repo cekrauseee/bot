@@ -55,6 +55,7 @@ export function processToolCopy(
 ) {
   const action = normalizedAction(activity.action)
   const file = workspaceTarget(activity.target)
+  const failureDetail = activity.status === "failed" ? activity.detail : undefined
 
   if (["filesystem_list", "list"].includes(action)) {
     return {
@@ -64,13 +65,13 @@ export function processToolCopy(
         "Inspected",
         "Could not inspect"
       ),
-      detail: file,
+      detail: failureDetail ?? file,
     }
   }
   if (["filesystem_read", "read"].includes(action)) {
     return {
       label: statusLabel(activity.status, "Reading", "Read", "Could not read"),
-      detail: file,
+      detail: failureDetail ?? file,
     }
   }
   if (["filesystem_write", "edit", "updated", "write"].includes(action)) {
@@ -81,13 +82,13 @@ export function processToolCopy(
         "Updated",
         "Could not update"
       ),
-      detail: file,
+      detail: failureDetail ?? file,
     }
   }
   if (["executed", "run", "shell_exec"].includes(action)) {
     return {
       label: statusLabel(activity.status, "Running", "Ran", "Could not run"),
-      detail: activity.target,
+      detail: failureDetail ?? activity.target,
     }
   }
   if (action === "browser_open") {
@@ -98,7 +99,7 @@ export function processToolCopy(
         "Opened",
         "Could not open"
       ),
-      detail: browserTarget(activity.target) ?? "the browser",
+      detail: failureDetail ?? browserTarget(activity.target) ?? "the browser",
     }
   }
   if (action === "browser_snapshot") {
@@ -109,6 +110,7 @@ export function processToolCopy(
         "Inspected the page",
         "Could not inspect the page"
       ),
+      detail: failureDetail,
     }
   }
   if (action === "browser_click") {
@@ -119,6 +121,7 @@ export function processToolCopy(
         "Interacted with the page",
         "Could not interact with the page"
       ),
+      detail: failureDetail,
     }
   }
   if (action === "browser_type") {
@@ -129,6 +132,18 @@ export function processToolCopy(
         "Entered text on the page",
         "Could not enter text on the page"
       ),
+      detail: failureDetail,
+    }
+  }
+  if (action === "browser_press") {
+    return {
+      label: statusLabel(
+        activity.status,
+        "Submitting the page",
+        "Submitted the page",
+        "Could not submit the page"
+      ),
+      detail: failureDetail,
     }
   }
   if (action === "browser_close") {
@@ -139,6 +154,7 @@ export function processToolCopy(
         "Closed the browser",
         "Could not close the browser"
       ),
+      detail: failureDetail,
     }
   }
   if (action === "ask_user") {
@@ -149,6 +165,7 @@ export function processToolCopy(
         "Asked for input",
         "Could not ask for input"
       ),
+      detail: failureDetail,
     }
   }
   return {
@@ -158,6 +175,7 @@ export function processToolCopy(
       "Used a tool",
       "Could not use a tool"
     ),
+    detail: failureDetail,
   }
 }
 

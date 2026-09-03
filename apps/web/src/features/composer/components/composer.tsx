@@ -5,7 +5,7 @@ import {
   useState,
   type FormEvent,
 } from "react"
-import { ArrowUpIcon, ZapIcon } from "lucide-react"
+import { ArrowUpIcon, SquareIcon, ZapIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -103,7 +103,6 @@ type ComposerProps = {
   fastMode: boolean
   models: ComposerModel[]
   modelContextKey: string
-  modelDisabled?: boolean
   providerDisabled?: boolean
   modelScope: "conversation" | "default"
   onPreferencesChange: (preferences: ComposerPreferences) => Promise<void>
@@ -111,6 +110,8 @@ type ComposerProps = {
     submission: ComposerSubmission,
     onAccepted: () => void
   ) => Promise<void>
+  activeRunId?: string
+  onStop?: () => Promise<void>
 }
 
 export function Composer({
@@ -119,11 +120,12 @@ export function Composer({
   fastMode: persistedFastMode,
   models,
   modelContextKey,
-  modelDisabled = false,
   providerDisabled = false,
   modelScope,
   onPreferencesChange,
   onSubmit,
+  activeRunId,
+  onStop,
 }: ComposerProps) {
   const [message, setMessage] = useState("")
   const [submitting, setSubmitting] = useState(false)
@@ -160,8 +162,8 @@ export function Composer({
   const visibleModelError =
     modelError?.contextKey === modelContextKey ? modelError.message : null
   const selectedModel = models.find((item) => item.id === effectiveModel)
-  const availableReasoningEfforts =
-    selectedModel?.reasoning_efforts.options ?? [requestedReasoningEffort]
+  const availableReasoningEfforts = selectedModel?.reasoning_efforts
+    .options ?? [requestedReasoningEffort]
   const effectiveReasoningEffort = availableReasoningEfforts.includes(
     requestedReasoningEffort
   )
@@ -171,17 +173,20 @@ export function Composer({
     effectiveReasoningEffort
   )
   const requestedProcessingMode = requestedFastMode ? "fast" : "standard"
-  const effectiveProcessingMode = selectedModel?.processing_modes.options.includes(
-    requestedProcessingMode
-  )
-    ? requestedProcessingMode
-    : (selectedModel?.processing_modes.default ?? "standard")
+  const effectiveProcessingMode =
+    selectedModel?.processing_modes.options.includes(requestedProcessingMode)
+      ? requestedProcessingMode
+      : (selectedModel?.processing_modes.default ?? "standard")
   const effectiveFastMode = effectiveProcessingMode === "fast"
   const selectedModelLabel = selectedModel?.label ?? modelLabel(effectiveModel)
 
   const error = submitError ?? visibleModelError
+  const activeRun = Boolean(activeRunId)
 
-  useGlobalComposerInput(textareaRef, !submitting && !modelChanging)
+  useGlobalComposerInput(
+    textareaRef,
+    !submitting && !modelChanging && !activeRun
+  )
 
   const handlePreferencesChange = async (preferences: ComposerPreferences) => {
     if (
@@ -189,8 +194,8 @@ export function Composer({
         preferences.reasoningEffort === effectiveReasoningEffort &&
         preferences.fastMode === effectiveFastMode) ||
       submittingRef.current ||
-      modelChangingRef.current ||
-      modelDisabled
+      activeRun ||
+      modelChangingRef.current
     ) {
       return
     }
@@ -270,6 +275,20 @@ export function Composer({
     }
   }, [updateComposerLayout])
 
+  const handleStop = async () => {
+    if (!onStop || submittingRef.current) return
+    setSubmitError(null)
+    try {
+      await onStop()
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : "Unable to stop generating. Try again."
+      )
+    }
+  }
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
@@ -279,7 +298,6 @@ export function Composer({
       !onSubmit ||
       submittingRef.current ||
       modelChangingRef.current ||
-      modelDisabled ||
       providerDisabled
     ) {
       return
@@ -324,7 +342,7 @@ export function Composer({
           </FieldLabel>
           <InputGroup
             ref={composerSurfaceRef}
-            className="rounded-2xl border-border/80 bg-muted/80 shadow-sm [--composer-inset:--spacing(2.5)] dark:bg-muted"
+            className="rounded-2xl border-border/80 bg-background shadow-[0_2px_8px_-4px_oklch(0_0_0_/_0.2),0_1px_2px_oklch(0_0_0_/_0.04)] [--composer-inset:--spacing(2.5)] has-[[data-slot=input-group-control]:focus-visible]:border-foreground/20 has-[[data-slot=input-group-control]:focus-visible]:ring-0"
           >
             <InputGroupTextarea
               ref={textareaRef}
@@ -348,11 +366,9 @@ export function Composer({
               placeholder="Message"
               rows={1}
               enterKeyHint="send"
-              readOnly={submitting}
+              readOnly={activeRun || submitting}
               aria-invalid={submitError ? true : undefined}
-              aria-describedby={
-                submitError ? "composer-error" : undefined
-              }
+              aria-describedby={submitError ? "composer-error" : undefined}
               className="max-h-48 min-h-10 min-w-0 overflow-y-auto px-(--composer-inset) pt-(--composer-inset) pb-1"
             />
             <InputGroupAddon
@@ -374,12 +390,12 @@ export function Composer({
                     aria-describedby={
                       visibleModelError ? "composer-error" : undefined
                     }
-                    disabled={submitting || modelChanging || modelDisabled}
+                    disabled={submitting || activeRun}
                     render={
                       <InputGroupButton
-                        variant="ghost-contrast"
+                        variant="ghost"
                         size="sm"
-                        className="gap-1"
+                        className="gap-1 focus-visible:border-foreground/20 focus-visible:ring-0 aria-expanded:border-foreground/20"
                       />
                     }
                   >
@@ -409,7 +425,7 @@ export function Composer({
                       <DropdownMenuSub>
                         <DropdownMenuSubTrigger className="whitespace-nowrap [&>svg:last-child]:ml-2">
                           {modelScope === "default" ? "Default model" : "Model"}
-                          <span className="ms-auto shrink-0 whitespace-nowrap text-xs text-muted-foreground">
+                          <span className="ms-auto shrink-0 text-xs whitespace-nowrap text-muted-foreground">
                             {selectedModelLabel}
                           </span>
                         </DropdownMenuSubTrigger>
@@ -449,7 +465,7 @@ export function Composer({
                       <DropdownMenuSub>
                         <DropdownMenuSubTrigger className="whitespace-nowrap [&>svg:last-child]:ml-2">
                           Effort
-                          <span className="ms-auto shrink-0 whitespace-nowrap text-xs text-muted-foreground">
+                          <span className="ms-auto shrink-0 text-xs whitespace-nowrap text-muted-foreground">
                             {selectedReasoningEffortLabel}
                           </span>
                         </DropdownMenuSubTrigger>
@@ -481,7 +497,7 @@ export function Composer({
                       <DropdownMenuSub>
                         <DropdownMenuSubTrigger className="whitespace-nowrap [&>svg:last-child]:ml-2">
                           Speed
-                          <span className="ms-auto shrink-0 whitespace-nowrap text-xs text-muted-foreground">
+                          <span className="ms-auto shrink-0 text-xs whitespace-nowrap text-muted-foreground">
                             {processingModeLabel(effectiveProcessingMode)}
                           </span>
                         </DropdownMenuSubTrigger>
@@ -497,9 +513,11 @@ export function Composer({
                                 })
                               }
                             >
-                              {(selectedModel?.processing_modes.options ?? [
-                                "standard",
-                              ]).map((value) => (
+                              {(
+                                selectedModel?.processing_modes.options ?? [
+                                  "standard",
+                                ]
+                              ).map((value) => (
                                 <DropdownMenuRadioItem
                                   key={value}
                                   value={value}
@@ -516,20 +534,28 @@ export function Composer({
                 </DropdownMenu>
 
                 <Button
-                  type="submit"
+                  onClick={activeRun ? () => void handleStop() : undefined}
+                  type={activeRun ? "button" : "submit"}
                   variant="default"
                   size="icon"
                   className="bg-foreground/10 text-foreground hover:bg-foreground/15 dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/80"
-                  aria-label={submitting ? "Sending message" : "Send message"}
+                  aria-label={
+                    activeRun
+                      ? "Stop generating"
+                      : submitting
+                        ? "Sending message"
+                        : "Send message"
+                  }
                   disabled={
-                    !message.trim() ||
-                    submitting ||
+                    (!activeRun && !message.trim()) ||
+                    (submitting && !activeRun) ||
                     modelChanging ||
-                    modelDisabled ||
-                    providerDisabled
+                    (!activeRun && providerDisabled)
                   }
                 >
-                  {submitting ? (
+                  {activeRun ? (
+                    <SquareIcon aria-hidden="true" data-icon="inline-start" />
+                  ) : submitting ? (
                     <Spinner aria-hidden="true" data-icon="inline-start" />
                   ) : (
                     <ArrowUpIcon aria-hidden="true" data-icon="inline-start" />

@@ -12,10 +12,11 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { cn } from "@/lib/utils"
 import { AppShellContext } from "@/features/app-shell/app-shell-context"
 import { AppSidebar } from "@/features/app-shell/components/app-sidebar"
-import { useLiveConversationTitles } from "@/features/app-shell/hooks/use-live-conversation-titles"
+import { subscribeToRunDiscovery } from "@/features/app-shell/run-discovery"
 import { useSidebarCatalog } from "@/features/app-shell/hooks/use-sidebar-catalog"
 import { authApi, type User } from "@/features/auth/api"
 import { startConversationTurn } from "@/features/composer/api"
+import { conversationApi } from "@/features/conversation/api"
 import {
   Composer,
   type ComposerPreferences,
@@ -53,10 +54,15 @@ export function AuthenticatedAppShell({
   const catalog = useSidebarCatalog(true)
   const {
     activeRecord: activeConversationRecord,
+    activeTurnConversationId,
     applyEvent: applyConversationEvent,
     consumeTurnSpacerAnchor,
     loadConversation,
-  } = useConversations(activeConversationId)
+    setRunStopRequested,
+  } = useConversations(activeConversationId, {
+    onConversationTitle: (conversation) =>
+      catalog.upsertConversation(conversation),
+  })
   const refreshCatalog = catalog.refresh
   const setConversationPreferences = catalog.setConversationPreferences
   const upsertConversation = catalog.upsertConversation
@@ -98,15 +104,18 @@ export function AuthenticatedAppShell({
     ]
   )
 
-  const resyncConversationTitles = useCallback(() => {
-    void refreshCatalog({ preserveActionError: true })
-  }, [refreshCatalog])
-  const subscribeTitleRun = useLiveConversationTitles({
-    activeRuns: catalog.activeRuns,
-    conversations: catalog.conversations,
-    onConversationTitle: upsertConversation,
-    onResync: resyncConversationTitles,
-  })
+  useEffect(() => {
+    const stop = subscribeToRunDiscovery(
+      (run) => void loadConversation(run.conversation_id, { force: true }),
+      () => {
+        void refreshCatalog({ preserveActionError: true })
+        if (activeConversationId) {
+          void loadConversation(activeConversationId, { force: true })
+        }
+      }
+    )
+    return stop
+  }, [activeConversationId, loadConversation, refreshCatalog])
 
   useEffect(
     () => () => {
@@ -173,16 +182,10 @@ export function AuthenticatedAppShell({
             const conversation = started.conversation
             conversationId = conversation.id
             upsertConversation(conversation)
-            if (!conversation.title_updated_at) {
-              subscribeTitleRun({
-                after: started.after,
-                conversationId: conversation.id,
-                runId: started.runId,
-              })
-            }
             onAccepted()
             onConversationSelect(conversation.id)
             void refreshCatalog()
+            controller.abort()
           },
           (event) => {
             if (conversationId) {
@@ -202,7 +205,6 @@ export function AuthenticatedAppShell({
       applyConversationEvent,
       onConversationSelect,
       refreshCatalog,
-      subscribeTitleRun,
       upsertConversation,
     ]
   )
@@ -224,6 +226,25 @@ export function AuthenticatedAppShell({
     [activeConversationId, setConversationPreferences]
   )
 
+  const handleStop = useCallback(async () => {
+    const conversationId = activeConversationId
+    const runId = activeConversationRecord?.runId
+    if (!conversationId || !runId) return
+    setRunStopRequested(conversationId, runId, true)
+    try {
+      await conversationApi.cancelRun(runId)
+    } catch (error) {
+      setRunStopRequested(conversationId, runId, false)
+      void loadConversation(conversationId, { force: true })
+      throw error
+    }
+  }, [
+    activeConversationId,
+    activeConversationRecord?.runId,
+    loadConversation,
+    setRunStopRequested,
+  ])
+
   return (
     <AppShellContext.Provider value={context}>
       <SidebarProvider className="relative h-svh min-h-0 overflow-hidden">
@@ -236,6 +257,7 @@ export function AuthenticatedAppShell({
           user={user}
           catalog={catalog}
           activeConversationId={activeConversationId}
+          activeTurnConversationId={activeTurnConversationId}
           isDesktop={isDesktop}
           onConversationSelect={onConversationSelect}
           onSignOut={() => void handleSignOut()}
@@ -287,10 +309,6 @@ export function AuthenticatedAppShell({
                 }
                 models={catalog.models}
                 modelContextKey={activeConversationId ?? "new"}
-                modelDisabled={
-                  catalog.models.length === 0 ||
-                  (activeConversationId !== null && activeConversation === null)
-                }
                 providerDisabled={
                   catalog.models.find(
                     (item) =>
@@ -301,6 +319,12 @@ export function AuthenticatedAppShell({
                 modelScope={activeConversationId ? "conversation" : "default"}
                 onPreferencesChange={handlePreferencesChange}
                 onSubmit={handleComposerSubmit}
+                activeRunId={
+                  activeConversationRecord?.stopRequested
+                    ? undefined
+                    : activeConversationRecord?.runId
+                }
+                onStop={handleStop}
               />
             </div>
           </footer>

@@ -1,5 +1,6 @@
 """Provider-neutral runtime client and explicit LangChain tool contracts."""
 
+import asyncio
 import json
 from contextlib import suppress
 from dataclasses import asdict, dataclass
@@ -20,6 +21,21 @@ from my_bot_ai.logging import outbound_request_headers
 
 RuntimePath = Annotated[str, Field(min_length=1, max_length=4_096)]
 Selector = Annotated[str, Field(min_length=1, max_length=4_096)]
+
+# These are deliberately per action: a local read should fail quickly while a
+# shell command or browser navigation may legitimately take longer.
+RUNTIME_TOOL_TIMEOUTS: dict[str, float] = {
+    "filesystem.list": 10.0,
+    "filesystem.read": 10.0,
+    "filesystem.write": 15.0,
+    "shell.exec": 60.0,
+    "browser.open": 30.0,
+    "browser.snapshot": 15.0,
+    "browser.click": 20.0,
+    "browser.type": 20.0,
+    "browser.press": 10.0,
+    "browser.close": 10.0,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,12 +82,16 @@ class RuntimeClient:
             "tool": name,
             "arguments": arguments,
         }
+        timeout_seconds = RUNTIME_TOOL_TIMEOUTS.get(name, 30.0)
         try:
-            if self._client is not None:
-                response = await self._client.post(self._endpoint, json=body, headers=headers)
-            else:
-                async with httpx.AsyncClient(timeout=30) as client:
-                    response = await client.post(self._endpoint, json=body, headers=headers)
+            async with asyncio.timeout(timeout_seconds):
+                if self._client is not None:
+                    response = await self._client.post(self._endpoint, json=body, headers=headers)
+                else:
+                    # The outer action timeout is authoritative; this client timeout
+                    # only prevents httpx from waiting forever on one phase.
+                    async with httpx.AsyncClient(timeout=httpx.Timeout(timeout_seconds)) as client:
+                        response = await client.post(self._endpoint, json=body, headers=headers)
             if not response.is_success:
                 self._raise_runtime_error(response)
             payload = response.json()
@@ -92,11 +112,18 @@ class RuntimeClient:
             return result
         except RuntimeCallError:
             raise
+        except TimeoutError as error:
+            raise RuntimeCallError(
+                "runtime_timeout",
+                f"The runtime {name} action timed out. Retry it once or choose another action.",
+                True,
+            ) from error
         except (httpx.HTTPError, TypeError, ValueError) as error:
             raise RuntimeCallError from error
 
     @staticmethod
     def _raise_runtime_error(response: httpx.Response) -> None:
+        detail: Any = None
         try:
             payload = response.json()
             detail = payload.get("error") if isinstance(payload, dict) else None
@@ -107,7 +134,13 @@ class RuntimeClient:
             raise RuntimeRecoveryRequiredError
         if code == "idempotency_conflict":
             raise RuntimeIdempotencyConflictError
-        raise RuntimeCallError
+        message = detail.get("message") if isinstance(detail, dict) else None
+        retryable = detail.get("retryable", True) if isinstance(detail, dict) else True
+        raise RuntimeCallError(
+            code if isinstance(code, str) else "runtime_error",
+            message if isinstance(message, str) else "The runtime tool failed.",
+            bool(retryable),
+        )
 
 
 def _valid_browser_frame(value: Any) -> bool:
@@ -167,6 +200,10 @@ class BrowserClickInput(RuntimeToolInput):
 class BrowserTypeInput(RuntimeToolInput):
     selector: Selector
     text: str = Field(min_length=1, max_length=100_000)
+
+
+class BrowserPressInput(RuntimeToolInput):
+    key: str = Field(min_length=1, max_length=128)
 
 
 def build_runtime_tools(client: RuntimeClient, context: RuntimeContext) -> tuple[BaseTool, ...]:
@@ -256,6 +293,17 @@ def build_runtime_tools(client: RuntimeClient, context: RuntimeContext) -> tuple
             operation_id=operation_id(name, tool_call_id),
         )
 
+    async def browser_press(
+        key: str, tool_call_id: Annotated[str, InjectedToolCallId]
+    ) -> Any:
+        name = "browser.press"
+        return await client.execute_tool(
+            name,
+            {"key": key},
+            context,
+            operation_id=operation_id(name, tool_call_id),
+        )
+
     async def browser_close(tool_call_id: Annotated[str, InjectedToolCallId]) -> Any:
         name = "browser.close"
         return await client.execute_tool(
@@ -320,6 +368,14 @@ def build_runtime_tools(client: RuntimeClient, context: RuntimeContext) -> tuple
             name="browser_type",
             description="Type text into one element in the isolated browser.",
             args_schema=BrowserTypeInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=browser_press,
+            name="browser_press",
+            description=(
+                "Press one key in the isolated browser, such as Enter to submit a focused form."
+            ),
+            args_schema=BrowserPressInput,
         ),
         StructuredTool.from_function(
             coroutine=browser_close,

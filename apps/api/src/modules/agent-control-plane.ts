@@ -174,6 +174,7 @@ type FrameListener = (frame: unknown) => void
 export type AgentEventFanoutEnvelope =
   | { kind: 'event'; source: string; event: PublicAgentEvent }
   | { kind: 'frame'; source: string; runId: string; frame: Record<string, unknown> }
+  | { kind: 'cancel'; source: string; runId: string }
 
 export interface AgentEventFanout {
   publish(envelope: AgentEventFanoutEnvelope): Promise<void>
@@ -184,6 +185,9 @@ const validFanoutEnvelope = (value: unknown): value is AgentEventFanoutEnvelope 
   if (!value || typeof value !== 'object') return false
   const envelope = value as Record<string, unknown>
   if (typeof envelope.source !== 'string' || !envelope.source) return false
+  if (envelope.kind === 'cancel') {
+    return typeof envelope.runId === 'string' && envelope.runId.length > 0
+  }
   if (envelope.kind === 'frame') {
     return typeof envelope.runId === 'string' && envelope.runId.length > 0 &&
       validBrowserFrame(envelope.frame)
@@ -245,6 +249,7 @@ export class RedisAgentEventFanout implements AgentEventFanout {
 /** Process-local projection only. PostgreSQL remains the event source of truth. */
 export class AgentEventHub {
   private readonly events = new Map<string, Set<EventListener>>()
+  private readonly allEvents = new Set<EventListener>()
   private readonly frames = new Map<string, Set<FrameListener>>()
 
   private publishTo<T>(listenersByRun: Map<string, Set<(value: T) => void>>, runId: string, value: T) {
@@ -272,6 +277,18 @@ export class AgentEventHub {
 
   publish(event: PublicAgentEvent) {
     this.publishTo(this.events, event.run_id, event)
+    for (const listener of this.allEvents) {
+      try {
+        listener(event)
+      } catch {
+        this.allEvents.delete(listener)
+      }
+    }
+  }
+
+  subscribeAll(listener: EventListener) {
+    this.allEvents.add(listener)
+    return () => this.allEvents.delete(listener)
   }
 
   subscribeFrames(runId: string, listener: FrameListener) {
@@ -426,8 +443,13 @@ export class AgentRunExecutor {
     this.hub = hub
     this.unsubscribeFanout = fanout?.subscribe((envelope) => {
       if (envelope.source === this.source) return
-      if (envelope.kind === 'event') this.hub.publish(envelope.event)
-      else this.hub.publishBrowserFrame(envelope.runId, envelope.frame)
+      if (envelope.kind === 'event') {
+        this.hub.publish(envelope.event)
+      } else if (envelope.kind === 'frame') {
+        this.hub.publishBrowserFrame(envelope.runId, envelope.frame)
+      } else {
+        this.cancelLocal(envelope.runId)
+      }
     }) ?? (() => undefined)
   }
 
@@ -506,10 +528,21 @@ export class AgentRunExecutor {
     return this.closePromise
   }
 
-  cancel(runId: string, headers?: Record<string, string>) {
+  private cancelLocal(runId: string, headers?: Record<string, string>) {
     const controller = this.controllers.get(runId)
     if (controller) controller.abort()
     this.start(runId, headers)
+  }
+
+  cancel(runId: string, headers?: Record<string, string>) {
+    this.cancelLocal(runId, headers)
+    if (!this.fanout) return
+    void this.fanout.publish({ kind: 'cancel', source: this.source, runId })
+      .catch((error) => logger.error({
+        event: 'agent_run_cancel_fanout_failed',
+        run_id: runId,
+        ...safeError(error),
+      }, 'agent_run_cancel_fanout_failed'))
   }
 
   private async dispatch(event: PublicAgentEvent) {

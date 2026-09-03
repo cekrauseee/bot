@@ -88,6 +88,21 @@ describe('durable agent event contract', () => {
     expect(listener).toHaveBeenCalledWith({ jpeg: 'frame' })
   })
 
+  it('supports all-event listeners for cross-run discovery', () => {
+    const hub = new AgentEventHub()
+    const listener = vi.fn()
+    const unsubscribe = hub.subscribeAll(listener)
+    const event: PublicAgentEvent = {
+      version: 2, sequence: '1', run_id: runId, turn_id: turnId,
+      type: 'turn.started', data: {},
+    }
+    hub.publish(event)
+    unsubscribe()
+    hub.publish({ ...event, sequence: '2' })
+    expect(listener).toHaveBeenCalledOnce()
+    expect(listener).toHaveBeenCalledWith(event)
+  })
+
   it('fans committed events across instances without duplicating the publishing instance', async () => {
     const fanout = new InMemoryAgentEventFanout()
     const first = new AgentRunExecutor({} as never, vi.fn() as never, new AgentEventHub(), fanout)
@@ -135,6 +150,26 @@ describe('durable agent event contract', () => {
     expect(secondListener).toHaveBeenCalledOnce()
     expect(firstListener).toHaveBeenCalledWith(frameData)
     expect(secondListener).toHaveBeenCalledWith(frameData)
+    await first.close()
+    await second.close()
+  })
+
+  it('fans cancellation to the instance that owns the active controller', async () => {
+    const fanout = new InMemoryAgentEventFanout()
+    const first = new AgentRunExecutor({} as never, vi.fn() as never, new AgentEventHub(), fanout)
+    const second = new AgentRunExecutor({} as never, vi.fn() as never, new AgentEventHub(), fanout)
+    const controller = new AbortController()
+    ;(second as unknown as { controllers: Map<string, AbortController> })
+      .controllers.set(runId, controller)
+    const secondStart = vi.spyOn(second, 'start').mockImplementation(() => undefined)
+    const firstStart = vi.spyOn(first, 'start').mockImplementation(() => undefined)
+
+    first.cancel(runId)
+    await Promise.resolve()
+
+    expect(firstStart).toHaveBeenCalledWith(runId, undefined)
+    expect(secondStart).toHaveBeenCalledWith(runId, undefined)
+    expect(controller.signal.aborted).toBe(true)
     await first.close()
     await second.close()
   })

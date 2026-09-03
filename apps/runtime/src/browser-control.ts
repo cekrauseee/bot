@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 
 import type { BrowserCommandResult, BrowserFrameRelay, BrowserLifecycle, BrowserProvider, BrowserStatus, JsonObject, JsonValue, TrustedControlChannel } from './contracts.js'
-import { ConflictError, ControlLeaseError, RuntimeUnavailableError } from './errors.js'
+import { BrowserActionError, ConflictError, ControlLeaseError, RuntimeUnavailableError } from './errors.js'
 
 const DEFAULT_LEASE_MS = 5 * 60 * 1000
 
@@ -40,7 +40,7 @@ export class BrowserController {
       this.lifecycle = 'live'
       return this.withResult({ operation: 'open', url }, result)
     } catch (error) {
-      this.lifecycle = error instanceof RuntimeUnavailableError ? 'failed' : 'failed'
+      this.lifecycle = error instanceof BrowserActionError ? 'live' : 'failed'
       throw error
     }
   }
@@ -54,7 +54,7 @@ export class BrowserController {
         this.lifecycle = 'live'
         return this.withResult({ operation: 'snapshot' }, result)
       } catch (error) {
-        this.lifecycle = 'failed'
+        this.lifecycle = error instanceof BrowserActionError ? 'live' : 'failed'
         throw error
       }
     }
@@ -76,6 +76,14 @@ export class BrowserController {
     this.ensureLive()
     this.ensureInputControl(leaseId)
     return this.providerOperation('type', () => this.provider.type(selector, text, signal))
+  }
+
+  async press(key: string, leaseId?: string, signal?: AbortSignal): Promise<JsonObject> {
+    await this.attachIfStopped(signal)
+    signal?.throwIfAborted()
+    this.ensureLive()
+    this.ensureInputControl(leaseId)
+    return this.providerOperation('press', () => this.provider.press(key, signal))
   }
 
   async requestUserControl(): Promise<JsonObject> {
@@ -123,7 +131,7 @@ export class BrowserController {
     try {
       await this.provider.close(signal)
     } catch (error) {
-      this.lifecycle = 'failed'
+      this.lifecycle = error instanceof BrowserActionError ? 'live' : 'failed'
       throw error
     }
     if (this.lease) await this.relay?.releaseHandoff(this.lease.id).catch(() => undefined)
@@ -150,7 +158,7 @@ export class BrowserController {
       await this.provider.snapshot(signal)
       this.lifecycle = 'live'
     } catch (error) {
-      this.lifecycle = 'failed'
+      this.lifecycle = error instanceof BrowserActionError ? 'live' : 'failed'
       throw error
     }
   }
@@ -193,7 +201,9 @@ export class BrowserController {
     try {
       return this.withResult({ operation }, await call())
     } catch (error) {
-      this.lifecycle = 'failed'
+      // A failed click/type/press/open does not imply that the session died.
+      // Keep it live so the model can inspect the page and choose a recovery.
+      if (!(error instanceof BrowserActionError)) this.lifecycle = 'failed'
       throw error
     }
   }

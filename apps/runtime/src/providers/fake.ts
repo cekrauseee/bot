@@ -105,6 +105,10 @@ class FakeBrowser implements BrowserProvider {
     return this.command('type', [selector, text], { selector })
   }
 
+  async press(key: string): Promise<BrowserCommandResult> {
+    return this.command('press', [key], { key })
+  }
+
   async close(): Promise<void> {
     this.closed = true
     this.calls.push({ command: 'close', args: [] })

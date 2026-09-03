@@ -11,10 +11,12 @@ import structlog
 from my_bot_ai.config import Settings
 from my_bot_ai.features.agent.contracts import AgentRequest
 from my_bot_ai.features.agent.errors import (
+    RuntimeCallError,
     RuntimeIdempotencyConflictError,
     RuntimeRecoveryRequiredError,
 )
 from my_bot_ai.features.agent.runtime import (
+    RUNTIME_TOOL_TIMEOUTS,
     RuntimeClient,
     RuntimeContext,
     build_runtime_tools,
@@ -79,6 +81,7 @@ def test_runtime_tools_use_typed_schemas_and_normalized_dotted_requests() -> Non
                 "browser_snapshot": {},
                 "browser_click": {"selector": "#continue"},
                 "browser_type": {"selector": "#name", "text": "Ada"},
+                "browser_press": {"key": "Enter"},
                 "browser_close": {},
             }
             for name, arguments in calls.items():
@@ -106,6 +109,7 @@ def test_runtime_tools_use_typed_schemas_and_normalized_dotted_requests() -> Non
         "browser_snapshot",
         "browser_click",
         "browser_type",
+        "browser_press",
         "browser_close",
     ]
     assert "browser_release_control" not in names
@@ -124,6 +128,7 @@ def test_runtime_tools_use_typed_schemas_and_normalized_dotted_requests() -> Non
         "browser.snapshot",
         "browser.click",
         "browser.type",
+        "browser.press",
         "browser.close",
     ]
     assert all(
@@ -166,6 +171,31 @@ def test_runtime_tools_use_contextual_defaults_for_filesystem_and_shell() -> Non
     anyio.run(run)
     assert captured[0]["arguments"] == {"path": "."}
     assert captured[1]["arguments"] == {"command": "true", "argv": [], "cwd": "."}
+
+
+def test_runtime_client_uses_action_timeout_and_reports_typed_failure() -> None:
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        await anyio.sleep(0.02)
+        return httpx.Response(200, json={"result": {"ok": True}})
+
+    async def run() -> None:
+        original = RUNTIME_TOOL_TIMEOUTS["filesystem.read"]
+        RUNTIME_TOOL_TIMEOUTS["filesystem.read"] = 0.001
+        try:
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+                client = RuntimeClient("https://runtime.invalid", client=http)
+                with pytest.raises(RuntimeCallError) as raised:
+                    await client.execute_tool(
+                        "filesystem.read",
+                        {"path": "/workspace/file.txt"},
+                        RuntimeContext("run", "conversation", "user", "workspace"),
+                        operation_id="operation",
+                    )
+                assert raised.value.public_error.code == "runtime_timeout"
+        finally:
+            RUNTIME_TOOL_TIMEOUTS["filesystem.read"] = original
+
+    anyio.run(run)
 
 
 def test_agent_builds_an_isolated_runtime_client_for_each_request() -> None:

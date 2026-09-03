@@ -89,6 +89,8 @@ export class RuntimeService {
         return workspace.browser(request.run_id).click(args.selector as string, args.leaseId as string | undefined, signal)
       case 'browser.type':
         return workspace.browser(request.run_id).type(args.selector as string, args.text as string, args.leaseId as string | undefined, signal)
+      case 'browser.press':
+        return workspace.browser(request.run_id).press(args.key as string, args.leaseId as string | undefined, signal)
       case 'browser.request_user_control':
         return workspace.browser(request.run_id).requestUserControl()
       case 'browser.release_control':

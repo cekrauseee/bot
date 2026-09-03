@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { BrowserController } from '../src/browser-control.js'
-import { ControlLeaseError, InvalidRequestError } from '../src/errors.js'
+import { BrowserActionError, ControlLeaseError, InvalidRequestError, RuntimeUnavailableError } from '../src/errors.js'
 import type { BrowserFrameRelay, RuntimeToolRequest, TrustedControlChannel } from '../src/contracts.js'
 import { createFakeRuntimeProvider } from '../src/providers/fake.js'
 import { RuntimeService } from '../src/service.js'
@@ -169,6 +169,7 @@ describe('runtime contracts and fake provider', () => {
     expect(handoff.status).not.toHaveProperty('leaseId')
     await expect(browser.click('#button')).rejects.toBeInstanceOf(ControlLeaseError)
     await browser.click('#button', leaseId)
+    await browser.press('Enter', leaseId)
     await expect(browser.releaseControl('wrong-lease')).rejects.toBeInstanceOf(ControlLeaseError)
     await browser.releaseControl(leaseId)
     expect(browser.status()).toMatchObject({ control: 'agent', state: 'live' })
@@ -189,6 +190,32 @@ describe('runtime contracts and fake provider', () => {
     })
   })
 
+  it('keeps a browser session live after a recoverable action error', async () => {
+    const provider = createFakeRuntimeProvider()
+    const remoteBrowser = provider.browserFor('run-1')
+    const failed = vi.spyOn(remoteBrowser, 'click').mockRejectedValue(new BrowserActionError('The target is covered.'))
+    const browser = new BrowserController('workspace-1', 'run-1', remoteBrowser)
+    await browser.open('https://example.com/')
+
+    await expect(browser.click('#covered')).rejects.toMatchObject({
+      code: 'browser_action_failed',
+      message: 'The target is covered.',
+    })
+    expect(browser.status()).toMatchObject({ state: 'live' })
+    failed.mockRestore()
+    await expect(browser.snapshot()).resolves.toMatchObject({ operation: 'snapshot' })
+  })
+
+  it('marks a browser session failed for a fatal lifecycle error', async () => {
+    const provider = createFakeRuntimeProvider()
+    const remoteBrowser = provider.browserFor('run-1')
+    vi.spyOn(remoteBrowser, 'open').mockRejectedValue(new RuntimeUnavailableError())
+    const browser = new BrowserController('workspace-1', 'run-1', remoteBrowser)
+
+    await expect(browser.open('https://example.com/')).rejects.toBeInstanceOf(RuntimeUnavailableError)
+    expect(browser.status()).toMatchObject({ state: 'failed' })
+  })
+
   it('reattaches a recreated controller to the stable run browser session', async () => {
     const provider = createFakeRuntimeProvider()
     const remoteBrowser = provider.browserFor('run-1')
@@ -196,7 +223,7 @@ describe('runtime contracts and fake provider', () => {
       .open('https://example.com/')
 
     const recreated = new BrowserController('workspace-1', 'run-1', remoteBrowser)
-    await recreated.click('#continue')
+    await recreated.press('Enter')
     const snapshot = await recreated.snapshot()
 
     expect(snapshot).toMatchObject({
@@ -204,7 +231,7 @@ describe('runtime contracts and fake provider', () => {
       data: { url: 'https://example.com/', closed: false },
     })
     expect(remoteBrowser.calls.map(({ command }) => command)).toEqual([
-      'open', 'snapshot', 'click', 'snapshot',
+      'open', 'snapshot', 'press', 'snapshot',
     ])
   })
 

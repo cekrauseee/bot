@@ -5,6 +5,7 @@ import {
   applyTurnEvent,
   consumeTurnSpacerAnchor,
   emptyConversationRecord,
+  markRunStopRequested,
   mapApiMessage,
 } from "@/features/conversation/conversation-state"
 
@@ -39,7 +40,7 @@ const apiMessage = (
 })
 
 describe("conversation state", () => {
-  it("keeps a static process status when an assistant has no activities", () => {
+  it("keeps a static process status for a completed direct response", () => {
     const message = mapApiMessage(
       apiMessage("assistant", "assistant", "completed", "Done.")
     )
@@ -48,6 +49,14 @@ describe("conversation state", () => {
       activities: [],
       status: "processed",
     })
+  })
+
+  it("omits an empty cancelled assistant that never produced output", () => {
+    const message = mapApiMessage(
+      apiMessage("assistant", "assistant", "cancelled")
+    )
+
+    expect(message).toBeNull()
   })
 
   it("restores canonical and durable raw activity shapes", () => {
@@ -154,5 +163,51 @@ describe("conversation state", () => {
     const consumed = consumeTurnSpacerAnchor(state, "user")
     expect(consumed.turnSpacerAnchorId).toBeUndefined()
     expect(consumed.messages).toBe(state.messages)
+  })
+
+  it("ignores duplicate deltas while advancing the durable cursor", () => {
+    let state = applyTurnEvent(
+      emptyConversationRecord(),
+      event(0, "turn.started", {
+        user_message: apiMessage("user", "user", "completed", "Hello"),
+        assistant_message: apiMessage("assistant", "assistant", "streaming"),
+      }),
+      0
+    )
+    state = applyTurnEvent(state, event(1, "text.delta", { delta: "A" }), 1)
+    const duplicate = applyTurnEvent(
+      state,
+      event(1, "text.delta", { delta: "A" }),
+      1
+    )
+    expect(duplicate).toBe(state)
+    state = applyTurnEvent(state, event(2, "text.delta", { delta: "B" }), 2)
+    expect(state.messages.find((message) => message.id === "assistant")?.content).toBe("AB")
+    expect(state.lastEventSequence).toBe("2")
+  })
+
+  it("freezes visible streaming immediately after stop is requested", () => {
+    let state = applyTurnEvent(
+      emptyConversationRecord(),
+      event(0, "turn.started", {
+        user_message: apiMessage("user", "user", "completed", "Hello"),
+        assistant_message: apiMessage("assistant", "assistant", "streaming"),
+      }),
+      0
+    )
+    state = applyTurnEvent(state, event(1, "text.delta", { delta: "Before" }), 1)
+    state = markRunStopRequested(state, "run-1", true)
+    state = applyTurnEvent(state, event(2, "text.delta", { delta: " after" }), 2)
+
+    expect(state.stopRequested).toBe(true)
+    expect(state.activeAssistantId).toBeUndefined()
+    expect(state.lastEventSequence).toBe("2")
+    expect(state.messages.find((message) => message.id === "assistant")?.content).toBe("Before")
+
+    state = applyTurnEvent(state, event(3, "turn.failed", {
+      error: { code: "cancelled", message: "Turn cancelled." },
+    }), 3)
+    expect(state.runId).toBeUndefined()
+    expect(state.stopRequested).toBeUndefined()
   })
 })

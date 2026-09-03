@@ -1745,7 +1745,68 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     return publicRun(result.run)
   }, { params: runParams })
 
-  const socketSubscriptions = new Map<string, () => void>()
+  // Key by socket object instead of provider-assigned ids so a recycled id
+  // cannot overwrite another connection's cleanup callback.
+  const socketSubscriptions = new WeakMap<object, () => void>()
+  type ActiveRunDiscoveryMessage = {
+    version: 2
+    type: 'active_run.discovered'
+    active_run: ReturnType<typeof activeRunProjection>
+  }
+  const activeRunDiscovery = (run: AgentRun): ActiveRunDiscoveryMessage => ({
+    version: 2,
+    type: 'active_run.discovered',
+    active_run: activeRunProjection(run),
+  })
+
+  app.ws('/agent-runs/subscribe', {
+    beforeHandle: async ({ request }) => {
+      websocketOrigin(request)
+      await sessionUser(request)
+    },
+    open: async (socket) => {
+      // Elysia carries the upgrade request on websocket data; authentication is
+      // repeated here so the user identity is available for event ownership checks.
+      const request = (socket.data as unknown as { request: Request }).request
+      const user = await sessionUser(request)
+      let closed = false
+      const discovered = new Set<string>()
+      let replaying = true
+      const buffered: AgentRun[] = []
+      const send = (run: AgentRun) => {
+        if (closed || discovered.has(run.id)) return
+        discovered.add(run.id)
+        socket.send(JSON.stringify(activeRunDiscovery(run)))
+      }
+      const receive = (event: ReturnType<typeof publicAgentEvent>) => {
+        if (event.type !== 'turn.started') return
+        void services.database.transaction((db) =>
+          new AgentRunRepository(db).getOwned(user.id, event.run_id)
+        ).then((run) => {
+          if (closed || !run) return
+          if (replaying) buffered.push(run)
+          else send(run)
+        }).catch(() => undefined)
+      }
+      const unsubscribe = agentExecutor.hub.subscribeAll(receive)
+      socketSubscriptions.set(socket, () => {
+        closed = true
+        unsubscribe()
+      })
+      const entries = await services.database.transaction((db) =>
+        new AgentRunRepository(db).activeForUser(user.id))
+      for (const { run } of entries) send(run)
+      // Events received while the snapshot was being read are emitted after it,
+      // with run-id deduplication preserving exactly one discovery per run.
+      replaying = false
+      for (const run of buffered) send(run)
+    },
+    close: (socket) => {
+      socketSubscriptions.get(socket)?.()
+      socketSubscriptions.delete(socket)
+    },
+  })
+
   app.ws('/agent-runs/:runId/subscribe', {
     params: runParams,
     query: t.Object({ after: t.Optional(t.String()) }),
@@ -1783,7 +1844,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       const unsubscribeFrames = agentExecutor.hub.subscribeFrames(runId, (frame) => {
         socket.send(JSON.stringify({ version: 2, run_id: runId, type: 'browser.frame', data: frame }))
       })
-      socketSubscriptions.set(socket.id, () => {
+      socketSubscriptions.set(socket, () => {
         unsubscribeEvents()
         unsubscribeFrames()
       })
@@ -1803,8 +1864,8 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       replaying = false
     },
     close: (socket) => {
-      socketSubscriptions.get(socket.id)?.()
-      socketSubscriptions.delete(socket.id)
+      socketSubscriptions.get(socket)?.()
+      socketSubscriptions.delete(socket)
     },
   })
 

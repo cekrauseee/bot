@@ -2,7 +2,13 @@ import { useEffect, useRef, useState, type CSSProperties } from "react"
 
 import { cn } from "@/lib/utils"
 
-export function SidebarScrollingTitle({ title }: { title: string }) {
+export function SidebarScrollingTitle({
+  shimmer = false,
+  title,
+}: {
+  shimmer?: boolean
+  title: string
+}) {
   const viewportRef = useRef<HTMLSpanElement>(null)
   const measureRef = useRef<HTMLSpanElement>(null)
   const [distance, setDistance] = useState(0)
@@ -41,7 +47,8 @@ export function SidebarScrollingTitle({ title }: { title: string }) {
       <span
         className={cn(
           "block min-w-0 truncate",
-          scrolling && "sidebar-title-static"
+          scrolling && "sidebar-title-static",
+          shimmer && "shimmer"
         )}
       >
         {title}
@@ -49,11 +56,16 @@ export function SidebarScrollingTitle({ title }: { title: string }) {
       {scrolling && (
         <span
           aria-hidden="true"
-          style={{
-            "--sidebar-title-distance": `${distance}px`,
-            "--sidebar-title-duration": `${Math.max(2.4, distance / 34)}s`,
-          } as CSSProperties}
-          className="sidebar-title-marquee pointer-events-none invisible absolute inset-y-0 start-0 flex w-max items-center gap-6 whitespace-nowrap opacity-0"
+          style={
+            {
+              "--sidebar-title-distance": `${distance}px`,
+              "--sidebar-title-duration": `${Math.max(2.4, distance / 34)}s`,
+            } as CSSProperties
+          }
+          className={cn(
+            "sidebar-title-marquee pointer-events-none invisible absolute inset-y-0 start-0 flex w-max items-center gap-6 whitespace-nowrap opacity-0",
+            shimmer && "shimmer"
+          )}
         >
           <span>{title}</span>
           <span>{title}</span>
