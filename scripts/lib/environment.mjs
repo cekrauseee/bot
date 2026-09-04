@@ -11,6 +11,7 @@ const LOCAL_SECRET_KEYS = [
   'AI_SERVICE_TOKEN',
   'RUNTIME_SERVICE_TOKEN',
 ]
+const GITHUB_ENCRYPTION_KEY = 'GITHUB_TOKEN_ENCRYPTION_KEY'
 const LOCAL_DEFAULTS = new Map([
   ['RUNTIME_BASE_URL', 'http://localhost:8002'],
   ['RUNTIME_PORT', '8002'],
@@ -108,6 +109,24 @@ function createUniqueSecret(createSecret, usedSecrets) {
   throw new Error('Unable to generate independent local service secrets')
 }
 
+function isGithubEncryptionKey(value) {
+  if (!value || !/^[A-Za-z0-9+/]{43}=$/.test(value)) return false
+  const decoded = Buffer.from(value, 'base64')
+  return decoded.length === 32 && decoded.toString('base64') === value
+}
+
+function createGithubEncryptionKey(createEncryptionKey, usedSecrets) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const candidate = createEncryptionKey()
+    if (isGithubEncryptionKey(candidate) && !usedSecrets.has(candidate)) {
+      usedSecrets.add(candidate)
+      return candidate
+    }
+  }
+
+  throw new Error('Unable to generate a valid independent GitHub token encryption key')
+}
+
 async function copyIfMissing(source, destination) {
   try {
     await readFile(destination)
@@ -156,7 +175,10 @@ export async function readExternalAuthenticationStatus(root = projectRoot) {
 
 export async function prepareEnvironment(
   root = projectRoot,
-  { createSecret = () => randomBytes(48).toString('base64url') } = {},
+  {
+    createSecret = () => randomBytes(48).toString('base64url'),
+    createEncryptionKey = () => randomBytes(32).toString('base64'),
+  } = {},
 ) {
   const envExample = path.join(root, '.env.example')
   const envPath = path.join(root, '.env')
@@ -181,6 +203,16 @@ export async function prepareEnvironment(
       generatedSecretKeys.push(key)
       values.set(key, secret)
     }
+  }
+
+  const githubEncryptionKey = values.get(GITHUB_ENCRYPTION_KEY) ?? ''
+  if (isPlaceholder(githubEncryptionKey)) {
+    const secret = createGithubEncryptionKey(createEncryptionKey, usedSecrets)
+    contents = setEnvironmentValue(contents, GITHUB_ENCRYPTION_KEY, secret)
+    generatedSecretKeys.push(GITHUB_ENCRYPTION_KEY)
+    values.set(GITHUB_ENCRYPTION_KEY, secret)
+  } else if (!isGithubEncryptionKey(githubEncryptionKey)) {
+    throw new Error('GITHUB_TOKEN_ENCRYPTION_KEY must be 32 random bytes encoded with standard Base64')
   }
 
   for (const [key, value] of LOCAL_DEFAULTS) {
@@ -213,7 +245,7 @@ export function printEnvironmentSummary(result) {
   const lines = []
   if (result.createdEnv) lines.push('✓ Created .env')
   if (result.generatedSecretKeys.length > 0) {
-    lines.push(`✓ Generated ${result.generatedSecretKeys.length} independent local service secrets`)
+    lines.push(`✓ Generated ${result.generatedSecretKeys.length} independent local secrets`)
   }
   if (result.configuredDefaultKeys.length > 0) {
     lines.push(`✓ Configured ${result.configuredDefaultKeys.length} local runtime defaults`)

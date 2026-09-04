@@ -15,7 +15,7 @@ npm run setup
 npm run dev
 ```
 
-Setup aligns the root `.env` with `.env.example`, generates local secrets without printing them, installs workspace dependencies, builds email assets, starts infrastructure, and applies migrations. `npm run dev` launches both the browser and Electron applications with the API, AI, and runtime services. The root environment is shared by Vite, the API, AI, and runtime. `VITE_API_BASE_URL` is the only browser-exposed value. Google and Resend credentials are optional for local UI work.
+Setup aligns the root `.env` with `.env.example`, generates local service secrets and the Base64 GitHub token-encryption key without printing them, installs workspace dependencies, builds email assets, starts infrastructure, and applies migrations. Existing secrets are preserved. `npm run dev` launches both the browser and Electron applications with the API, AI, and runtime services. The root environment is shared by Vite, the API, AI, and runtime. `VITE_API_BASE_URL` is the only browser-exposed value. Google, GitHub OAuth, and Resend credentials are optional for local UI work.
 
 Use `localhost` with the documented origins (`WEB_BASE_URL=http://localhost:5173`, `API_BASE_URL=http://localhost:8000`). `npm run infra:stop` stops the dedicated containers; `infra:reset` deletes their local data.
 
