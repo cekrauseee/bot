@@ -23,7 +23,7 @@ function AssistantMessage({
 }) {
   const hasResponse = content.trim().length > 0
   const responseBody = hasResponse ? (
-    <div className="typeset typeset-docs w-full max-w-none select-text">
+    <div className="typeset typeset-docs w-full max-w-none text-base select-text">
       <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml>
         {content}
       </ReactMarkdown>
@@ -72,7 +72,7 @@ export function ConversationMessage({
             )}
           >
             {isUser ? (
-              <p className="whitespace-pre-wrap select-text">
+              <p className="text-base whitespace-pre-wrap select-text">
                 {message.content}
               </p>
             ) : (

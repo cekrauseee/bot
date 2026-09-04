@@ -113,6 +113,7 @@ export function SidebarConversationRow({
     <SidebarMenuItem
       aria-busy={turnActive || undefined}
       className="overflow-hidden rounded-md group-data-[collapsible=icon]:hidden"
+      data-menu-open={menuOpen ? "true" : undefined}
       data-turn-active={turnActive || undefined}
     >
       <SidebarMenuButton
@@ -138,7 +139,7 @@ export function SidebarConversationRow({
         <span
           aria-hidden="true"
           data-slot="sidebar-turn-spinner"
-          className="pointer-events-none absolute top-1.5 right-1 z-10 hidden size-5 items-center justify-center text-sidebar-foreground transition-opacity duration-100 md:flex"
+          className="pointer-events-none absolute top-1.5 right-1 z-0 hidden size-5 items-center justify-center text-sidebar-foreground transition-opacity duration-100 md:flex"
         >
           <Spinner />
         </span>

@@ -77,7 +77,7 @@ export function ResponseProcess({
   const hasDisclosure = process.activities.length > 0
 
   const processDetails = (
-    <div className="flex min-w-0 flex-col gap-4">
+    <div className="flex min-w-0 flex-col gap-2">
       {hasDisclosure ? (
         <ProcessActivityList
           activities={process.activities}
@@ -130,7 +130,7 @@ export function ResponseProcess({
         </CollapsibleTrigger>
       </div>
       <Separator />
-      <div className="flex min-w-0 flex-col gap-4">
+      <div className="flex min-w-0 flex-col gap-2">
         <CollapsibleContent>
           <ProcessActivityList
             activities={process.activities}

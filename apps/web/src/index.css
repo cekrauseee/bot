@@ -147,7 +147,21 @@
   opacity: 0;
 }
 
+[data-sidebar="menu-item"][data-menu-open="true"]
+  > [data-sidebar="menu-button"]
+  .sidebar-title-static {
+  opacity: 0;
+}
+
 .group\/menu-item:hover > [data-sidebar="menu-button"] .sidebar-title-marquee {
+  visibility: visible;
+  opacity: 1;
+  animation: sidebar-title-scroll var(--sidebar-title-duration) linear infinite;
+}
+
+[data-sidebar="menu-item"][data-menu-open="true"]
+  > [data-sidebar="menu-button"]
+  .sidebar-title-marquee {
   visibility: visible;
   opacity: 1;
   animation: sidebar-title-scroll var(--sidebar-title-duration) linear infinite;
@@ -156,18 +170,30 @@
 [data-sidebar="menu-item"]:has(> [data-sidebar="menu-action"]:hover)
   > [data-sidebar="menu-button"],
 [data-sidebar="menu-item"]:has(> [data-sidebar="menu-action"]:focus-visible)
+  > [data-sidebar="menu-button"],
+[data-sidebar="menu-item"]:focus-within > [data-sidebar="menu-button"],
+[data-sidebar="menu-item"][data-menu-open="true"]
   > [data-sidebar="menu-button"] {
   background-color: var(--sidebar-accent);
   color: var(--sidebar-accent-foreground);
 }
 
+[data-sidebar="menu-item"][data-menu-open="true"]
+  > [data-sidebar="menu-action"] {
+  opacity: 1;
+}
+
 [data-sidebar="menu-item"]:hover > [data-slot="sidebar-action-surface"],
+[data-sidebar="menu-item"]:focus-within
+  > [data-slot="sidebar-action-surface"],
 [data-sidebar="menu-item"]:has(> [data-sidebar="menu-action"]:focus-visible)
   > [data-slot="sidebar-action-surface"] {
   opacity: 1;
 }
 
 [data-sidebar="menu-item"]:hover > [data-slot="sidebar-turn-spinner"],
+[data-sidebar="menu-item"]:focus-within
+  > [data-slot="sidebar-turn-spinner"],
 [data-sidebar="menu-item"]:has(> [data-sidebar="menu-action"]:focus-visible)
   > [data-slot="sidebar-turn-spinner"],
 [data-sidebar="menu-item"]:has(
@@ -244,10 +270,24 @@
     opacity: 1;
   }
 
+  [data-sidebar="menu-item"][data-menu-open="true"]
+    > [data-sidebar="menu-button"]
+    .sidebar-title-static {
+    opacity: 1;
+  }
+
   .group\/menu-item:hover > [data-sidebar="menu-button"]
     .sidebar-title-marquee {
     visibility: hidden;
     opacity: 0;
+  }
+
+  [data-sidebar="menu-item"][data-menu-open="true"]
+    > [data-sidebar="menu-button"]
+    .sidebar-title-marquee {
+    visibility: hidden;
+    opacity: 0;
+    animation: none;
   }
 
   [data-slot="sidebar-gap"],

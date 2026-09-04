@@ -239,7 +239,7 @@ describe("response process", () => {
     expect(markup).not.toContain("shell_exec")
 
     expect(markup).toMatch(
-      /<span class="inline-flex shrink-0 items-center gap-1\.5 text-muted-foreground"><span>Ran<\/span><svg[^>]*class="[^"]*command-chevron[^"]*"[^>]*>[\s\S]*?<span class="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">npm run test/
+      /<span class="shrink-0 text-muted-foreground">Ran<\/span><span class="inline-flex max-w-full min-w-0 items-center gap-1\.5"><span class="min-w-0 truncate font-mono text-sm text-muted-foreground">npm run test[\s\S]*?<svg[^>]*class="[^"]*command-chevron[^"]*"[^>]*>/
     )
   })
 
