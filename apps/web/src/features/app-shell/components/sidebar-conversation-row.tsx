@@ -118,7 +118,10 @@ export function SidebarConversationRow({
     >
       <SidebarMenuButton
         className={cn(
-          "group-has-data-[sidebar=menu-action]/menu-item:pr-14 md:group-has-data-[sidebar=menu-action]/menu-item:pr-2",
+          "group-has-data-[sidebar=menu-action]/menu-item:pr-14",
+          turnActive
+            ? "md:pr-8"
+            : "md:group-has-data-[sidebar=menu-action]/menu-item:pr-2",
           nested && "ps-8"
         )}
         tooltip={conversation.title}
