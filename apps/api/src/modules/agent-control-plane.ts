@@ -389,6 +389,25 @@ export const upsertActivity = (
   else activities[index] = { ...activities[index], ...next }
 }
 
+export const settleActivities = (
+  activities: Array<Record<string, unknown>>,
+  status: 'completed' | 'failed',
+) => {
+  for (let index = 0; index < activities.length; index += 1) {
+    const activity = activities[index]
+    if (activity?.type === 'text' || activity?.status !== 'in_progress') continue
+    const eventType = typeof activity.event_type === 'string' &&
+      /^(step|tool|child|skill)\./.test(activity.event_type)
+      ? `${activity.event_type.split('.', 1)[0]}.completed`
+      : activity.event_type
+    activities[index] = {
+      ...activity,
+      status,
+      ...(eventType ? { event_type: eventType } : {}),
+    }
+  }
+}
+
 const appendReasoningActivity = (
   activities: Array<Record<string, unknown>>,
   delta: string,
@@ -610,7 +629,18 @@ export class AgentRunExecutor {
     return serialized
   }
 
+  private async terminalActivities(run: AgentRun, status: 'completed' | 'failed') {
+    const assistant = await this.database.transaction((db) =>
+      new AgentRunRepository(db).assistant(run))
+    const activities = Array.isArray(assistant?.activities)
+      ? [...assistant.activities] as Array<Record<string, unknown>>
+      : []
+    settleActivities(activities, status)
+    return activities
+  }
+
   private async finishCancelled(run: AgentRun) {
+    const activities = await this.terminalActivities(run, 'failed')
     await this.persist(run, 'turn.failed', {
       error: { code: 'cancelled', message: 'Turn cancelled.', retryable: false },
     }, {
@@ -619,7 +649,7 @@ export class AgentRunExecutor {
       leaseExpiresAt: null,
       completedAt: new Date(),
     }, {
-      status: 'cancelled', errorMessage: null,
+      activities, status: 'cancelled', errorMessage: null,
     })
   }
 
@@ -799,6 +829,7 @@ export class AgentRunExecutor {
         if (event.type === 'turn.completed') {
           terminal = event.type
           await titleTask
+          settleActivities(activities, 'completed')
           await this.persist(run, event.type, data, {
             status: 'completed',
             browserProjection: null,
@@ -810,6 +841,7 @@ export class AgentRunExecutor {
         if (event.type === 'turn.failed') {
           terminal = event.type
           await titleTask
+          settleActivities(activities, 'failed')
           const detail = plainRecord(data.error)
           logger.error({ event: 'agent_run_failed', run_id: run.id, turn_id: run.turnId, ...aiDiagnostic(detail) }, 'agent_run_failed')
           await this.persist(run, event.type, {
@@ -857,14 +889,16 @@ export class AgentRunExecutor {
       const diagnostic = aiDiagnostic(error)
       logger.error({ event: 'agent_run_failed', run_id: run.id, turn_id: run.turnId, ...safeError(error), ...diagnostic }, 'agent_run_failed')
       try {
+        const activities = await this.terminalActivities(run, 'failed')
         await this.persist(run, 'turn.failed', {
           error: { code: 'provider_error', message: 'Unable to complete this turn.', retryable: true },
         }, {
           status: 'failed',
+          browserProjection: null,
           leaseExpiresAt: null,
           completedAt: new Date(),
         }, {
-          status: 'failed', errorMessage: 'Unable to complete this turn.',
+          activities, status: 'failed', errorMessage: 'Unable to complete this turn.',
         })
       } catch (terminalError) {
         if (!(terminalError instanceof AgentRunLeaseLostError)) {

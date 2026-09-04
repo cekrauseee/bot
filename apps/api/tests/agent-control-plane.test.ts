@@ -7,6 +7,7 @@ import {
   type AgentEventFanout,
   type AgentEventFanoutEnvelope,
   type PublicAgentEvent,
+  settleActivities,
   withGithubMcp,
   upsertActivity,
 } from '../src/modules/agent-control-plane.js'
@@ -107,6 +108,28 @@ describe('durable agent event contract', () => {
     expect(activities).toEqual([{
       id: 'github', name: 'GitHub', detail: 'Loaded', status: 'completed', event_type: 'skill.completed',
     }])
+  })
+
+  it('settles every open activity when a run becomes terminal', () => {
+    const activities: Array<Record<string, unknown>> = [
+      { id: 'reasoning', type: 'text', content: 'Working' },
+      {
+        id: 'tool', name: 'filesystem_read', status: 'in_progress',
+        event_type: 'tool.started',
+      },
+      { id: 'search', type: 'search', status: 'completed' },
+    ]
+
+    settleActivities(activities, 'failed')
+
+    expect(activities).toEqual([
+      { id: 'reasoning', type: 'text', content: 'Working' },
+      {
+        id: 'tool', name: 'filesystem_read', status: 'failed',
+        event_type: 'tool.completed',
+      },
+      { id: 'search', type: 'search', status: 'completed' },
+    ])
   })
 
   it('replays the latest process-local browser frame to late subscribers', () => {

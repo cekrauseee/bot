@@ -136,7 +136,7 @@ describe("response process", () => {
       })
     )
 
-    expect(markup).toContain("Read files")
+    expect(markup).toContain("Reading files")
     expect(markup).toContain('title="Reading package.json"')
     expect(markup).toContain('title="Read src/app.ts"')
     expect(markup).not.toContain("filesystem_read")

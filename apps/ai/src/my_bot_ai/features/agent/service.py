@@ -108,25 +108,26 @@ def _explicit_summary_values(value: Any) -> list[str]:
     return []
 
 
-def _reasoning_summaries(chunk: Any, provider: ProviderName | None) -> list[str]:
-    """Return explicit provider summaries without exposing raw reasoning."""
+def _reasoning_block_summaries(block: dict[str, Any]) -> list[str]:
+    """Return additive summary fragments from one ordered content block."""
+
+    summaries = _explicit_summary_values(block.get("summary"))
+    for key in ("reasoning", "text"):
+        value = block.get(key)
+        if isinstance(value, str) and value:
+            summaries.append(value)
+    return summaries
+
+
+def _metadata_reasoning_summaries(chunk: Any) -> list[str]:
+    """Return legacy summary fragments when no ordered reasoning block exists."""
 
     summaries: list[str] = []
     metadata = getattr(chunk, "response_metadata", {}) or {}
     additional = getattr(chunk, "additional_kwargs", {}) or {}
     for source in (metadata, additional):
         summaries.extend(_explicit_summary_values(source.get("reasoning_summary")))
-
-    for block in _blocks(chunk):
-        if block.get("type") != "reasoning":
-            continue
-        summaries.extend(_explicit_summary_values(block.get("summary")))
-        for key in ("reasoning", "text"):
-            value = block.get(key)
-            if isinstance(value, str) and value:
-                summaries.append(value)
-
-    return list(dict.fromkeys(summaries))
+    return summaries
 
 
 def _sources(value: Any) -> list[dict[str, str]]:
@@ -350,14 +351,10 @@ def _hosted_tool_events(
         return []
     hosted_tools[tool_id] = tool
     # Responses API can deliver the first observation only after the hosted
-    # call has finished. Preserve the same lifecycle contract as a streamed
-    # observation by synthesizing the missing start before the terminal event.
+    # call has finished. A terminal-only lifecycle is more truthful than a
+    # synthetic start immediately followed by completion.
     if status in {"completed", "failed"} and not existing_tool:
-        started = {**tool, "label": _tool_label(tool_name, "in_progress"), "status": "in_progress"}
-        return [
-            {"type": "tool.started", "data": {"tool": started}},
-            {"type": "tool.completed", "data": {"tool": tool}},
-        ]
+        return [{"type": "tool.completed", "data": {"tool": tool}}]
     event_type = (
         "tool.completed"
         if status in {"completed", "failed"}
@@ -767,8 +764,38 @@ async def stream_model(
     if config is not None:
         configurable = config.get("configurable")
         if isinstance(configurable, dict) and isinstance(configurable.get("thread_id"), str):
-            reasoning_activity_fallback = f"reasoning:{configurable['thread_id']}"
-    previous_reasoning_summaries: dict[str, str] = {}
+            reasoning_activity_fallback = configurable["thread_id"]
+    reasoning_segment_counts: dict[str, int] = {}
+    active_reasoning_key: str | None = None
+    active_reasoning_id: str | None = None
+    child_delegation_runs: set[str] = set()
+
+    def close_reasoning_segment() -> None:
+        nonlocal active_reasoning_key, active_reasoning_id
+        active_reasoning_key = None
+        active_reasoning_id = None
+
+    def reasoning_event(summary: str, event: dict[str, Any]) -> dict[str, Any]:
+        """Give each contiguous visible reasoning phase a stable ordered identity."""
+
+        nonlocal active_reasoning_key, active_reasoning_id
+        provider_run_id = event.get("run_id")
+        key = (
+            provider_run_id
+            if isinstance(provider_run_id, str) and provider_run_id
+            else reasoning_activity_fallback
+        )
+        if len(key) > 160:
+            key = sha256(key.encode()).hexdigest()[:32]
+        if active_reasoning_key != key or active_reasoning_id is None:
+            segment = reasoning_segment_counts.get(key, 0) + 1
+            reasoning_segment_counts[key] = segment
+            active_reasoning_key = key
+            active_reasoning_id = f"reasoning:{key}:{segment}"
+        return {
+            "type": "reasoning.delta",
+            "data": {"delta": summary, "activity_id": active_reasoning_id},
+        }
 
     def close_active_activities(status: Literal["completed", "failed"]):
         """Close provider activities that never delivered their terminal block."""
@@ -799,12 +826,43 @@ async def stream_model(
             data = event.get("data") or {}
             if not isinstance(data, dict):
                 data = {}
+            name = _event_name(event, data)
+            parent_ids = event.get("parent_ids")
+            parents = parent_ids if isinstance(parent_ids, (list, tuple)) else []
+            inside_child = any(
+                isinstance(parent_id, str) and parent_id in child_delegation_runs
+                for parent_id in parents
+            )
+            if inside_child:
+                # Child execution is represented by its parent child.started /
+                # child.completed lifecycle. Its internal model, tool, and
+                # browser events must never become root response activity.
+                continue
+            if kind == "on_tool_start" and name == "delegate_to_child_agent":
+                delegation_run_id = event.get("run_id")
+                if isinstance(delegation_run_id, str) and delegation_run_id:
+                    child_delegation_runs.add(delegation_run_id)
+
             chunk = data.get("chunk")
             if kind == "on_chat_model_stream" and chunk is not None:
                 blocks = _blocks(chunk)
                 chunk_emitted_text = False
+                has_reasoning_block = any(block.get("type") == "reasoning" for block in blocks)
+                if not has_reasoning_block:
+                    for summary in _metadata_reasoning_summaries(chunk):
+                        if summary:
+                            yield reasoning_event(summary, event)
+
                 for block in blocks:
-                    if block.get("type") == "text" and block.get("text"):
+                    block_type = block.get("type")
+                    if block_type == "reasoning":
+                        for summary in _reasoning_block_summaries(block):
+                            if summary:
+                                yield reasoning_event(summary, event)
+                        continue
+
+                    if block_type == "text" and block.get("text"):
+                        close_reasoning_segment()
                         chunk_emitted_text = True
                         delta = str(block["text"])
                         emitted_text.append(delta)
@@ -813,6 +871,7 @@ async def stream_model(
                     if annotations:
                         citations = _sources(annotations)
                         if citations and searches:
+                            close_reasoning_segment()
                             search_id = next(reversed(searches))
                             searches[search_id]["sources"] = citations
                             yield {
@@ -821,44 +880,6 @@ async def stream_model(
                             }
                         elif citations:
                             pending_sources = citations
-                if not chunk_emitted_text:
-                    plain_text = getattr(chunk, "content", "")
-                    if isinstance(plain_text, str) and plain_text:
-                        emitted_text.append(plain_text)
-                        yield {"type": "text.delta", "data": {"delta": plain_text}}
-
-                for summary in _reasoning_summaries(chunk, provider):
-                    provider_run_id = event.get("run_id")
-                    reasoning_activity_id = (
-                        f"reasoning:{provider_run_id}"
-                        if isinstance(provider_run_id, str) and provider_run_id
-                        else reasoning_activity_fallback
-                    )
-                    previous_reasoning_summary = previous_reasoning_summaries.get(
-                        reasoning_activity_id, ""
-                    )
-                    # Some providers resend a cumulative summary on every
-                    # chunk. Emit only its new suffix so durable and live
-                    # projections cannot duplicate the same explanation.
-                    if summary == previous_reasoning_summary or (
-                        previous_reasoning_summary and
-                        previous_reasoning_summary.startswith(summary)
-                    ):
-                        continue
-                    delta = summary
-                    if previous_reasoning_summary and summary.startswith(
-                        previous_reasoning_summary
-                    ):
-                        delta = summary[len(previous_reasoning_summary):]
-                    previous_reasoning_summaries[reasoning_activity_id] = summary
-                    if delta:
-                        yield {
-                            "type": "reasoning.delta",
-                            "data": {"delta": delta, "activity_id": reasoning_activity_id},
-                        }
-
-                for block in blocks:
-                    block_type = block.get("type")
                     if block_type not in {
                         "mcp_call",
                         "server_tool_call",
@@ -866,6 +887,7 @@ async def stream_model(
                         "server_tool_result",
                     }:
                         continue
+                    close_reasoning_segment()
                     block_id = str(block.get("id") or block.get("tool_call_id") or "")
                     name = str(block.get("name", "")).lower()
                     is_web_search = "web_search" in name or block_id in searches
@@ -901,10 +923,18 @@ async def stream_model(
                     yield {"type": event_type, "data": {"step": step}}
                     continue
 
+                if not chunk_emitted_text:
+                    plain_text = getattr(chunk, "content", "")
+                    if isinstance(plain_text, str) and plain_text:
+                        close_reasoning_segment()
+                        emitted_text.append(plain_text)
+                        yield {"type": "text.delta", "data": {"delta": plain_text}}
+
             if kind == "on_chat_model_end":
                 for block in _raw_blocks(data.get("output")):
                     if block.get("type") != "mcp_call":
                         continue
+                    close_reasoning_segment()
                     hosted_event = _hosted_tool_events(block, hosted_tools)
                     if hosted_event is not None:
                         for normalized in hosted_event:
@@ -912,7 +942,10 @@ async def stream_model(
 
             normalized_tool = _tool_event(event)
             if normalized_tool is not None:
+                if normalized_tool.type != "browser.frame":
+                    close_reasoning_segment()
                 yield normalized_tool.model_dump(mode="json")
+        close_reasoning_segment()
         for normalized in close_active_activities("completed"):
             yield normalized
     except GraphRecursionError:

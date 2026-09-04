@@ -78,6 +78,10 @@ export function markRunStopRequested(
             process: message.process
               ? {
                   ...message.process,
+                  activities: settleActivities(
+                    message.process.activities,
+                    "failed"
+                  ),
                   durationSeconds:
                     current.processStartedAt === undefined
                       ? message.process.durationSeconds
@@ -471,6 +475,22 @@ function upsertActivity(
   )
 }
 
+function settleActivities(
+  activities: readonly ProcessActivity[],
+  status: "completed" | "failed"
+) {
+  return activities.map((activity) => {
+    if (
+      activity.type === "text" ||
+      activity.type === "step" ||
+      activity.status !== "in_progress"
+    ) {
+      return activity
+    }
+    return { ...activity, status }
+  })
+}
+
 function mergeActivity(
   current: ProcessActivity,
   next: ProcessActivity
@@ -638,6 +658,7 @@ export function applyTurnEvent(
       runId: event.run_id,
       turnId: event.turn_id,
       lastEventSequence: event.sequence,
+      eventCursor: event.sequence,
       turnSpacerAnchorId: user.id,
       version: next.version + 1,
     }
@@ -780,6 +801,10 @@ export function applyTurnEvent(
         process: assistant.process
           ? {
               ...assistant.process,
+              activities: settleActivities(
+                assistant.process.activities,
+                event.type === "turn.failed" ? "failed" : "completed"
+              ),
               durationSeconds: elapsed(next, at),
               status: "processed",
             }

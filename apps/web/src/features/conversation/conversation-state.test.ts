@@ -302,6 +302,57 @@ describe("conversation state", () => {
     expect(consumed.messages).toBe(state.messages)
   })
 
+  it("advances both cursors when a new turn starts", () => {
+    const state = applyTurnEvent(
+      {
+        ...emptyConversationRecord(),
+        eventCursor: "4",
+        lastEventSequence: "4",
+      },
+      event(5, "turn.started", {
+        user_message: apiMessage("user", "user", "completed", "Continue."),
+        assistant_message: apiMessage("assistant", "assistant", "streaming"),
+      }),
+      5
+    )
+
+    expect(state.lastEventSequence).toBe("5")
+    expect(state.eventCursor).toBe("5")
+  })
+
+  it("settles open process activity when the turn fails", () => {
+    let state = applyTurnEvent(
+      emptyConversationRecord(),
+      event(0, "turn.started", {
+        user_message: apiMessage("user", "user", "completed", "Inspect."),
+        assistant_message: apiMessage("assistant", "assistant", "streaming"),
+      }),
+      0
+    )
+    state = applyTurnEvent(
+      state,
+      event(1, "tool.started", {
+        tool: {
+          id: "tool-1",
+          name: "filesystem_read",
+          status: "in_progress",
+        },
+      }),
+      1
+    )
+    state = applyTurnEvent(
+      state,
+      event(2, "turn.failed", {
+        error: { message: "Unable to finish." },
+      }),
+      2
+    )
+
+    expect(state.messages[1]?.process?.activities).toEqual([
+      expect.objectContaining({ id: "tool-1", status: "failed" }),
+    ])
+  })
+
   it("ignores duplicate deltas while advancing the durable cursor", () => {
     let state = applyTurnEvent(
       emptyConversationRecord(),
@@ -424,26 +475,41 @@ describe("conversation state", () => {
       event(1, "text.delta", { delta: "Before" }),
       1
     )
+    state = applyTurnEvent(
+      state,
+      event(2, "tool.started", {
+        tool: {
+          id: "tool-1",
+          name: "filesystem_read",
+          status: "in_progress",
+        },
+      }),
+      2
+    )
     state = markRunStopRequested(state, "run-1", true)
     state = applyTurnEvent(
       state,
-      event(2, "text.delta", { delta: " after" }),
-      2
+      event(3, "text.delta", { delta: " after" }),
+      3
     )
 
     expect(state.stopRequested).toBe(true)
     expect(state.activeAssistantId).toBeUndefined()
-    expect(state.lastEventSequence).toBe("2")
+    expect(state.lastEventSequence).toBe("3")
     expect(
       state.messages.find((message) => message.id === "assistant")?.content
     ).toBe("Before")
+    expect(
+      state.messages.find((message) => message.id === "assistant")?.process
+        ?.activities
+    ).toEqual([expect.objectContaining({ id: "tool-1", status: "failed" })])
 
     state = applyTurnEvent(
       state,
-      event(3, "turn.failed", {
+      event(4, "turn.failed", {
         error: { code: "cancelled", message: "Turn cancelled." },
       }),
-      3
+      4
     )
     expect(state.runId).toBeUndefined()
     expect(state.stopRequested).toBeUndefined()

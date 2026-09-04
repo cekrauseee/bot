@@ -420,10 +420,9 @@ export function processActivityGroupLabel(
     return processSearchCopy(first).label
   }
 
-  // Tool calls are sequential from the agent's perspective. The latest
-  // status is therefore the source of truth for the current group state;
-  // historical failures remain visible in the child rows but must not poison
-  // a later successful retry.
+  // A model can issue multiple calls in parallel. Any open child keeps the
+  // group active; once all children are terminal, the latest terminal result
+  // determines whether a later retry recovered an earlier failure.
   const latest = [...activities]
     .reverse()
     .find(
@@ -440,7 +439,11 @@ export function processActivityGroupLabel(
         Boolean(activity.status)
     )
   const active =
-    browserActive || (latest !== undefined && latest.status === "in_progress")
+    browserActive ||
+    activities.some(
+      (activity) =>
+        activity.type !== "text" && activity.status === "in_progress"
+    )
   const failed = latest !== undefined && latest.status === "failed"
   const [pending, completed, error] = GROUP_LABELS[family]
   if (

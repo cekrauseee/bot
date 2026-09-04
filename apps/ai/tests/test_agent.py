@@ -138,17 +138,17 @@ class Chunk:
     content_blocks = [
         {"type": "reasoning", "reasoning": "Brief plan"},
         {
+            "type": "server_tool_call",
+            "name": "web_search",
+            "id": "ws1",
+            "args": {"query": "latest news"},
+        },
+        {
             "type": "text",
             "text": "Visible answer",
             "annotations": [
                 {"type": "url_citation", "title": "Source", "url": "https://example.com"}
             ],
-        },
-        {
-            "type": "server_tool_call",
-            "name": "web_search",
-            "id": "ws1",
-            "args": {"query": "latest news"},
         },
     ]
 
@@ -220,16 +220,98 @@ class GithubMcpGraph:
         yield {"event": "on_chat_model_end", "data": {"output": GithubMcpChunk()}}
 
 
-class CumulativeReasoningGraph:
+class AdditiveReasoningGraph:
     async def astream_events(self, _input, version, **_kwargs):
         assert version == "v2"
-        for summary in ("Planning", "Planning carefully", "Planning carefully"):
+        for summary in ("Planning", " carefully", " carefully"):
             yield {
                 "event": "on_chat_model_stream",
                 "data": {"chunk": SimpleNamespace(content_blocks=[
                     {"type": "reasoning", "summary": summary},
                 ])},
             }
+
+
+class SameRunSegmentedReasoningGraph:
+    async def astream_events(self, _input, version, **_kwargs):
+        assert version == "v2"
+        yield {
+            "event": "on_chat_model_stream",
+            "run_id": "model-run-1",
+            "data": {"chunk": SimpleNamespace(content_blocks=[
+                {"type": "reasoning", "summary": "Before tool"},
+            ])},
+        }
+        yield {
+            "event": "on_tool_start",
+            "run_id": "tool-run-1",
+            "name": "filesystem_read",
+            "data": {"input": {"path": "/workspace/README.md"}},
+        }
+        yield {
+            "event": "on_tool_end",
+            "run_id": "tool-run-1",
+            "name": "filesystem_read",
+            "data": {},
+        }
+        yield {
+            "event": "on_chat_model_stream",
+            "run_id": "model-run-1",
+            "data": {"chunk": SimpleNamespace(content_blocks=[
+                {"type": "reasoning", "summary": "After tool"},
+            ])},
+        }
+
+
+class NestedChildActivityGraph:
+    async def astream_events(self, _input, version, **_kwargs):
+        assert version == "v2"
+        yield {
+            "event": "on_tool_start",
+            "name": "delegate_to_child_agent",
+            "run_id": "child-tool-1",
+            "parent_ids": ["root-agent", "root-tools"],
+            "data": {"input": {"task": "Inspect one repository"}},
+        }
+        yield {
+            "event": "on_chat_model_stream",
+            "run_id": "child-model-1",
+            "parent_ids": ["root-agent", "root-tools", "child-tool-1", "child-agent"],
+            "data": {"chunk": SimpleNamespace(content_blocks=[
+                {"type": "reasoning", "summary": "Private child progress"},
+                {"type": "text", "text": "Private child result"},
+            ])},
+        }
+        yield {
+            "event": "on_tool_start",
+            "name": "browser_open",
+            "run_id": "child-browser-1",
+            "parent_ids": ["root-agent", "root-tools", "child-tool-1", "child-agent"],
+            "data": {"input": {"url": "https://example.com"}},
+        }
+        yield {
+            "event": "on_tool_end",
+            "name": "browser_open",
+            "run_id": "child-browser-1",
+            "parent_ids": ["root-agent", "root-tools", "child-tool-1", "child-agent"],
+            "data": {},
+        }
+        yield {
+            "event": "on_tool_end",
+            "name": "delegate_to_child_agent",
+            "run_id": "child-tool-1",
+            "parent_ids": ["root-agent", "root-tools"],
+            "data": {"output": "Private child result"},
+        }
+        yield {
+            "event": "on_chat_model_stream",
+            "run_id": "root-model-2",
+            "parent_ids": ["root-agent", "root-model"],
+            "data": {"chunk": SimpleNamespace(content_blocks=[
+                {"type": "reasoning", "summary": "Root summary"},
+                {"type": "text", "text": "Visible root result"},
+            ])},
+        }
 
 
 class InterleavedReasoningGraph:
@@ -442,13 +524,14 @@ def collect(stream):
 def test_stream_normalizes_reasoning_text_and_web_sources() -> None:
     events = collect(stream_model(FakeGraph(), []))
     assert [event["type"] for event in events] == [
-        "text.delta",
         "reasoning.delta",
         "step.started",
+        "text.delta",
+        "step.updated",
         "step.completed",
     ]
-    assert events[0]["data"]["delta"] == "Visible answer"
-    assert events[1]["data"]["delta"] == "Brief plan"
+    assert events[0]["data"]["delta"] == "Brief plan"
+    assert events[2]["data"]["delta"] == "Visible answer"
     assert events[-1]["data"]["step"]["status"] == "completed"
     assert events[-1]["data"]["step"]["sources"] == [
         {
@@ -491,21 +574,25 @@ def test_stream_normalizes_hosted_github_mcp_calls_as_tool_activity() -> None:
     ]
 
 
-def test_stream_reasoning_is_additive_and_has_a_stable_activity_id() -> None:
+def test_stream_reasoning_preserves_additive_deltas_and_has_a_segment_id() -> None:
     events = collect(
         stream_model(
-            CumulativeReasoningGraph(), [], config={"configurable": {"thread_id": "run-1"}}
+            AdditiveReasoningGraph(), [], config={"configurable": {"thread_id": "run-1"}}
         )
     )
 
     assert events == [
         {
             "type": "reasoning.delta",
-            "data": {"delta": "Planning", "activity_id": "reasoning:run-1"},
+            "data": {"delta": "Planning", "activity_id": "reasoning:run-1:1"},
         },
         {
             "type": "reasoning.delta",
-            "data": {"delta": " carefully", "activity_id": "reasoning:run-1"},
+            "data": {"delta": " carefully", "activity_id": "reasoning:run-1:1"},
+        },
+        {
+            "type": "reasoning.delta",
+            "data": {"delta": " carefully", "activity_id": "reasoning:run-1:1"},
         },
     ]
 
@@ -518,8 +605,39 @@ def test_stream_keeps_reasoning_activities_distinct_across_model_invocations() -
         "tool.started",
         "reasoning.delta",
     ]
-    assert events[0]["data"]["activity_id"] == "reasoning:model-run-1"
-    assert events[2]["data"]["activity_id"] == "reasoning:model-run-2"
+    assert events[0]["data"]["activity_id"] == "reasoning:model-run-1:1"
+    assert events[2]["data"]["activity_id"] == "reasoning:model-run-2:1"
+
+
+def test_stream_splits_one_model_reasoning_around_visible_tool_activity() -> None:
+    events = collect(stream_model(SameRunSegmentedReasoningGraph(), []))
+
+    assert [event["type"] for event in events] == [
+        "reasoning.delta",
+        "tool.started",
+        "tool.completed",
+        "reasoning.delta",
+    ]
+    assert events[0]["data"]["activity_id"] == "reasoning:model-run-1:1"
+    assert events[-1]["data"]["activity_id"] == "reasoning:model-run-1:2"
+
+
+def test_stream_exposes_child_lifecycle_without_leaking_descendant_activity() -> None:
+    events = collect(stream_model(NestedChildActivityGraph(), []))
+
+    assert [event["type"] for event in events] == [
+        "child.started",
+        "child.completed",
+        "reasoning.delta",
+        "text.delta",
+    ]
+    assert events[0]["data"]["child"]["detail"] == "Inspect one repository"
+    assert events[1]["data"]["child"]["status"] == "completed"
+    assert events[2]["data"] == {
+        "delta": "Root summary",
+        "activity_id": "reasoning:root-model-2:1",
+    }
+    assert events[3]["data"]["delta"] == "Visible root result"
 
 
 def test_stream_closes_incomplete_provider_activities_on_normal_return() -> None:
@@ -551,15 +669,8 @@ def test_stream_closes_incomplete_provider_activities_before_reraising_error() -
 def test_stream_normalizes_responses_api_mcp_call_without_exposing_output() -> None:
     events = collect(stream_model(GithubMcpGraph(), []))
 
-    assert [event["type"] for event in events] == ["tool.started", "tool.completed"]
+    assert [event["type"] for event in events] == ["tool.completed"]
     assert events[0]["data"]["tool"] == {
-        "id": "mcp-github-1",
-        "name": "get_file_contents",
-        "label": "Reading from GitHub",
-        "status": "in_progress",
-        "target": "acme/atlas/README.md @ refs/heads/main",
-    }
-    assert events[1]["data"]["tool"] == {
         "id": "mcp-github-1",
         "name": "get_file_contents",
         "label": "Read from GitHub",

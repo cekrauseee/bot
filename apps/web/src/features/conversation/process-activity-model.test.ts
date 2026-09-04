@@ -219,7 +219,7 @@ describe("process activity model", () => {
       detail: undefined,
     })
     expect(processActivityGroupLabel("skills", activities)).toBe(
-      "Loaded skills"
+      "Loading skills"
     )
     expect(
       processActivityGroupLabel("skills", [
@@ -312,6 +312,17 @@ describe("process activity model", () => {
 
     expect(processActivityGroupLabel("browser", activities)).toBe(
       "Interacting with the page"
+    )
+  })
+
+  it("keeps a parallel group active until every action is terminal", () => {
+    const activities: ProcessActivity[] = [
+      { ...tool("open-1", "browser_open"), status: "in_progress" },
+      { ...tool("snapshot-2", "browser_snapshot"), status: "completed" },
+    ]
+
+    expect(processActivityGroupLabel("browser", activities)).toBe(
+      "Working in the browser"
     )
   })
 })
