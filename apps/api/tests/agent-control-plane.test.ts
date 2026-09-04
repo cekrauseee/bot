@@ -7,6 +7,8 @@ import {
   type AgentEventFanout,
   type AgentEventFanoutEnvelope,
   type PublicAgentEvent,
+  withGithubMcp,
+  upsertActivity,
 } from '../src/modules/agent-control-plane.js'
 
 const runId = '00000000-0000-4000-8000-000000000001'
@@ -31,6 +33,23 @@ class InMemoryAgentEventFanout implements AgentEventFanout {
 }
 
 describe('durable agent event contract', () => {
+  it('attaches GitHub MCP credentials only to the private AI request shape', () => {
+    const request = { version: 2, user_id: runId }
+    const configured = withGithubMcp(request, {
+      server_url: 'https://api.githubcopilot.com/mcp/',
+      authorization: 'in-memory-token',
+      allowed_tools: ['search_repositories', 'get_file_contents'],
+    })
+    expect(configured.github_mcp).toMatchObject({ server_url: 'https://api.githubcopilot.com/mcp/' })
+    expect(request).not.toHaveProperty('github_mcp')
+    expect(JSON.stringify({ event: 'turn.started', data: {} })).not.toContain('in-memory-token')
+  })
+
+  it('omits GitHub MCP when the connection is disconnected, inactive, or unavailable', () => {
+    const request = { version: 2, user_id: runId }
+    expect(withGithubMcp(request, undefined)).toEqual(request)
+  })
+
   it('retains safe AI quota diagnostics without trusting arbitrary details', () => {
     expect(aiDiagnostic({
       code: 'provider_error',
@@ -76,7 +95,20 @@ describe('durable agent event contract', () => {
     )).toThrow('invalid_provider_event')
   })
 
-  it('keeps browser frames in process-local fanout only', () => {
+  it('accepts and persists skill lifecycle activities', () => {
+    const activities: Array<Record<string, unknown>> = []
+    upsertActivity(activities, 'skill.started', {
+      skill: { id: 'github', name: 'GitHub', detail: 'Loading', status: 'in_progress' },
+    })
+    upsertActivity(activities, 'skill.completed', {
+      skill: { id: 'github', name: 'GitHub', detail: 'Loaded', status: 'completed' },
+    })
+    expect(activities).toEqual([{
+      id: 'github', name: 'GitHub', detail: 'Loaded', status: 'completed', event_type: 'skill.completed',
+    }])
+  })
+
+  it('replays the latest process-local browser frame to late subscribers', () => {
     const hub = new AgentEventHub()
     const listener = vi.fn()
     hub.publishBrowserFrame(runId, { jpeg: 'frame' })

@@ -10,9 +10,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
-  ProvidersDialog,
-  ProvidersDialogTrigger,
-} from "@/features/provider-connections/components/providers-dialog"
+  SettingsDialog,
+  SettingsDialogTrigger,
+} from "@/features/settings/components/settings-dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { SidebarMenuButton } from "@/components/ui/sidebar"
 
@@ -44,7 +44,7 @@ function initials(user: AccountMenuProps["user"]) {
 
 export function AccountMenu({ user, onSignOut, signingOut }: AccountMenuProps) {
   return (
-    <ProvidersDialog>
+    <SettingsDialog>
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
@@ -84,7 +84,7 @@ export function AccountMenu({ user, onSignOut, signingOut }: AccountMenuProps) {
           className="min-w-60"
         >
           <DropdownMenuGroup>
-            <ProvidersDialogTrigger />
+            <SettingsDialogTrigger />
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
           <DropdownMenuGroup>
@@ -99,6 +99,6 @@ export function AccountMenu({ user, onSignOut, signingOut }: AccountMenuProps) {
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
-    </ProvidersDialog>
+    </SettingsDialog>
   )
 }

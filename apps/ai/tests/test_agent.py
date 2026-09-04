@@ -899,6 +899,7 @@ def test_child_agents_are_recursive_configurable_and_checkpoint_led() -> None:
     assert root_tool_names == {
         "update_plan",
         "delegate_to_child_agent",
+        "load_skill",
     }
     assert all(
         "Current task plan (context only)" not in call["system_prompt"] for call in created[1:]

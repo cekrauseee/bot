@@ -42,6 +42,13 @@ export type ProcessActivity =
   | {
       detail?: string
       id: string
+      name: string
+      status?: ProcessActivityStatus
+      type: "skill"
+    }
+  | {
+      detail?: string
+      id: string
       kind: string
       label: string
       status?: ProcessActivityStatus

@@ -63,6 +63,20 @@ const columns: Record<string, ColumnContract[]> = {
     { name: 'created_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
     { name: 'updated_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
   ],
+  github_connections: [
+    { name: 'id', type: 'uuid', length: null, nullable: false, defaultValue: 'gen_random_uuid()' },
+    { name: 'user_id', type: 'uuid', length: null, nullable: false, defaultValue: null },
+    { name: 'access_token', type: 'text', length: null, nullable: false, defaultValue: null },
+    { name: 'refresh_token', type: 'text', length: null, nullable: true, defaultValue: null },
+    { name: 'access_token_expires_at', type: 'timestamp with time zone', length: null, nullable: true, defaultValue: null },
+    { name: 'refresh_token_expires_at', type: 'timestamp with time zone', length: null, nullable: true, defaultValue: null },
+    { name: 'provider_subject', type: 'character varying', length: 255, nullable: false, defaultValue: null },
+    { name: 'login', type: 'character varying', length: 255, nullable: false, defaultValue: null },
+    { name: 'email', type: 'character varying', length: 320, nullable: true, defaultValue: null },
+    { name: 'scopes', type: 'text', length: null, nullable: false, defaultValue: "''::text" },
+    { name: 'created_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
+    { name: 'updated_at', type: 'timestamp with time zone', length: null, nullable: false, defaultValue: 'now()' },
+  ],
   projects: [
     { name: 'id', type: 'uuid', length: null, nullable: false, defaultValue: 'gen_random_uuid()' },
     { name: 'user_id', type: 'uuid', length: null, nullable: false, defaultValue: null },
@@ -163,6 +177,9 @@ const constraints: ConstraintContract[] = [
   { table: 'provider_connections', name: '', type: 'p', definition: 'PRIMARY KEY (id)' },
   { table: 'provider_connections', name: 'provider_connections_user_id_users_id_fk', type: 'f', definition: 'FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE' },
   { table: 'provider_connections', name: 'uq_provider_connections_user_id_provider', type: 'u', definition: 'UNIQUE (user_id, provider)' },
+  { table: 'github_connections', name: '', type: 'p', definition: 'PRIMARY KEY (id)' },
+  { table: 'github_connections', name: 'github_connections_user_id_users_id_fk', type: 'f', definition: 'FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE' },
+  { table: 'github_connections', name: 'uq_github_connections_user_id', type: 'u', definition: 'UNIQUE (user_id)' },
   { table: 'projects', name: '', type: 'p', definition: 'PRIMARY KEY (id)' },
   { table: 'projects', name: 'projects_user_id_users_id_fk', type: 'f', definition: 'FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE' },
   { table: 'projects', name: 'uq_projects_user_id_slug', type: 'u', definition: 'UNIQUE (user_id, slug)' },
@@ -193,6 +210,8 @@ const indexes: IndexContract[] = [
   { table: 'sessions', name: 'uq_sessions_token_hash', definition: 'CREATE UNIQUE INDEX uq_sessions_token_hash ON public.sessions USING btree (token_hash)' },
   { table: 'provider_connections', name: 'ix_provider_connections_user_id', definition: 'CREATE INDEX ix_provider_connections_user_id ON public.provider_connections USING btree (user_id)' },
   { table: 'provider_connections', name: 'uq_provider_connections_user_id_provider', definition: 'CREATE UNIQUE INDEX uq_provider_connections_user_id_provider ON public.provider_connections USING btree (user_id, provider)' },
+  { table: 'github_connections', name: 'ix_github_connections_user_id', definition: 'CREATE INDEX ix_github_connections_user_id ON public.github_connections USING btree (user_id)' },
+  { table: 'github_connections', name: 'uq_github_connections_user_id', definition: 'CREATE UNIQUE INDEX uq_github_connections_user_id ON public.github_connections USING btree (user_id)' },
   { table: 'projects', name: 'ix_projects_user_id_created_at', definition: 'CREATE INDEX ix_projects_user_id_created_at ON public.projects USING btree (user_id, created_at)' },
   { table: 'projects', name: 'uq_projects_user_id_slug', definition: 'CREATE UNIQUE INDEX uq_projects_user_id_slug ON public.projects USING btree (user_id, slug)' },
   { table: 'projects', name: 'ix_projects_user_id_sort_order', definition: 'CREATE INDEX ix_projects_user_id_sort_order ON public.projects USING btree (user_id, sort_order)' },
@@ -252,12 +271,13 @@ const tableOrder = (table: string) => {
   if (table === 'oauth_identities') return 2
   if (table === 'sessions') return 3
   if (table === 'provider_connections') return 4
-  if (table === 'projects') return 5
-  if (table === 'conversations') return 6
-  if (table === 'messages') return 7
-  if (table === 'agent_workspaces') return 8
-  if (table === 'agent_runs') return 9
-  return 10
+  if (table === 'github_connections') return 5
+  if (table === 'projects') return 6
+  if (table === 'conversations') return 7
+  if (table === 'messages') return 8
+  if (table === 'agent_workspaces') return 9
+  if (table === 'agent_runs') return 10
+  return 11
 }
 const indexKey = (row: IndexContract) => `${tableOrder(row.table)}|${row.name}|${row.definition}`
 
@@ -290,7 +310,7 @@ export async function checkDatabase(databaseUrl = loadSettings().databaseUrl) {
              is_nullable, column_default, ordinal_position
       from information_schema.columns
       where table_schema = 'public'
-        and table_name in ('users', 'oauth_identities', 'sessions', 'provider_connections', 'projects', 'conversations', 'messages', 'agent_workspaces', 'agent_runs', 'agent_events')
+        and table_name in ('users', 'oauth_identities', 'sessions', 'provider_connections', 'github_connections', 'projects', 'conversations', 'messages', 'agent_workspaces', 'agent_runs', 'agent_events')
       order by table_name, ordinal_position
     `)).rows
     for (const [table, expected] of Object.entries(columns)) {
@@ -315,7 +335,7 @@ export async function checkDatabase(databaseUrl = loadSettings().databaseUrl) {
       join pg_namespace n on n.oid = c.connamespace
       where n.nspname = 'public' and c.contype <> 'n'
         and c.conrelid::regclass::text in (
-          'users', 'oauth_identities', 'sessions', 'provider_connections', 'projects', 'conversations', 'messages',
+          'users', 'oauth_identities', 'sessions', 'provider_connections', 'github_connections', 'projects', 'conversations', 'messages',
           'agent_workspaces', 'agent_runs', 'agent_events'
         )
     `)).rows
@@ -328,18 +348,19 @@ export async function checkDatabase(databaseUrl = loadSettings().databaseUrl) {
       join pg_namespace index_namespace on index_namespace.oid = index_class.relnamespace
       join pg_index i on i.indexrelid = index_class.oid
       where p.schemaname = 'public' and index_namespace.nspname = 'public'
-        and p.tablename in ('users', 'oauth_identities', 'sessions', 'provider_connections', 'projects', 'conversations', 'messages', 'agent_workspaces', 'agent_runs', 'agent_events')
+        and p.tablename in ('users', 'oauth_identities', 'sessions', 'provider_connections', 'github_connections', 'projects', 'conversations', 'messages', 'agent_workspaces', 'agent_runs', 'agent_events')
       order by case p.tablename
         when 'users' then 1
         when 'oauth_identities' then 2
         when 'sessions' then 3
         when 'provider_connections' then 4
-        when 'projects' then 5
-        when 'conversations' then 6
-        when 'messages' then 7
-        when 'agent_workspaces' then 8
-        when 'agent_runs' then 9
-        else 10
+        when 'github_connections' then 5
+        when 'projects' then 6
+        when 'conversations' then 7
+        when 'messages' then 8
+        when 'agent_workspaces' then 9
+        when 'agent_runs' then 10
+        else 11
       end, p.indexname
     `)).rows
     if (!validateIndexContract(indexRows)) throw new Error('invalid database index contract')

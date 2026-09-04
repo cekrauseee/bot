@@ -102,6 +102,28 @@ export const providerConnections = pgTable(
   ],
 )
 
+export const githubConnections = pgTable(
+  'github_connections',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    accessToken: text('access_token').notNull(),
+    refreshToken: text('refresh_token'),
+    accessTokenExpiresAt: timestamp('access_token_expires_at', { withTimezone: true }),
+    refreshTokenExpiresAt: timestamp('refresh_token_expires_at', { withTimezone: true }),
+    providerSubject: varchar('provider_subject', { length: 255 }).notNull(),
+    login: varchar('login', { length: 255 }).notNull(),
+    email: varchar('email', { length: 320 }),
+    scopes: text('scopes').notNull().default(''),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('uq_github_connections_user_id').on(table.userId),
+    index('ix_github_connections_user_id').on(table.userId),
+  ],
+)
+
 export const projects = pgTable('projects', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -209,6 +231,7 @@ export const schema = {
   oauthIdentities,
   sessions,
   providerConnections,
+  githubConnections,
   projects,
   conversations,
   messages,

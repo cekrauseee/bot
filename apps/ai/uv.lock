@@ -745,6 +745,7 @@ dependencies = [
     { name = "langgraph-checkpoint-postgres" },
     { name = "psycopg", extra = ["binary", "pool"] },
     { name = "pydantic-settings" },
+    { name = "pyyaml" },
     { name = "structlog" },
 ]
 
@@ -763,6 +764,7 @@ requires-dist = [
     { name = "langgraph-checkpoint-postgres", specifier = "==3.1.2" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = "==3.3.4" },
     { name = "pydantic-settings", specifier = "==2.15.0" },
+    { name = "pyyaml", specifier = "==6.0.3" },
     { name = "structlog", specifier = "==26.1.0" },
 ]
 

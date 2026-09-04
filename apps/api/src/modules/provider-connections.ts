@@ -19,7 +19,7 @@ export type ProviderConnection = {
 }
 
 export type ProviderLogin =
-  | { type: 'browser'; loginId: string; authUrl: string }
+  | { type: 'browser'; loginId: string; authUrl: string; state?: string }
   | {
       type: 'device_code'
       loginId: string

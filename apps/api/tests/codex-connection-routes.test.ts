@@ -92,6 +92,24 @@ function services(withCodex = true) {
 describe('OpenAI Codex provider connection routes', () => {
   beforeEach(() => vi.clearAllMocks())
 
+  it('completes GitHub OAuth from a system browser without an app session cookie', async () => {
+    const dependencies = services()
+    dependencies.github = {
+      completeCallback: vi.fn().mockResolvedValue('login-1'),
+    }
+    const app = createApp(settings, dependencies)
+    const response = await app.handle(
+      new Request('http://localhost/auth/github/callback?state=redis-state&code=oauth-code'),
+    )
+
+    expect(response.status).toBe(303)
+    expect(response.headers.get('location')).toBe(`${settings.webOrigin}/?github=connected`)
+    expect(dependencies.github.completeCallback).toHaveBeenCalledWith(
+      { state: 'redis-state', code: 'oauth-code' }, undefined, undefined,
+    )
+    expect(dependencies.sessions.resolve).not.toHaveBeenCalled()
+  })
+
   it('returns connected account metadata and safe rate-limit fields', async () => {
     const app = createApp(settings, services())
     const response = await app.handle(

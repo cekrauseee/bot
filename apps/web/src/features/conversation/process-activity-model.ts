@@ -11,6 +11,7 @@ export type ProcessActivityFamily =
   | "files-read"
   | "files-updated"
   | "web-search"
+  | "skills"
 
 export type ProcessActivityItem =
   | { activity: ProcessActivity; type: "activity" }
@@ -77,6 +78,7 @@ const GROUP_LABELS: Record<ProcessActivityFamily, [string, string, string]> = {
     "Searched the web",
     "Had trouble searching the web",
   ],
+  skills: ["Loading skills", "Loaded skills", "Could not load skills"],
 }
 
 export function normalizeProcessAction(action: string) {
@@ -265,10 +267,23 @@ export function processToolCopy(activity: ProcessTool) {
   }
 }
 
+export function processSkillCopy(
+  activity: Extract<ProcessActivity, { type: "skill" }>
+) {
+  const pending = "Loading skill"
+  const completed = "Loaded skill"
+  const failed = "Could not load skill"
+  return {
+    label: statusLabel(activity.status, pending, completed, failed),
+    detail: activity.detail,
+  }
+}
+
 export function processActivityFamily(
   activity: ProcessActivity
 ): ProcessActivityFamily | null {
   if (activity.type === "search") return "web-search"
+  if (activity.type === "skill") return "skills"
   if (activity.type !== "tool") return null
 
   const action = normalizeProcessAction(activity.action)
@@ -327,11 +342,14 @@ export function processActivityGroupLabel(
   activities: readonly ProcessActivity[],
   browserActive = false
 ) {
-  const singleSearch =
+  const first = activities[0]
+  if (
     family === "web-search" &&
     activities.length === 1 &&
-    activities[0]?.type === "search"
-  if (singleSearch) return processSearchCopy(activities[0]).label
+    first?.type === "search"
+  ) {
+    return processSearchCopy(first).label
+  }
 
   // Tool calls are sequential from the agent's perspective. The latest
   // status is therefore the source of truth for the current group state;
@@ -344,10 +362,11 @@ export function processActivityGroupLabel(
         activity
       ): activity is Extract<
         ProcessActivity,
-        { type: "tool" | "search" | "trace" }
+        { type: "tool" | "search" | "skill" | "trace" }
       > =>
         (activity.type === "tool" ||
           activity.type === "search" ||
+          activity.type === "skill" ||
           activity.type === "trace") &&
         Boolean(activity.status)
     )

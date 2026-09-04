@@ -90,4 +90,14 @@ describe('configuration', () => {
     expect(loadSettings({ ...base, CODEX_LOGIN_MODE: 'device' }).codexLoginMode).toBe('device')
     expect(() => loadSettings({ ...base, CODEX_LOGIN_MODE: 'invalid' })).toThrow(/CODEX_LOGIN_MODE/)
   })
+
+  it('validates the optional GitHub encryption key and official MCP endpoint', () => {
+    const key = Buffer.alloc(32, 7).toString('base64')
+    expect(loadSettings({ ...base, GITHUB_TOKEN_ENCRYPTION_KEY: key }).githubTokenEncryptionKey)
+      .toEqual(Buffer.alloc(32, 7))
+    expect(() => loadSettings({ ...base, GITHUB_TOKEN_ENCRYPTION_KEY: 'not-a-key' }))
+      .toThrow(/GITHUB_TOKEN_ENCRYPTION_KEY/)
+    expect(() => loadSettings({ ...base, GITHUB_MCP_URL: 'https://example.com/mcp' }))
+      .toThrow(/GITHUB_MCP_URL/)
+  })
 })

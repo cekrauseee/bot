@@ -33,7 +33,7 @@ describe('compatibility migration', () => {
 
   it('derives ordered hashes from the journal and detects pending, mismatched, and out-of-order history', async () => {
     const expected = await readMigrationManifest(new URL('../drizzle/', import.meta.url))
-    expect(expected).toHaveLength(15)
+    expect(expected).toHaveLength(16)
     expect(compareMigrationHistory(expected, [])).toMatchObject({ ok: false, reason: 'pending' })
     expect(compareMigrationHistory(expected, [{ hash: 'wrong' }])).toMatchObject({ ok: false, reason: 'mismatch' })
     expect(compareMigrationHistory(expected, [{ hash: expected[0].hash }]))
@@ -102,6 +102,11 @@ describe('compatibility migration', () => {
       { table_name: 'agent_events', conname: 'agent_events_run_id_agent_runs_id_fk', contype: 'f', definition: 'FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE' },
       { table_name: 'users', conname: 'users_email_not_null', contype: 'n', definition: 'NOT NULL email' },
     ]
+    constraints.splice(12, 0,
+      { table_name: 'github_connections', conname: 'github_connections_pkey', contype: 'p', definition: 'PRIMARY KEY (id)' },
+      { table_name: 'github_connections', conname: 'github_connections_user_id_users_id_fk', contype: 'f', definition: 'FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE' },
+      { table_name: 'github_connections', conname: 'uq_github_connections_user_id', contype: 'u', definition: 'UNIQUE (user_id)' },
+    )
     expect(validateConstraintContract(constraints)).toBe(true)
   })
 
@@ -120,6 +125,9 @@ describe('compatibility migration', () => {
       primary('provider_connections'),
       { table_name: 'provider_connections', indexname: 'ix_provider_connections_user_id', indexdef: 'CREATE INDEX ix_provider_connections_user_id ON public.provider_connections USING btree (user_id)', is_primary: false },
       { table_name: 'provider_connections', indexname: 'uq_provider_connections_user_id_provider', indexdef: 'CREATE UNIQUE INDEX uq_provider_connections_user_id_provider ON public.provider_connections USING btree (user_id, provider)', is_primary: false },
+      primary('github_connections'),
+      { table_name: 'github_connections', indexname: 'ix_github_connections_user_id', indexdef: 'CREATE INDEX ix_github_connections_user_id ON public.github_connections USING btree (user_id)', is_primary: false },
+      { table_name: 'github_connections', indexname: 'uq_github_connections_user_id', indexdef: 'CREATE UNIQUE INDEX uq_github_connections_user_id ON public.github_connections USING btree (user_id)', is_primary: false },
       primary('projects'),
       { table_name: 'projects', indexname: 'ix_projects_user_id_created_at', indexdef: 'CREATE INDEX ix_projects_user_id_created_at ON public.projects USING btree (user_id, created_at)', is_primary: false },
       { table_name: 'projects', indexname: 'uq_projects_user_id_slug', indexdef: 'CREATE UNIQUE INDEX uq_projects_user_id_slug ON public.projects USING btree (user_id, slug)', is_primary: false },
