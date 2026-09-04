@@ -1,23 +1,32 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { createConversationSimulation } from "@/features/conversation-simulator/scenario"
-import { simulationSnapshotAt } from "@/features/conversation-simulator/state-machine"
+import {
+  advanceSimulationSnapshot,
+  simulationSnapshotAt,
+} from "@/features/conversation-simulator/state-machine"
 import { markRunStopRequested } from "@/features/conversation/conversation-state"
 
+function createTimeline(prompt?: string, stepIndex = 0) {
+  const startedAt = Date.now()
+  const steps = createConversationSimulation(startedAt, prompt)
+
+  return {
+    prompt,
+    snapshot: simulationSnapshotAt(steps, stepIndex, startedAt),
+    startedAt,
+    steps,
+  }
+}
+
 export function useConversationSimulator() {
-  const [startedAt, setStartedAt] = useState(() => Date.now())
-  const [prompt, setPrompt] = useState<string>()
-  const [stepIndex, setStepIndex] = useState(0)
+  const [timeline, setTimeline] = useState(() => createTimeline())
   const [playing, setPlaying] = useState(false)
   const [loop, setLoop] = useState(true)
   const [speed, setSpeed] = useState(1)
   const [stopped, setStopped] = useState(false)
-  const steps = useMemo(
-    () => createConversationSimulation(startedAt, prompt),
-    [prompt, startedAt]
-  )
   const snapshot = useMemo(() => {
-    const current = simulationSnapshotAt(steps, stepIndex, startedAt)
+    const current = timeline.snapshot
     if (!stopped || !current.record.runId) return current
     return {
       ...current,
@@ -25,15 +34,16 @@ export function useConversationSimulator() {
         current.record,
         current.record.runId,
         true,
-        startedAt + stepIndex * 1_000
+        timeline.startedAt + current.stepIndex * 1_000
       ),
     }
-  }, [startedAt, stepIndex, steps, stopped])
+  }, [stopped, timeline.snapshot, timeline.startedAt])
 
   useEffect(() => {
     if (!playing) return
 
-    const atEnd = stepIndex >= steps.length - 1
+    const stepIndex = timeline.snapshot.stepIndex
+    const atEnd = stepIndex >= timeline.steps.length - 1
     const timer = window.setTimeout(
       () => {
         if (atEnd) {
@@ -41,56 +51,65 @@ export function useConversationSimulator() {
             setPlaying(false)
             return
           }
-          setStartedAt(Date.now())
-          setStepIndex(0)
+          setTimeline((current) => createTimeline(current.prompt))
           return
         }
-        setStepIndex((current) => current + 1)
+        setTimeline((current) => ({
+          ...current,
+          snapshot: advanceSimulationSnapshot(
+            current.snapshot,
+            current.steps,
+            current.startedAt
+          ),
+        }))
       },
-      (atEnd ? steps[stepIndex].delayMs : steps[stepIndex + 1].delayMs) / speed
+      (atEnd
+        ? timeline.steps[stepIndex].delayMs
+        : timeline.steps[stepIndex + 1].delayMs) / speed
     )
 
     return () => window.clearTimeout(timer)
-  }, [loop, playing, speed, stepIndex, steps])
+  }, [loop, playing, speed, timeline.snapshot.stepIndex, timeline.steps])
 
   const play = useCallback(() => {
-    if (stepIndex >= steps.length - 1) {
-      setStartedAt(Date.now())
-      setStepIndex(0)
-    }
+    setTimeline((current) =>
+      current.snapshot.stepIndex >= current.steps.length - 1
+        ? createTimeline(current.prompt)
+        : current
+    )
     setStopped(false)
     setPlaying(true)
-  }, [stepIndex, steps.length])
+  }, [])
 
   const pause = useCallback(() => setPlaying(false), [])
 
   const reset = useCallback(() => {
     setPlaying(false)
     setStopped(false)
-    setStartedAt(Date.now())
-    setStepIndex(0)
+    setTimeline((current) => createTimeline(current.prompt))
   }, [])
 
   const restart = useCallback(() => {
     setPlaying(true)
     setStopped(false)
-    setStartedAt(Date.now())
-    setStepIndex(0)
+    setTimeline((current) => createTimeline(current.prompt))
   }, [])
 
-  const seek = useCallback(
-    (nextIndex: number) => {
-      setPlaying(false)
-      setStopped(false)
-      setStepIndex(Math.min(Math.max(0, nextIndex), steps.length - 1))
-    },
-    [steps.length]
-  )
+  const seek = useCallback((nextIndex: number) => {
+    setPlaying(false)
+    setStopped(false)
+    setTimeline((current) => ({
+      ...current,
+      snapshot: simulationSnapshotAt(
+        current.steps,
+        nextIndex,
+        current.startedAt
+      ),
+    }))
+  }, [])
 
   const startWithPrompt = useCallback((nextPrompt: string) => {
-    setPrompt(nextPrompt)
-    setStartedAt(Date.now())
-    setStepIndex(1)
+    setTimeline(createTimeline(nextPrompt, 1))
     setStopped(false)
     setPlaying(true)
   }, [])
@@ -118,6 +137,6 @@ export function useConversationSimulator() {
     speed,
     startWithPrompt,
     stop,
-    stepCount: steps.length,
+    stepCount: timeline.steps.length,
   }
 }

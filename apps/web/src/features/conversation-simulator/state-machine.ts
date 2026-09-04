@@ -43,3 +43,33 @@ export function simulationSnapshotAt(
     stepIndex,
   }
 }
+
+export function advanceSimulationSnapshot(
+  snapshot: ConversationSimulationSnapshot,
+  steps: readonly SimulationStep[],
+  startedAt: number
+): ConversationSimulationSnapshot {
+  const nextIndex = snapshot.stepIndex + 1
+  if (nextIndex >= steps.length) return snapshot
+
+  const nextStep = steps[nextIndex]
+  let record = snapshot.record
+  let browserFrameScene = snapshot.browserFrameScene
+
+  if (nextStep.event) {
+    record = applyTurnEvent(
+      record,
+      nextStep.event,
+      startedAt + nextIndex * 1_000
+    )
+  }
+  if (nextStep.frame === null) browserFrameScene = undefined
+  else if (nextStep.frame) browserFrameScene = nextStep.frame
+
+  return {
+    browserFrameScene,
+    record,
+    step: nextStep,
+    stepIndex: nextIndex,
+  }
+}

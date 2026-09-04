@@ -1,5 +1,4 @@
 import {
-  lazy,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -26,14 +25,10 @@ import {
 import { useConversations } from "@/features/conversation/hooks/use-conversations"
 import { DesktopAppHeader } from "@/features/app-shell/components/desktop-app-header"
 import { BrowserPictureInPicture } from "@/features/conversation/components/browser-picture-in-picture"
+import { ConversationView } from "@/features/conversation/components/conversation-view"
 import { createMockBrowserFrame } from "@/features/conversation-simulator/browser-frame"
-import { ConversationSimulationToggle } from "@/features/conversation-simulator/components/conversation-simulation-toggle"
+import { ConversationSimulationControl } from "@/features/conversation-simulator/components/conversation-simulation-control"
 import { useConversationSimulator } from "@/features/conversation-simulator/use-conversation-simulator"
-
-const ConversationSimulatorView = lazy(
-  () =>
-    import("@/features/conversation-simulator/components/conversation-simulator-view")
-)
 
 type AuthenticatedAppShellProps = {
   activeConversationId: string | null
@@ -308,6 +303,7 @@ export function AuthenticatedAppShell({
               ? {
                   simulationEnabled,
                   onSimulationEnabledChange: handleSimulationEnabledChange,
+                  simulator,
                 }
               : {})}
             title={centeredComposer ? "Bot" : conversationTitle}
@@ -338,9 +334,10 @@ export function AuthenticatedAppShell({
               >
                 {conversationTitle}
               </h1>
-              <ConversationSimulationToggle
+              <ConversationSimulationControl
                 checked={simulationEnabled}
                 onCheckedChange={handleSimulationEnabledChange}
+                simulator={simulator}
               />
             </header>
           )}
@@ -349,7 +346,11 @@ export function AuthenticatedAppShell({
             className="relative min-h-0 flex-1"
           >
             {simulationActive ? (
-              <ConversationSimulatorView simulator={simulator} />
+              <ConversationView
+                activeAssistantId={simulationRecord.activeAssistantId}
+                browserProjection={simulationRecord.browserProjection}
+                messages={simulationRecord.messages}
+              />
             ) : (
               children
             )}
