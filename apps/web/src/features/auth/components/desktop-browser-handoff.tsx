@@ -48,7 +48,7 @@ export function DesktopBrowserHandoff({ transactionId }: { transactionId: string
       <Card className="w-full max-w-sm" size="sm">
         <CardHeader role="alert">
           <CardTitle><h1>Unable to finish sign-in</h1></CardTitle>
-          <CardDescription>Return to myBot and try again.</CardDescription>
+          <CardDescription>Return to Bot and try again.</CardDescription>
         </CardHeader>
       </Card>
     )
@@ -59,13 +59,13 @@ export function DesktopBrowserHandoff({ transactionId }: { transactionId: string
       <CardHeader>
         <CardTitle><h1>{state.status === "ready" ? "You’re signed in" : "Finishing sign-in"}</h1></CardTitle>
         <CardDescription>
-          {state.status === "ready" ? "myBot should open automatically." : "This will only take a moment."}
+          {state.status === "ready" ? "Bot should open automatically." : "This will only take a moment."}
         </CardDescription>
       </CardHeader>
       <CardContent>
         {state.status === "ready" ? (
           <a className={cn(buttonVariants(), "w-full")} href={state.callbackUrl}>
-            Open myBot
+            Open Bot
           </a>
         ) : (
           <div className="flex justify-center" role="status">

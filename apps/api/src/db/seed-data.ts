@@ -777,7 +777,7 @@ const curatedSeedConversations: SeedConversation[] = [
           {
             id: 'ai-search-docs',
             type: 'search',
-            query: 'myBot monorepo Node Elysia Python FastAPI AI boundary',
+            query: 'Bot monorepo Node Elysia Python FastAPI AI boundary',
             results: [
               {
                 id: 'fastapi-docs',

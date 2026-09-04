@@ -20,7 +20,7 @@ const LOCAL_DEFAULTS = new Map([
 ])
 const GOOGLE_CONFIG_KEYS = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET']
 const RESEND_CONFIG_KEYS = ['RESEND_API_KEY']
-const DEFAULT_SENDER = 'myBot <mybot@cekrause.eu>'
+const DEFAULT_SENDER = 'Bot <mybot@cekrause.eu>'
 
 function unquote(value) {
   if (

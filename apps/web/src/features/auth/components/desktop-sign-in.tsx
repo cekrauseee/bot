@@ -33,7 +33,7 @@ export function DesktopSignIn() {
   return (
     <Card className="w-full max-w-sm" size="sm">
       <CardHeader>
-        <CardTitle><h1>Sign in to myBot</h1></CardTitle>
+        <CardTitle><h1>Sign in to Bot</h1></CardTitle>
         <CardDescription>Use your browser to sign in.</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">

@@ -22,7 +22,7 @@ test('sign-in uses semantic controls and preserves desktop transaction context',
   assert.match(page, /DesktopBrowserHandoff/)
   assert.match(handoff, /completeDesktop/)
   assert.match(callback, /mybot:/)
-  assert.match(handoff, /Open myBot/)
+  assert.match(handoff, /Open Bot/)
   assert.match(card, /desktopTransaction/)
   assert.match(card, /aria-invalid/)
   assert.match(card, /window\.location\.assign/)

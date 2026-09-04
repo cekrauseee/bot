@@ -190,7 +190,7 @@ class CodexAppServerClient {
       options.loginMode,
     )
     await client.request('initialize', {
-      clientInfo: { name: 'my-bot', title: 'myBot', version: '0.1.0' },
+      clientInfo: { name: 'my-bot', title: 'Bot', version: '0.1.0' },
       capabilities: { experimentalApi: false, requestAttestation: false },
     })
     client.notify('initialized')

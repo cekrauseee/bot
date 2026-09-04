@@ -1,8 +1,18 @@
 # Project
 
-myBot is a portfolio project for a durable cloud agent. The repository keeps the browser/desktop renderer, application API, AI provider boundary, runtime tools, and email package independently managed in one monorepo.
+**An agentic harness for everyone.**
 
-## Current scope
+Bot provides the structure in which people and agents work together. The harness is the product; no single agent, model, interface, or catalog of capabilities defines it.
+
+## Direction
+
+Bot is intended to become a general, approachable home for agentic work. It should support different people, agents, and ways of working without assuming technical expertise or a single use case.
+
+Product decisions should strengthen the shared harness rather than turn Bot into a collection of disconnected AI features.
+
+## Implementation today
+
+The repository keeps the browser and desktop renderer, application API, AI provider boundary, runtime tools, and email package independently managed in one monorepo.
 
 - Vite and React web application with lazy public and protected routes.
 - Official shadcn/Base UI components, Tailwind CSS 4 semantic tokens, and system light/dark appearance.

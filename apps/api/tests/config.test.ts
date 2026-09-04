@@ -72,7 +72,7 @@ describe('configuration', () => {
       GOOGLE_CLIENT_ID: 'client.apps.googleusercontent.com',
       GOOGLE_CLIENT_SECRET: 'google-client-secret',
       RESEND_API_KEY: 're_live_valid-key',
-      RESEND_FROM: 'myBot <auth@example.com>',
+      RESEND_FROM: 'Bot <auth@example.com>',
     }
     expect(loadSettings(production)).toMatchObject({ secureCookies: true, codexHomeRoot: null, codexLoginMode: 'device' })
     expect(loadSettings({ ...production, CODEX_LOGIN_MODE: 'browser' }).codexLoginMode).toBe('browser')

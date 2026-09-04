@@ -24,7 +24,7 @@ GITHUB_TOKEN_ENCRYPTION_KEY=
 GOOGLE_CLIENT_ID=example.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=replace-with-google-client-secret
 RESEND_API_KEY=re_example
-RESEND_FROM="myBot <hello@example.com>"
+RESEND_FROM="Bot <hello@example.com>"
 `
 
 async function fixture(context) {
@@ -81,7 +81,7 @@ test('prepareEnvironment creates files and generates independent local secrets',
     32,
   )
   assert.deepEqual(result.configuredDefaultKeys, [])
-  assert.equal(values.get('RESEND_FROM'), 'myBot <mybot@cekrause.eu>')
+  assert.equal(values.get('RESEND_FROM'), 'Bot <mybot@cekrause.eu>')
   assert.equal((await stat(path.join(root, '.env'))).mode & 0o777, 0o600)
 })
 

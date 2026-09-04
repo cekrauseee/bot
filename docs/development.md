@@ -30,7 +30,7 @@ Use `localhost` with the documented origins (`WEB_BASE_URL=http://localhost:5173
 | `npm run scripts:test` | Root script tests |
 | `npm run desktop:package` | Build an ad hoc signed desktop package |
 | `npm run desktop:make` | Build Forge distributables |
-| `npm run desktop:install` | Stage and install `myBot.app` on macOS |
+| `npm run desktop:install` | Stage and install `Bot.app` on macOS |
 | `npm run icons:build` | Regenerate deterministic icon assets |
 
 Desktop builds generate a public config artifact from the root `.env` and process overrides. It contains only validated HTTP(S) origins; the packaged app does not depend on Finder inheriting shell variables. The installer is deliberately not part of ordinary checks, validates the copied bundle before replacing the current installation, and keeps a timestamped backup of an existing user installation.

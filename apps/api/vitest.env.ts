@@ -10,7 +10,7 @@ export const testEnvironment = {
   RATE_LIMIT_PEPPER: 'test-rate-limit-pepper-that-is-at-least-32-characters',
   AI_SERVICE_TOKEN: 'test-ai-service-token-that-is-at-least-32-characters',
   GOOGLE_REDIRECT_URI: 'http://localhost:8000/auth/google/callback',
-  RESEND_FROM: 'myBot <test@example.com>',
+  RESEND_FROM: 'Bot <test@example.com>',
 }
 
 export const resolvedTestEnvironment = () => Object.fromEntries(

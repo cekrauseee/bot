@@ -1,4 +1,4 @@
-# myBot transactional email
+# Bot transactional email
 
 `emails/login-otp.tsx` is the React Email component and single source of truth for the OTP message. The package exports the typed component and subject through `@my-bot/email`; the API does not use hosted Resend templates.
 

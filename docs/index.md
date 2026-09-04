@@ -4,7 +4,7 @@ Read only the documents relevant to the task.
 
 | Document | Read when |
 | --- | --- |
-| [Project](project.md) | Understanding project purpose, scope, or concepts |
+| [Project](project.md) | Understanding Bot's identity, direction, scope, or concepts |
 | [Architecture](architecture.md) | Changing system boundaries or cross-cutting behavior |
 | [Development](development.md) | Setting up, testing, or contributing |
 | [Delivery and review](delivery.md) | Splitting cross-service features into child PRs and reviewing the aggregate |

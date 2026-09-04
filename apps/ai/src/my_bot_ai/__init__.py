@@ -1,1 +1,1 @@
-"""AI service boundary for myBot."""
+"""AI service boundary for Bot."""

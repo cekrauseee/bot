@@ -18,7 +18,7 @@ const USER_URL = 'https://api.github.com/user'
 // GitHub OAuth Apps expose `repo` as the minimum scope that can read private
 // repository contents; write-capable MCP tools remain disallowed below.
 export const GITHUB_OAUTH_SCOPE = 'repo'
-const jsonHeaders = { accept: 'application/json', 'user-agent': 'myBot' }
+const jsonHeaders = { accept: 'application/json', 'user-agent': 'Bot' }
 
 type PendingLogin = { userId: string; loginId: string; verifier: string; state?: string; phase?: 'pending' | 'completing' }
 type TokenEnvelope = { v: 1; iv: string; tag: string; data: string }

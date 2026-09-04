@@ -172,7 +172,7 @@ export function AppSidebar({
         <SidebarHeader>
           <div className="flex h-8 items-center gap-2 px-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
             <span className="truncate text-sm font-semibold group-data-[collapsible=icon]:hidden">
-              myBot
+              Bot
             </span>
             <SidebarTrigger
               className="ml-auto group-data-[collapsible=icon]:ml-0"

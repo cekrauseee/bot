@@ -14,7 +14,7 @@ describe('OTP email delivery', () => {
     const send = vi.fn().mockResolvedValue({ data: { id: 'email_123' }, error: null })
     const sender = new ResendOtpEmailSender(
       're_test',
-      'myBot <mybot@example.com>',
+      'Bot <mybot@example.com>',
       { emails: { send } } as never,
     )
 
@@ -27,9 +27,9 @@ describe('OTP email delivery', () => {
 
     const [payload, options] = send.mock.calls[0]
     expect(payload).toMatchObject({
-      from: 'myBot <mybot@example.com>',
+      from: 'Bot <mybot@example.com>',
       to: ['private@example.com'],
-      subject: 'Your myBot sign-in code',
+      subject: 'Your Bot sign-in code',
       tags: [{ name: 'category', value: 'authentication' }],
     })
     expect(payload).not.toHaveProperty('html')
@@ -45,7 +45,7 @@ describe('OTP email delivery', () => {
     const log = createLogger({ environment: 'production' }, destination)
     const sender = new ResendOtpEmailSender(
       're_private',
-      'myBot <mybot@example.com>',
+      'Bot <mybot@example.com>',
       { emails: { send: vi.fn().mockRejectedValue(new TypeError('provider unavailable')) } } as never,
       log,
     )
@@ -76,7 +76,7 @@ describe('OTP email delivery', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const sender = new ResendOtpEmailSender(
       're_test',
-      'myBot <mybot@example.com>',
+      'Bot <mybot@example.com>',
       {
         emails: {
           send: vi.fn().mockResolvedValue({

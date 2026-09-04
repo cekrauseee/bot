@@ -310,7 +310,7 @@ export function AuthenticatedAppShell({
                   onSimulationEnabledChange: handleSimulationEnabledChange,
                 }
               : {})}
-            title={centeredComposer ? "myBot" : conversationTitle}
+            title={centeredComposer ? "Bot" : conversationTitle}
           />
         )}
         <AppSidebar

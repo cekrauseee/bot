@@ -609,7 +609,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id', 'X-Correlation-Id'],
       exposeHeaders: ['X-Request-Id', 'X-Correlation-Id'],
     }))
-    .use(openapi({ documentation: { info: { title: 'myBot API', version: '0.1.0' } } }))
+    .use(openapi({ documentation: { info: { title: 'Bot API', version: '0.1.0' } } }))
     .onError(({ error, request, route, set }) => {
       const context = requestContexts.get(request)
       if (context) {

@@ -172,7 +172,7 @@ export function SignInCard({ googleError = false, desktopTransaction }: { google
     <Card className="w-full max-w-sm">
       <CardHeader>
         <CardTitle>
-          <h1>Sign in to myBot</h1>
+          <h1>Sign in to Bot</h1>
         </CardTitle>
         <CardDescription>
           {challenge ? (

@@ -57,9 +57,9 @@ def create_app(
             yield
 
     application = FastAPI(
-        title="myBot AI",
+        title="Bot AI",
         version="0.1.0",
-        description="Authenticated streaming AI agent service for myBot.",
+        description="Authenticated streaming AI agent service for Bot.",
         lifespan=lifespan,
     )
     application.state.settings = resolved_settings
