@@ -125,6 +125,13 @@ describe("conversation state", () => {
           status: "completed",
           target: "/workspace/package.json",
         },
+        {
+          id: "child-1",
+          event_type: "child.completed",
+          label: "Delegated a task",
+          detail: "Compare the release options",
+          status: "completed",
+        },
       ],
     })
 
@@ -134,8 +141,17 @@ describe("conversation state", () => {
         id: "tool-1",
         type: "tool",
         action: "filesystem_read",
+        label: "Read files",
         status: "completed",
         target: "/workspace/package.json",
+      },
+      {
+        id: "child-1",
+        type: "trace",
+        kind: "child",
+        label: "Delegated a task",
+        detail: "Compare the release options",
+        status: "completed",
       },
     ])
   })
@@ -207,6 +223,7 @@ describe("conversation state", () => {
       expect.objectContaining({
         type: "tool",
         action: "filesystem_read",
+        label: "Read files",
         status: "completed",
         target: "/workspace/package.json",
       }),

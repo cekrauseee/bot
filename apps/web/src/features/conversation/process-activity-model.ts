@@ -32,6 +32,11 @@ const BROWSER_ACTIVE_STATES = new Set(["launching", "live", "awaiting_user"])
 const SKILL_NAMES: Readonly<Record<string, string>> = {
   github: "GitHub",
 }
+const GENERIC_CHILD_LABELS = new Set([
+  "Delegating a task",
+  "Delegated a task",
+  "Could not delegate the task",
+])
 const TOOL_FAMILY_RULES: readonly {
   actions?: readonly string[]
   family: ProcessActivityFamily
@@ -132,7 +137,11 @@ export function processSearchCopy(
   activity: Extract<ProcessActivity, { type: "search" }>
 ) {
   const verb =
-    activity.status === "in_progress" ? "Searching for" : "Searched for"
+    activity.status === "in_progress"
+      ? "Searching for"
+      : activity.status === "failed"
+        ? "Could not search for"
+        : "Searched for"
   const query = `“${activity.query}”`
   return {
     label: `${verb} ${query}`,
@@ -256,8 +265,8 @@ const TOOL_COPY_DEFINITIONS: Record<string, ToolCopyDefinition> = {
     browserDetail
   ),
   browser_press: defineToolCopy(
-    ["Submitting the page", "Submitted the page", "Could not submit the page"],
-    failureDetail
+    ["Pressing a key", "Pressed a key", "Could not press a key"],
+    targetDetail
   ),
   browser_snapshot: defineToolCopy(
     ["Inspecting the page", "Inspected the page", "Could not inspect the page"],
@@ -280,10 +289,14 @@ const DEFAULT_TOOL_COPY = defineToolCopy(
 
 export function processToolCopy(activity: ProcessTool) {
   const action = normalizeProcessAction(activity.action)
-  const copy = TOOL_COPY_DEFINITIONS[action] ?? DEFAULT_TOOL_COPY
+  const knownCopy = TOOL_COPY_DEFINITIONS[action]
+  const copy = knownCopy ?? DEFAULT_TOOL_COPY
   const detail = activity.status === "failed" ? activity.detail : undefined
   return {
-    label: statusLabel(activity.status, ...copy.labels),
+    label:
+      knownCopy || !activity.label?.trim()
+        ? statusLabel(activity.status, ...copy.labels)
+        : activity.label.trim(),
     detail: copy.detail({
       activity,
       failureDetail: detail,
@@ -306,6 +319,21 @@ export function processSkillCopy(
 
 export function processSkillName(name: string) {
   return SKILL_NAMES[name.trim().toLowerCase()] ?? name
+}
+
+export function processChildCopy(
+  activity: Extract<ProcessActivity, { type: "trace" }>
+) {
+  const subject = GENERIC_CHILD_LABELS.has(activity.label)
+    ? "a task"
+    : activity.label
+  const label =
+    activity.status === "in_progress"
+      ? `Delegating ${subject}`
+      : activity.status === "failed"
+        ? `Could not delegate ${subject}`
+        : `Delegated ${subject}`
+  return { label, detail: activity.detail }
 }
 
 export function processActivityFamily(

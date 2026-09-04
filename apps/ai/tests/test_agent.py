@@ -30,6 +30,7 @@ from my_bot_ai.features.agent.service import (
     _safe_tool_error,
     _tool_error_middleware,
     _tool_event,
+    _tool_label,
     build_model,
     child_thread_id,
     prepare_agent_request,
@@ -160,9 +161,13 @@ class GithubCallChunk:
     content_blocks = [
         {
             "type": "server_tool_call",
-            "name": "search_repositories",
+            "name": "remote_mcp",
             "id": "github-1",
             "args": {"query": "user:octocat"},
+            "extras": {
+                "server_label": "github",
+                "tool_name": "search_repositories",
+            },
         }
     ]
 
@@ -170,6 +175,27 @@ class GithubCallChunk:
 class GithubResultChunk:
     content_blocks = [
         {"type": "server_tool_result", "tool_call_id": "github-1", "status": "completed"}
+    ]
+
+
+class GithubMcpChunk:
+    content = [
+        {
+            "type": "mcp_call",
+            "name": "get_file_contents",
+            "id": "mcp-github-1",
+            "server_label": "github",
+            "status": "completed",
+            "arguments": json.dumps(
+                {
+                    "owner": "acme",
+                    "repo": "atlas",
+                    "path": "README.md",
+                    "ref": "refs/heads/main",
+                }
+            ),
+            "output": "private repository contents",
+        }
     ]
 
 
@@ -186,6 +212,12 @@ class GithubGraph:
         assert version == "v2"
         yield {"event": "on_chat_model_stream", "data": {"chunk": GithubCallChunk()}}
         yield {"event": "on_chat_model_stream", "data": {"chunk": GithubResultChunk()}}
+
+
+class GithubMcpGraph:
+    async def astream_events(self, _input, version, **_kwargs):
+        assert version == "v2"
+        yield {"event": "on_chat_model_end", "data": {"output": GithubMcpChunk()}}
 
 
 class ActivityStream:
@@ -213,7 +245,7 @@ class ActivityStream:
             "event": "on_tool_start",
             "name": "delegate_to_child_agent",
             "run_id": "child-1",
-            "data": {},
+            "data": {"input": {"task": "Compare the release options"}},
         }
         yield {
             "event": "on_tool_end",
@@ -382,6 +414,26 @@ def test_stream_normalizes_hosted_github_mcp_calls_as_tool_activity() -> None:
     ]
 
 
+def test_stream_normalizes_responses_api_mcp_call_without_exposing_output() -> None:
+    events = collect(stream_model(GithubMcpGraph(), []))
+
+    assert events == [
+        {
+            "type": "tool.completed",
+            "data": {
+                "tool": {
+                    "id": "mcp-github-1",
+                    "name": "get_file_contents",
+                    "label": "Read from GitHub",
+                    "status": "completed",
+                    "target": "acme/atlas/README.md @ refs/heads/main",
+                }
+            },
+        }
+    ]
+    assert "private repository contents" not in json.dumps(events)
+
+
 def test_recursion_limit_emits_saved_partial_answer_as_truthful_completion() -> None:
     events = collect(
         stream_model(
@@ -458,6 +510,52 @@ def test_plan_tool_and_child_events_are_normalized() -> None:
     }
     assert events[-1]["data"]["child"]["label"] == "Delegated a task"
     assert events[-1]["data"]["child"]["status"] == "completed"
+    assert events[-2]["data"]["child"]["detail"] == "Compare the release options"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "filesystem_list",
+        "filesystem_read",
+        "filesystem_write",
+        "shell_exec",
+        "browser_open",
+        "browser_snapshot",
+        "browser_click",
+        "browser_type",
+        "browser_press",
+        "browser_close",
+        "search_repositories",
+        "get_file_contents",
+    ],
+)
+def test_known_visible_tools_never_use_generic_labels(name: str) -> None:
+    generic = {"Using a tool", "Used a tool", "Could not use a tool"}
+
+    assert _tool_label(name, "in_progress") not in generic
+    assert _tool_label(name, "completed") not in generic
+    assert _tool_label(name, "failed") not in generic
+
+
+def test_browser_key_activity_names_the_key_without_exposing_page_input() -> None:
+    event = _tool_event(
+        {
+            "event": "on_tool_start",
+            "name": "browser_press",
+            "run_id": "browser-key",
+            "data": {"input": {"key": "Escape"}},
+        }
+    )
+
+    assert event is not None
+    assert event.data["tool"] == {
+        "id": "browser-key",
+        "name": "browser_press",
+        "label": "Pressing a key",
+        "status": "in_progress",
+        "target": "Escape",
+    }
 
 
 def test_github_tool_events_include_safe_inspectable_targets() -> None:

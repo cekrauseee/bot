@@ -185,6 +185,7 @@ export function parseProcessActivity(value: unknown): ProcessActivity | null {
       id,
       type: "tool",
       action: string(activity.action) ?? string(activity.name) ?? "tool",
+      ...(string(activity.label) ? { label: string(activity.label) } : {}),
       ...(string(activity.target) ? { target: string(activity.target) } : {}),
       ...(string(activity.detail) ? { detail: string(activity.detail) } : {}),
       ...(activityStatus(activity.status)
@@ -243,6 +244,7 @@ export function parseProcessActivity(value: unknown): ProcessActivity | null {
       id,
       type: "tool",
       action: string(activity.name) ?? "tool",
+      ...(string(activity.label) ? { label: string(activity.label) } : {}),
       ...(string(activity.target) ? { target: string(activity.target) } : {}),
       ...(string(activity.detail) ? { detail: string(activity.detail) } : {}),
       ...(activityStatus(activity.status)
@@ -255,7 +257,8 @@ export function parseProcessActivity(value: unknown): ProcessActivity | null {
       id,
       type: "trace",
       kind: "child",
-      label: "Delegated a task",
+      label: string(activity.label) ?? "Delegated a task",
+      ...(string(activity.detail) ? { detail: string(activity.detail) } : {}),
       ...(activityStatus(activity.status)
         ? { status: activityStatus(activity.status) }
         : {}),
@@ -490,6 +493,7 @@ function eventActivity(event: TurnStreamEvent): ProcessActivity | null {
       id,
       type: "tool",
       action: string(raw.name) ?? "tool",
+      ...(string(raw.label) ? { label: string(raw.label) } : {}),
       ...(string(raw.target) ? { target: string(raw.target) } : {}),
       ...(string(raw.detail) ? { detail: string(raw.detail) } : {}),
       ...(activityStatus(raw.status)

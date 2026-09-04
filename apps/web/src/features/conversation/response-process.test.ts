@@ -180,6 +180,31 @@ describe("response process", () => {
     expect(markup).not.toContain("get_file_contents")
   })
 
+  it("renders a failed child delegation without contradictory success copy", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(ResponseProcess, {
+        hasResponse: false,
+        process: {
+          activities: [
+            {
+              detail: "The child agent could not start.",
+              id: "child-failed",
+              kind: "child",
+              label: "Could not delegate the task",
+              status: "failed",
+              type: "trace",
+            },
+          ],
+          durationSeconds: 2,
+          status: "processing",
+        },
+      })
+    )
+
+    expect(markup).toContain("Could not delegate a task")
+    expect(markup).not.toContain("Delegated Could not delegate")
+  })
+
   it("renders a search with results as a collapsible family item", () => {
     const markup = renderToStaticMarkup(
       React.createElement(ResponseProcess, {

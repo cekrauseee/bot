@@ -85,6 +85,13 @@ def _blocks(chunk: Any) -> list[dict[str, Any]]:
     return [block for block in blocks or [] if isinstance(block, dict)]
 
 
+def _raw_blocks(message: Any) -> list[dict[str, Any]]:
+    content = getattr(message, "content", [])
+    if isinstance(content, dict):
+        return [content]
+    return [block for block in content or [] if isinstance(block, dict)]
+
+
 def _explicit_summary_values(value: Any) -> list[str]:
     """Extract text only from fields explicitly labelled as summaries."""
 
@@ -179,9 +186,9 @@ def _tool_label(name: str, status: str) -> str:
             "Could not enter text on the page",
         ),
         "browser_press": (
-            "Submitting the page",
-            "Submitted the page",
-            "Could not submit the page",
+            "Pressing a key",
+            "Pressed a key",
+            "Could not press a key",
         ),
         "browser_close": (
             "Closing the browser",
@@ -229,6 +236,8 @@ def _tool_target(name: str, data: dict[str, Any]) -> str | None:
         "filesystem_write": "path",
         "shell_exec": "command",
         "browser_open": "url",
+        "browser_press": "key",
+        "delegate_to_child_agent": "task",
         "search_repositories": "query",
     }.get(name)
     value = tool_input.get(field) if field else None
@@ -266,6 +275,75 @@ def _object_output(value: Any) -> dict[str, Any] | None:
     except ValueError:
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def _server_tool_arguments(block: dict[str, Any]) -> dict[str, Any]:
+    args = block.get("args")
+    if isinstance(args, dict):
+        return args
+    arguments = block.get("arguments")
+    if not isinstance(arguments, str):
+        return {}
+    try:
+        parsed = json.loads(arguments)
+    except ValueError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _hosted_tool_event(
+    block: dict[str, Any],
+    hosted_tools: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    block_type = block.get("type")
+    block_id = str(block.get("id") or block.get("tool_call_id") or "")
+    existing_tool = hosted_tools.get(block_id)
+    extras = block.get("extras")
+    extras = extras if isinstance(extras, dict) else {}
+    server_label = block.get("server_label") or extras.get("server_label")
+    raw_name = str(block.get("name", "")).lower()
+    if raw_name == "remote_mcp":
+        raw_name = str(extras.get("tool_name", "")).lower()
+    tool_name = raw_name or str((existing_tool or {}).get("name", ""))
+    if server_label not in {None, "github"}:
+        return None
+    if tool_name not in GITHUB_TOOL_NAMES:
+        return None
+
+    tool_id = block_id or f"github-tool-{len(hosted_tools) + 1}"
+    existing_tool = hosted_tools.get(tool_id)
+    status = "in_progress"
+    if block_type in {"mcp_call", "server_tool_result"}:
+        result_status = str(block.get("status", "completed")).lower()
+        if result_status in {"error", "failed", "incomplete"}:
+            status = "failed"
+        elif result_status in {"completed", "success"}:
+            status = "completed"
+
+    target = _tool_target(tool_name, {"input": _server_tool_arguments(block)})
+    tool = {
+        **(existing_tool or {}),
+        "id": tool_id,
+        "name": tool_name,
+        "label": _tool_label(tool_name, status),
+        "status": status,
+    }
+    if target:
+        tool["target"] = target
+    if status == "failed":
+        tool["detail"] = "GitHub could not complete this action."
+
+    if existing_tool == tool:
+        return None
+    hosted_tools[tool_id] = tool
+    event_type = (
+        "tool.completed"
+        if status in {"completed", "failed"}
+        else "tool.updated"
+        if existing_tool
+        else "tool.started"
+    )
+    return {"type": event_type, "data": {"tool": tool}}
 
 
 def _tool_failure(output: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -565,6 +643,9 @@ def _tool_event(event: dict[str, Any]) -> NormalizedEvent | None:
             if status == "failed"
             else "Delegated a task"
         )
+        task = child.pop("target", None)
+        if isinstance(task, str) and "detail" not in child:
+            child["detail"] = task
         return NormalizedEvent(type=event_type, data={"child": child})
 
     event_type = {
@@ -703,6 +784,7 @@ async def stream_model(
                 for block in blocks:
                     block_type = block.get("type")
                     if block_type not in {
+                        "mcp_call",
                         "server_tool_call",
                         "server_tool_call_chunk",
                         "server_tool_result",
@@ -712,40 +794,9 @@ async def stream_model(
                     name = str(block.get("name", "")).lower()
                     is_web_search = "web_search" in name or block_id in searches
                     if not is_web_search:
-                        existing_tool = hosted_tools.get(block_id)
-                        tool_name = name or str((existing_tool or {}).get("name", ""))
-                        if tool_name not in GITHUB_TOOL_NAMES:
-                            continue
-                        tool_id = block_id or f"github-tool-{len(hosted_tools) + 1}"
-                        existing_tool = hosted_tools.get(tool_id)
-                        status = "in_progress"
-                        if block_type == "server_tool_result":
-                            result_status = str(block.get("status", "completed")).lower()
-                            status = (
-                                "failed"
-                                if result_status in {"error", "failed", "incomplete"}
-                                else "completed"
-                            )
-                        tool = {
-                            **(existing_tool or {}),
-                            "id": tool_id,
-                            "name": tool_name,
-                            "label": _tool_label(tool_name, status),
-                            "status": status,
-                        }
-                        args = block.get("args") or {}
-                        target = _tool_target(
-                            tool_name,
-                            {"input": args if isinstance(args, dict) else {}},
-                        )
-                        if target:
-                            tool["target"] = target
-                        hosted_tools[tool_id] = tool
-                        if block_type == "server_tool_result":
-                            event_type = "tool.completed"
-                        else:
-                            event_type = "tool.updated" if existing_tool else "tool.started"
-                        yield {"type": event_type, "data": {"tool": tool}}
+                        hosted_event = _hosted_tool_event(block, hosted_tools)
+                        if hosted_event is not None:
+                            yield hosted_event
                         continue
                     search_id = block_id or "web-search"
                     existing = searches.get(search_id)
@@ -772,6 +823,14 @@ async def stream_model(
                     searches[search_id] = step
                     yield {"type": event_type, "data": {"step": step}}
                     continue
+
+            if kind == "on_chat_model_end":
+                for block in _raw_blocks(data.get("output")):
+                    if block.get("type") != "mcp_call":
+                        continue
+                    hosted_event = _hosted_tool_event(block, hosted_tools)
+                    if hosted_event is not None:
+                        yield hosted_event
 
             normalized_tool = _tool_event(event)
             if normalized_tool is not None:

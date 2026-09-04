@@ -6,6 +6,7 @@ import {
   isProcessActivityActive,
   isProcessFamilyDefaultOpen,
   processActivityGroupLabel,
+  processChildCopy,
   processSearchCopy,
   processSkillCopy,
   processSkillName,
@@ -89,6 +90,17 @@ describe("process activity model", () => {
     expect(isProcessFamilyDefaultOpen("browser", true)).toBe(false)
     expect(isProcessFamilyDefaultOpen("web-search", true)).toBe(false)
     expect(isProcessFamilyDefaultOpen("commands", true)).toBe(true)
+    expect(
+      processSearchCopy({
+        id: "failed-search",
+        query: "unavailable source",
+        status: "failed",
+        type: "search",
+      })
+    ).toMatchObject({
+      label: "Could not search for “unavailable source”",
+      verb: "Could not search for",
+    })
   })
 
   it("uses sentence copy without exposing internal tool identifiers", () => {
@@ -106,12 +118,87 @@ describe("process activity model", () => {
       target: "internal_provider_tool",
       type: "tool",
     })
+    const custom = processToolCopy({
+      action: "index_documents",
+      id: "custom",
+      label: "Indexed documents",
+      status: "completed",
+      type: "tool",
+    })
 
     expect(read).toEqual({ label: "Read", detail: "package.json" })
     expect(unknown).toEqual({ label: "Used a tool" })
+    expect(custom).toEqual({ label: "Indexed documents" })
     expect(processActivityGroupLabel("files-read", [tool("a", "read")])).toBe(
       "Read files"
     )
+  })
+
+  it("has specific copy for every visible agent tool", () => {
+    const actions = [
+      "browser_click",
+      "browser_close",
+      "browser_open",
+      "browser_press",
+      "browser_snapshot",
+      "browser_type",
+      "filesystem_list",
+      "filesystem_read",
+      "filesystem_write",
+      "get_file_contents",
+      "load_skill",
+      "search_repositories",
+      "shell_exec",
+    ]
+    const generic = new Set([
+      "Using a tool",
+      "Used a tool",
+      "Could not use a tool",
+    ])
+
+    for (const action of actions) {
+      for (const status of ["in_progress", "completed", "failed"] as const) {
+        expect(
+          generic.has(
+            processToolCopy({ action, id: action, status, type: "tool" }).label
+          )
+        ).toBe(false)
+      }
+    }
+    expect(
+      processToolCopy({
+        action: "browser_press",
+        id: "press",
+        status: "completed",
+        target: "Escape",
+        type: "tool",
+      })
+    ).toEqual({ label: "Pressed a key", detail: "Escape" })
+  })
+
+  it("uses truthful copy for child-agent lifecycle states", () => {
+    expect(
+      processChildCopy({
+        detail: "Compare the release options",
+        id: "child-start",
+        kind: "child",
+        label: "Delegating a task",
+        status: "in_progress",
+        type: "trace",
+      })
+    ).toEqual({
+      label: "Delegating a task",
+      detail: "Compare the release options",
+    })
+    expect(
+      processChildCopy({
+        id: "child-failed",
+        kind: "child",
+        label: "Could not delegate the task",
+        status: "failed",
+        type: "trace",
+      })
+    ).toEqual({ label: "Could not delegate a task", detail: undefined })
   })
 
   it("groups skill lifecycle items and gives them human-readable copy", () => {
