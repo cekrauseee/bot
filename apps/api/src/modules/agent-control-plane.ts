@@ -104,6 +104,7 @@ export type GithubMcpConfig = {
   server_url: string
   authorization: string
   allowed_tools: string[]
+  account_login: string
 }
 export type GithubMcpResolver = (userId: string) => Promise<GithubMcpConfig | undefined>
 
@@ -388,20 +389,46 @@ export const upsertActivity = (
   else activities[index] = { ...activities[index], ...next }
 }
 
+export const settleActivities = (
+  activities: Array<Record<string, unknown>>,
+  status: 'completed' | 'failed',
+) => {
+  for (let index = 0; index < activities.length; index += 1) {
+    const activity = activities[index]
+    if (activity?.type === 'text' || activity?.status !== 'in_progress') continue
+    const eventType = typeof activity.event_type === 'string' &&
+      /^(step|tool|child|skill)\./.test(activity.event_type)
+      ? `${activity.event_type.split('.', 1)[0]}.completed`
+      : activity.event_type
+    activities[index] = {
+      ...activity,
+      status,
+      ...(eventType ? { event_type: eventType } : {}),
+    }
+  }
+}
+
 const appendReasoningActivity = (
   activities: Array<Record<string, unknown>>,
   delta: string,
   sequence: number,
+  activityId?: string,
 ) => {
-  const last = activities.at(-1)
-  if (last?.type === 'text' && last.lastSequence === sequence - 1 &&
-    typeof last.content === 'string') {
-    last.content += delta
-    last.lastSequence = sequence
+  const id = activityId && activityId.length <= 200
+    ? activityId
+    : `reasoning-${sequence}`
+  const existingIndex = activities.findIndex((activity) => activity.id === id)
+  const existing = existingIndex >= 0 ? activities[existingIndex] : undefined
+  if (existing?.type === 'text' && typeof existing.content === 'string') {
+    // The activity ID is stable across title events and reconnects. Sequence
+    // ordering is still retained for diagnostics, but must not be required
+    // for additive reasoning updates.
+    existing.content += delta
+    existing.lastSequence = sequence
     return
   }
   activities.push({
-    id: `reasoning-${sequence}`,
+    id,
     type: 'text',
     content: delta,
     lastSequence: sequence,
@@ -602,7 +629,18 @@ export class AgentRunExecutor {
     return serialized
   }
 
+  private async terminalActivities(run: AgentRun, status: 'completed' | 'failed') {
+    const assistant = await this.database.transaction((db) =>
+      new AgentRunRepository(db).assistant(run))
+    const activities = Array.isArray(assistant?.activities)
+      ? [...assistant.activities] as Array<Record<string, unknown>>
+      : []
+    settleActivities(activities, status)
+    return activities
+  }
+
   private async finishCancelled(run: AgentRun) {
+    const activities = await this.terminalActivities(run, 'failed')
     await this.persist(run, 'turn.failed', {
       error: { code: 'cancelled', message: 'Turn cancelled.', retryable: false },
     }, {
@@ -611,7 +649,7 @@ export class AgentRunExecutor {
       leaseExpiresAt: null,
       completedAt: new Date(),
     }, {
-      status: 'cancelled', errorMessage: null,
+      activities, status: 'cancelled', errorMessage: null,
     })
   }
 
@@ -779,13 +817,19 @@ export class AgentRunExecutor {
         } else if (event.type === 'reasoning.delta') {
           if (typeof data.delta !== 'string') throw new Error('invalid_provider_event')
           reasoning += data.delta
-          appendReasoningActivity(activities, data.delta, event.sequence)
+          appendReasoningActivity(
+            activities,
+            data.delta,
+            event.sequence,
+            typeof data.activity_id === 'string' ? data.activity_id : undefined,
+          )
         }
         upsertActivity(activities, event.type, data)
 
         if (event.type === 'turn.completed') {
           terminal = event.type
           await titleTask
+          settleActivities(activities, 'completed')
           await this.persist(run, event.type, data, {
             status: 'completed',
             browserProjection: null,
@@ -797,6 +841,7 @@ export class AgentRunExecutor {
         if (event.type === 'turn.failed') {
           terminal = event.type
           await titleTask
+          settleActivities(activities, 'failed')
           const detail = plainRecord(data.error)
           logger.error({ event: 'agent_run_failed', run_id: run.id, turn_id: run.turnId, ...aiDiagnostic(detail) }, 'agent_run_failed')
           await this.persist(run, event.type, {
@@ -844,14 +889,16 @@ export class AgentRunExecutor {
       const diagnostic = aiDiagnostic(error)
       logger.error({ event: 'agent_run_failed', run_id: run.id, turn_id: run.turnId, ...safeError(error), ...diagnostic }, 'agent_run_failed')
       try {
+        const activities = await this.terminalActivities(run, 'failed')
         await this.persist(run, 'turn.failed', {
           error: { code: 'provider_error', message: 'Unable to complete this turn.', retryable: true },
         }, {
           status: 'failed',
+          browserProjection: null,
           leaseExpiresAt: null,
           completedAt: new Date(),
         }, {
-          status: 'failed', errorMessage: 'Unable to complete this turn.',
+          activities, status: 'failed', errorMessage: 'Unable to complete this turn.',
         })
       } catch (terminalError) {
         if (!(terminalError instanceof AgentRunLeaseLostError)) {

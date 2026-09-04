@@ -16,6 +16,7 @@ from my_bot_ai.features.agent.contracts import (
     AgentRequest,
     ConversationTitleRequest,
     ConversationTitleResponse,
+    GithubMcpConfig,
     PlanStep,
     resolve_model_settings,
 )
@@ -28,6 +29,8 @@ from my_bot_ai.features.agent.service import (
     MAX_TOOL_CALLS_PER_RUN,
     _safe_tool_error,
     _tool_error_middleware,
+    _tool_event,
+    _tool_label,
     build_model,
     child_thread_id,
     prepare_agent_request,
@@ -135,17 +138,17 @@ class Chunk:
     content_blocks = [
         {"type": "reasoning", "reasoning": "Brief plan"},
         {
+            "type": "server_tool_call",
+            "name": "web_search",
+            "id": "ws1",
+            "args": {"query": "latest news"},
+        },
+        {
             "type": "text",
             "text": "Visible answer",
             "annotations": [
                 {"type": "url_citation", "title": "Source", "url": "https://example.com"}
             ],
-        },
-        {
-            "type": "server_tool_call",
-            "name": "web_search",
-            "id": "ws1",
-            "args": {"query": "latest news"},
         },
     ]
 
@@ -154,12 +157,226 @@ class ResultChunk:
     content_blocks = [{"type": "server_tool_result", "tool_call_id": "ws1", "status": "completed"}]
 
 
+class GithubCallChunk:
+    content_blocks = [
+        {
+            "type": "server_tool_call",
+            "name": "remote_mcp",
+            "id": "github-1",
+            "args": {"query": "user:octocat"},
+            "extras": {
+                "server_label": "github",
+                "tool_name": "search_repositories",
+            },
+        }
+    ]
+
+
+class GithubResultChunk:
+    content_blocks = [
+        {"type": "server_tool_result", "tool_call_id": "github-1", "status": "completed"}
+    ]
+
+
+class GithubMcpChunk:
+    content = [
+        {
+            "type": "mcp_call",
+            "name": "get_file_contents",
+            "id": "mcp-github-1",
+            "server_label": "github",
+            "status": "completed",
+            "arguments": json.dumps(
+                {
+                    "owner": "acme",
+                    "repo": "atlas",
+                    "path": "README.md",
+                    "ref": "refs/heads/main",
+                }
+            ),
+            "output": "private repository contents",
+        }
+    ]
+
+
 class FakeGraph:
     async def astream_events(self, _input, version, **_kwargs):
         assert version == "v2"
         assert _kwargs["durability"] == "sync"
         yield {"event": "on_chat_model_stream", "data": {"chunk": Chunk()}}
         yield {"event": "on_chat_model_stream", "data": {"chunk": ResultChunk()}}
+
+
+class GithubGraph:
+    async def astream_events(self, _input, version, **_kwargs):
+        assert version == "v2"
+        yield {"event": "on_chat_model_stream", "data": {"chunk": GithubCallChunk()}}
+        yield {"event": "on_chat_model_stream", "data": {"chunk": GithubResultChunk()}}
+
+
+class GithubMcpGraph:
+    async def astream_events(self, _input, version, **_kwargs):
+        assert version == "v2"
+        yield {"event": "on_chat_model_end", "data": {"output": GithubMcpChunk()}}
+
+
+class AdditiveReasoningGraph:
+    async def astream_events(self, _input, version, **_kwargs):
+        assert version == "v2"
+        for summary in ("Planning", " carefully", " carefully"):
+            yield {
+                "event": "on_chat_model_stream",
+                "data": {"chunk": SimpleNamespace(content_blocks=[
+                    {"type": "reasoning", "summary": summary},
+                ])},
+            }
+
+
+class SameRunSegmentedReasoningGraph:
+    async def astream_events(self, _input, version, **_kwargs):
+        assert version == "v2"
+        yield {
+            "event": "on_chat_model_stream",
+            "run_id": "model-run-1",
+            "data": {"chunk": SimpleNamespace(content_blocks=[
+                {"type": "reasoning", "summary": "Before tool"},
+            ])},
+        }
+        yield {
+            "event": "on_tool_start",
+            "run_id": "tool-run-1",
+            "name": "filesystem_read",
+            "data": {"input": {"path": "/workspace/README.md"}},
+        }
+        yield {
+            "event": "on_tool_end",
+            "run_id": "tool-run-1",
+            "name": "filesystem_read",
+            "data": {},
+        }
+        yield {
+            "event": "on_chat_model_stream",
+            "run_id": "model-run-1",
+            "data": {"chunk": SimpleNamespace(content_blocks=[
+                {"type": "reasoning", "summary": "After tool"},
+            ])},
+        }
+
+
+class NestedChildActivityGraph:
+    async def astream_events(self, _input, version, **_kwargs):
+        assert version == "v2"
+        yield {
+            "event": "on_tool_start",
+            "name": "delegate_to_child_agent",
+            "run_id": "child-tool-1",
+            "parent_ids": ["root-agent", "root-tools"],
+            "data": {"input": {"task": "Inspect one repository"}},
+        }
+        yield {
+            "event": "on_chat_model_stream",
+            "run_id": "child-model-1",
+            "parent_ids": ["root-agent", "root-tools", "child-tool-1", "child-agent"],
+            "data": {"chunk": SimpleNamespace(content_blocks=[
+                {"type": "reasoning", "summary": "Private child progress"},
+                {"type": "text", "text": "Private child result"},
+            ])},
+        }
+        yield {
+            "event": "on_tool_start",
+            "name": "browser_open",
+            "run_id": "child-browser-1",
+            "parent_ids": ["root-agent", "root-tools", "child-tool-1", "child-agent"],
+            "data": {"input": {"url": "https://example.com"}},
+        }
+        yield {
+            "event": "on_tool_end",
+            "name": "browser_open",
+            "run_id": "child-browser-1",
+            "parent_ids": ["root-agent", "root-tools", "child-tool-1", "child-agent"],
+            "data": {},
+        }
+        yield {
+            "event": "on_tool_end",
+            "name": "delegate_to_child_agent",
+            "run_id": "child-tool-1",
+            "parent_ids": ["root-agent", "root-tools"],
+            "data": {"output": "Private child result"},
+        }
+        yield {
+            "event": "on_chat_model_stream",
+            "run_id": "root-model-2",
+            "parent_ids": ["root-agent", "root-model"],
+            "data": {"chunk": SimpleNamespace(content_blocks=[
+                {"type": "reasoning", "summary": "Root summary"},
+                {"type": "text", "text": "Visible root result"},
+            ])},
+        }
+
+
+class InterleavedReasoningGraph:
+    async def astream_events(self, _input, version, **_kwargs):
+        assert version == "v2"
+        yield {
+            "event": "on_chat_model_stream",
+            "run_id": "model-run-1",
+            "data": {"chunk": SimpleNamespace(content_blocks=[
+                {"type": "reasoning", "summary": "Before tool"},
+            ])},
+        }
+        yield {
+            "event": "on_tool_start",
+            "run_id": "tool-run-1",
+            "name": "filesystem_read",
+            "data": {"input": {"path": "/workspace/README.md"}},
+        }
+        yield {
+            "event": "on_chat_model_stream",
+            "run_id": "model-run-2",
+            "data": {"chunk": SimpleNamespace(content_blocks=[
+                {"type": "reasoning", "summary": "After tool"},
+            ])},
+            }
+
+
+class IncompleteLifecycleGraph:
+    async def astream_events(self, _input, version, **_kwargs):
+        assert version == "v2"
+        yield {
+            "event": "on_chat_model_stream",
+            "data": {"chunk": SimpleNamespace(content_blocks=[
+                {
+                    "type": "server_tool_call",
+                    "name": "web_search",
+                    "id": "search-open",
+                    "args": {"query": "unfinished search"},
+                },
+                {
+                    "type": "server_tool_call",
+                    "name": "remote_mcp",
+                    "id": "github-open",
+                    "extras": {"server_label": "github", "tool_name": "search_repositories"},
+                    "args": {"query": "org:acme"},
+                },
+            ])},
+        }
+
+
+class ProviderErrorAfterActivityGraph:
+    async def astream_events(self, _input, version, **_kwargs):
+        assert version == "v2"
+        yield {
+            "event": "on_chat_model_stream",
+            "data": {"chunk": SimpleNamespace(content_blocks=[
+                {
+                    "type": "server_tool_call",
+                    "name": "remote_mcp",
+                    "id": "github-error",
+                    "extras": {"server_label": "github", "tool_name": "search_repositories"},
+                },
+            ])},
+        }
+        raise RuntimeError("provider stream broke")
 
 
 class ActivityStream:
@@ -187,7 +404,7 @@ class ActivityStream:
             "event": "on_tool_start",
             "name": "delegate_to_child_agent",
             "run_id": "child-1",
-            "data": {},
+            "data": {"input": {"task": "Compare the release options"}},
         }
         yield {
             "event": "on_tool_end",
@@ -307,13 +524,14 @@ def collect(stream):
 def test_stream_normalizes_reasoning_text_and_web_sources() -> None:
     events = collect(stream_model(FakeGraph(), []))
     assert [event["type"] for event in events] == [
-        "text.delta",
         "reasoning.delta",
         "step.started",
+        "text.delta",
+        "step.updated",
         "step.completed",
     ]
-    assert events[0]["data"]["delta"] == "Visible answer"
-    assert events[1]["data"]["delta"] == "Brief plan"
+    assert events[0]["data"]["delta"] == "Brief plan"
+    assert events[2]["data"]["delta"] == "Visible answer"
     assert events[-1]["data"]["step"]["status"] == "completed"
     assert events[-1]["data"]["step"]["sources"] == [
         {
@@ -323,6 +541,143 @@ def test_stream_normalizes_reasoning_text_and_web_sources() -> None:
             "domain": "example.com",
         }
     ]
+
+
+def test_stream_normalizes_hosted_github_mcp_calls_as_tool_activity() -> None:
+    events = collect(stream_model(GithubGraph(), []))
+
+    assert events == [
+        {
+            "type": "tool.started",
+            "data": {
+                "tool": {
+                    "id": "github-1",
+                    "name": "search_repositories",
+                    "label": "Searching repositories",
+                    "status": "in_progress",
+                    "target": "user:octocat",
+                }
+            },
+        },
+        {
+            "type": "tool.completed",
+            "data": {
+                "tool": {
+                    "id": "github-1",
+                    "name": "search_repositories",
+                    "label": "Searched repositories",
+                    "status": "completed",
+                    "target": "user:octocat",
+                }
+            },
+        },
+    ]
+
+
+def test_stream_reasoning_preserves_additive_deltas_and_has_a_segment_id() -> None:
+    events = collect(
+        stream_model(
+            AdditiveReasoningGraph(), [], config={"configurable": {"thread_id": "run-1"}}
+        )
+    )
+
+    assert events == [
+        {
+            "type": "reasoning.delta",
+            "data": {"delta": "Planning", "activity_id": "reasoning:run-1:1"},
+        },
+        {
+            "type": "reasoning.delta",
+            "data": {"delta": " carefully", "activity_id": "reasoning:run-1:1"},
+        },
+        {
+            "type": "reasoning.delta",
+            "data": {"delta": " carefully", "activity_id": "reasoning:run-1:1"},
+        },
+    ]
+
+
+def test_stream_keeps_reasoning_activities_distinct_across_model_invocations() -> None:
+    events = collect(stream_model(InterleavedReasoningGraph(), []))
+
+    assert [event["type"] for event in events] == [
+        "reasoning.delta",
+        "tool.started",
+        "reasoning.delta",
+    ]
+    assert events[0]["data"]["activity_id"] == "reasoning:model-run-1:1"
+    assert events[2]["data"]["activity_id"] == "reasoning:model-run-2:1"
+
+
+def test_stream_splits_one_model_reasoning_around_visible_tool_activity() -> None:
+    events = collect(stream_model(SameRunSegmentedReasoningGraph(), []))
+
+    assert [event["type"] for event in events] == [
+        "reasoning.delta",
+        "tool.started",
+        "tool.completed",
+        "reasoning.delta",
+    ]
+    assert events[0]["data"]["activity_id"] == "reasoning:model-run-1:1"
+    assert events[-1]["data"]["activity_id"] == "reasoning:model-run-1:2"
+
+
+def test_stream_exposes_child_lifecycle_without_leaking_descendant_activity() -> None:
+    events = collect(stream_model(NestedChildActivityGraph(), []))
+
+    assert [event["type"] for event in events] == [
+        "child.started",
+        "child.completed",
+        "reasoning.delta",
+        "text.delta",
+    ]
+    assert events[0]["data"]["child"]["detail"] == "Inspect one repository"
+    assert events[1]["data"]["child"]["status"] == "completed"
+    assert events[2]["data"] == {
+        "delta": "Root summary",
+        "activity_id": "reasoning:root-model-2:1",
+    }
+    assert events[3]["data"]["delta"] == "Visible root result"
+
+
+def test_stream_closes_incomplete_provider_activities_on_normal_return() -> None:
+    events = collect(stream_model(IncompleteLifecycleGraph(), []))
+
+    assert [event["type"] for event in events] == [
+        "step.started",
+        "tool.started",
+        "step.completed",
+        "tool.completed",
+    ]
+    assert events[2]["data"]["step"]["status"] == "completed"
+    assert events[3]["data"]["tool"]["status"] == "completed"
+
+
+def test_stream_closes_incomplete_provider_activities_before_reraising_error() -> None:
+    async def run() -> list[dict[str, object]]:
+        yielded: list[dict[str, object]] = []
+        with pytest.raises(RuntimeError, match="provider stream broke"):
+            async for event in stream_model(ProviderErrorAfterActivityGraph(), []):
+                yielded.append(event)
+        return yielded
+
+    events = anyio.run(run)
+    assert events[-1]["type"] == "tool.completed"
+    assert events[-1]["data"]["tool"]["status"] == "failed"  # type: ignore[index]
+
+
+def test_stream_normalizes_responses_api_mcp_call_without_exposing_output() -> None:
+    events = collect(stream_model(GithubMcpGraph(), []))
+
+    assert [event["type"] for event in events] == ["tool.completed"]
+    assert events[0]["data"]["tool"] == {
+        "id": "mcp-github-1",
+        "name": "get_file_contents",
+        "label": "Read from GitHub",
+        "status": "completed",
+        "target": "acme/atlas/README.md @ refs/heads/main",
+    }
+    assert "private repository contents" not in json.dumps(events)
 
 
 def test_recursion_limit_emits_saved_partial_answer_as_truthful_completion() -> None:
@@ -401,6 +756,99 @@ def test_plan_tool_and_child_events_are_normalized() -> None:
     }
     assert events[-1]["data"]["child"]["label"] == "Delegated a task"
     assert events[-1]["data"]["child"]["status"] == "completed"
+    assert events[-2]["data"]["child"]["detail"] == "Compare the release options"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "filesystem_list",
+        "filesystem_read",
+        "filesystem_write",
+        "shell_exec",
+        "browser_open",
+        "browser_snapshot",
+        "browser_click",
+        "browser_type",
+        "browser_press",
+        "browser_close",
+        "search_repositories",
+        "get_file_contents",
+    ],
+)
+def test_known_visible_tools_never_use_generic_labels(name: str) -> None:
+    generic = {"Using a tool", "Used a tool", "Could not use a tool"}
+
+    assert _tool_label(name, "in_progress") not in generic
+    assert _tool_label(name, "completed") not in generic
+    assert _tool_label(name, "failed") not in generic
+
+
+def test_browser_key_activity_names_the_key_without_exposing_page_input() -> None:
+    event = _tool_event(
+        {
+            "event": "on_tool_start",
+            "name": "browser_press",
+            "run_id": "browser-key",
+            "data": {"input": {"key": "Escape"}},
+        }
+    )
+
+    assert event is not None
+    assert event.data["tool"] == {
+        "id": "browser-key",
+        "name": "browser_press",
+        "label": "Pressing a key",
+        "status": "in_progress",
+        "target": "Escape",
+    }
+
+
+def test_github_tool_events_include_safe_inspectable_targets() -> None:
+    search = _tool_event(
+        {
+            "event": "on_tool_start",
+            "name": "search_repositories",
+            "run_id": "github-search",
+            "data": {"input": {"query": "org:acme workspace launch"}},
+        }
+    )
+    read = _tool_event(
+        {
+            "event": "on_tool_end",
+            "name": "get_file_contents",
+            "run_id": "github-read",
+            "data": {
+                "input": {
+                    "owner": "acme",
+                    "repo": "atlas",
+                    "path": "/product/launch-brief.md",
+                    "ref": "refs/heads/main",
+                }
+            },
+        }
+    )
+
+    assert search is not None
+    assert search.data["tool"]["target"] == "org:acme workspace launch"
+    assert read is not None
+    assert read.data["tool"]["target"] == (
+        "acme/atlas/product/launch-brief.md @ refs/heads/main"
+    )
+
+
+def test_load_skill_wrapper_is_hidden_in_favor_of_skill_lifecycle_events() -> None:
+    assert (
+        _tool_event(
+            {
+                "event": "on_tool_start",
+                "name": "load_skill",
+                "run_id": "load-github",
+                "data": {"input": {"skill_id": "github"}},
+            }
+        )
+        is None
+    )
 
 
 def test_browser_tool_events_project_truthful_durable_status() -> None:
@@ -750,6 +1198,47 @@ def test_provider_constructors_receive_only_supported_settings() -> None:
     assert provider_builtin_tools(openai_settings) == [{"type": "web_search"}]
 
     assert resolve_model_settings("gpt-5.6-terra", "none", "standard").reasoning_effort == "none"
+
+
+def test_connected_github_context_routes_account_requests_to_mcp() -> None:
+    created: dict[str, object] = {}
+    secret = "github-secret"
+
+    def create(**kwargs):
+        created.update(kwargs)
+        return object()
+
+    with (
+        patch(
+            "my_bot_ai.features.agent.service.build_chat_model",
+            return_value=(
+                object(),
+                resolve_model_settings("gpt-5.6-luna", "medium", "standard"),
+            ),
+        ),
+        patch("my_bot_ai.features.agent.service.provider_builtin_tools", return_value=[]),
+        patch("my_bot_ai.features.agent.service.create_agent", side_effect=create),
+    ):
+        build_model(
+            Settings(environment="test"),
+            "gpt-5.6-luna",
+            "medium",
+            "standard",
+            run_id=RUN,
+            checkpointer=object(),
+            github_mcp=GithubMcpConfig(
+                server_url="https://mcp.github.example",
+                authorization=secret,
+                account_login="octocat",
+                allowed_tools=["search_repositories", "get_file_contents"],
+            ),
+        )
+
+    prompt = str(created["system_prompt"])
+    assert "load_skill with skill_id github" in prompt
+    assert "do not use web_search or the browser" in prompt
+    assert "user:octocat" in prompt
+    assert secret not in prompt
 
 
 def test_child_agents_are_recursive_configurable_and_checkpoint_led() -> None:

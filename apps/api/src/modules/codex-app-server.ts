@@ -7,6 +7,7 @@ import {
   ProviderConnectionError,
   type ProviderConnection,
   type ProviderConnectionAdapter,
+  type ProviderConnectionContext,
   type ProviderLogin,
   type ProviderLoginStatus,
   type ProviderRateLimitWindow,
@@ -150,7 +151,6 @@ class CodexAppServerClient {
   private constructor(
     private readonly child: ChildProcessWithoutNullStreams,
     private readonly requestTimeoutMs: number,
-    private readonly loginMode: 'browser' | 'device',
   ) {
     const lines = createInterface({ input: child.stdout })
     lines.on('line', (line) => this.receive(line))
@@ -163,7 +163,6 @@ class CodexAppServerClient {
     binary: string
     home: string
     requestTimeoutMs: number
-    loginMode: 'browser' | 'device'
     spawnCodex: SpawnCodex
   }) {
     await mkdir(options.home, { recursive: true, mode: 0o700 })
@@ -187,21 +186,20 @@ class CodexAppServerClient {
     const client = new CodexAppServerClient(
       child,
       options.requestTimeoutMs,
-      options.loginMode,
     )
     await client.request('initialize', {
-      clientInfo: { name: 'my-bot', title: 'myBot', version: '0.1.0' },
+      clientInfo: { name: 'my-bot', title: 'Bot', version: '0.1.0' },
       capabilities: { experimentalApi: false, requestAttestation: false },
     })
     client.notify('initialized')
     return client
   }
 
-  async connection(): Promise<CodexConnection> {
+  async connection(loginMode: 'browser' | 'device'): Promise<CodexConnection> {
     if (this.activeLogin && !this.loginResults.has(this.activeLogin.loginId)) {
       return {
         status: 'connecting',
-        loginMode: this.loginMode,
+        loginMode: this.activeLogin.type === 'browser' ? 'browser' : 'device',
         account: null,
         limits: null,
       }
@@ -212,7 +210,7 @@ class CodexAppServerClient {
     if (response.account?.type !== 'chatgpt') {
       return {
         status: 'disconnected',
-        loginMode: this.loginMode,
+        loginMode,
         account: null,
         limits: null,
       }
@@ -232,7 +230,7 @@ class CodexAppServerClient {
     }
     return {
       status: 'connected',
-      loginMode: this.loginMode,
+      loginMode,
       account: {
         email:
           typeof response.account.email === 'string'
@@ -247,8 +245,8 @@ class CodexAppServerClient {
     }
   }
 
-  async startLogin(): Promise<CodexLogin> {
-    const current = await this.connection()
+  async startLogin(loginMode: 'browser' | 'device'): Promise<CodexLogin> {
+    const current = await this.connection(loginMode)
     if (current.status === 'connected') {
       throw new CodexConnectionError(
         'codex_already_connected',
@@ -259,15 +257,14 @@ class CodexAppServerClient {
     if (this.activeLogin && !this.loginResults.has(this.activeLogin.loginId))
       return this.activeLogin
     const params =
-      this.loginMode === 'browser'
+      loginMode === 'browser'
         ? {
             type: 'chatgpt',
-            useHostedLoginSuccessPage: true,
-            appBrand: 'chatgpt',
+            useHostedLoginSuccessPage: false,
           }
         : { type: 'chatgptDeviceCode' }
     const response = asObject(await this.request('account/login/start', params))
-    if (this.loginMode === 'browser') {
+    if (loginMode === 'browser') {
       if (
         response?.type !== 'chatgpt' ||
         typeof response.loginId !== 'string' ||
@@ -315,7 +312,9 @@ class CodexAppServerClient {
         message: 'Unable to connect the OpenAI account. Try again.',
       }
     }
-    const connection = await this.connection()
+    const connection = await this.connection(
+      this.activeLogin.type === 'browser' ? 'browser' : 'device',
+    )
     if (connection.status !== 'connected') return { status: 'pending' }
     this.activeLogin = undefined
     this.loginResults.delete(loginId)
@@ -450,7 +449,8 @@ export class CodexAppServerManager implements CodexConnectionService {
     },
   ) {}
 
-  async connection(userId: string) {
+  async connection(userId: string, context?: ProviderConnectionContext) {
+    const loginMode = this.loginMode(context)
     const key = this.userKey(userId)
     if (!this.clients.has(key)) {
       try {
@@ -458,17 +458,17 @@ export class CodexAppServerManager implements CodexConnectionService {
       } catch {
         return {
           status: 'disconnected',
-          loginMode: this.options.loginMode,
+          loginMode,
           account: null,
           limits: null,
         } as const
       }
     }
-    return this.withClient(userId, (client) => client.connection())
+    return this.withClient(userId, (client) => client.connection(loginMode))
   }
 
-  async startLogin(userId: string) {
-    return this.withClient(userId, (client) => client.startLogin())
+  async startLogin(userId: string, context?: ProviderConnectionContext) {
+    return this.withClient(userId, (client) => client.startLogin(this.loginMode(context)))
   }
 
   async loginStatus(userId: string, loginId: string) {
@@ -512,7 +512,6 @@ export class CodexAppServerManager implements CodexConnectionService {
       binary: this.options.binary,
       home,
       requestTimeoutMs: this.options.requestTimeoutMs ?? 15_000,
-      loginMode: this.options.loginMode,
       spawnCodex:
         this.options.spawnCodex ??
         ((command, args, options) =>
@@ -572,6 +571,12 @@ export class CodexAppServerManager implements CodexConnectionService {
     if (!managed) return
     clearTimeout(managed.idleTimer)
     this.clients.delete(key)
+  }
+
+  private loginMode(context?: ProviderConnectionContext) {
+    return context?.callbackTarget === 'desktop'
+      ? 'browser' as const
+      : this.options.loginMode
   }
 
   private userKey(userId: string) {

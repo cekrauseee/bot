@@ -32,9 +32,15 @@ export type ProviderLoginStatus =
   | { status: 'connected'; connection: ProviderConnection }
   | { status: 'failed'; message: string }
 
+export type ProviderConnectionContext = {
+  callbackTarget: 'web' | 'desktop'
+}
+
+export type ProviderLoginContext = ProviderConnectionContext
+
 export interface ProviderConnectionAdapter {
-  connection(userId: string): Promise<ProviderConnection>
-  startLogin(userId: string): Promise<ProviderLogin>
+  connection(userId: string, context?: ProviderConnectionContext): Promise<ProviderConnection>
+  startLogin(userId: string, context?: ProviderLoginContext): Promise<ProviderLogin>
   loginStatus(userId: string, loginId: string): Promise<ProviderLoginStatus>
   cancelLogin(userId: string, loginId: string): Promise<void>
   disconnect(userId: string): Promise<void>

@@ -8,18 +8,19 @@ if (process.platform !== 'darwin') throw new Error('desktop:install currently su
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const applications = path.join(os.homedir(), 'Applications')
-const appName = 'myBot.app'
+const appName = 'Bot.app'
+const legacyAppName = 'myBot.app'
 const destination = path.join(applications, appName)
 let runningOutput = ''
-try { runningOutput = execFileSync('pgrep', ['-f', `${appName}/Contents/MacOS/`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) } catch { runningOutput = '' }
+try { runningOutput = execFileSync('pgrep', ['-f', `(?:${appName}|${legacyAppName})/Contents/MacOS/`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) } catch { runningOutput = '' }
 const running = runningOutput.trim().split(/\s+/).filter(Boolean)
-if (running.length > 1) throw new Error('Refusing install while multiple myBot.app processes are running')
-if (running.length === 1) throw new Error('Refusing install while myBot.app is running; quit it first')
+if (running.length > 1) throw new Error('Refusing install while multiple Bot.app or myBot.app processes are running')
+if (running.length === 1) throw new Error('Refusing install while Bot.app or myBot.app is running; quit it first')
 
 execFileSync('npm', ['run', 'desktop:package'], { cwd: projectRoot, stdio: 'inherit' })
 const outRoot = path.join(projectRoot, 'apps/desktop/out')
 const candidates = (await readdir(outRoot, { withFileTypes: true }))
-  .filter((entry) => entry.isDirectory() && entry.name.startsWith('myBot-darwin'))
+  .filter((entry) => entry.isDirectory() && entry.name.startsWith('Bot-darwin'))
   .map((entry) => path.join(outRoot, entry.name, appName))
 let source
 for (const candidate of candidates) {
@@ -27,7 +28,7 @@ for (const candidate of candidates) {
 }
 if (!source) throw new Error(`No packaged ${appName} found under apps/desktop/out`)
 await mkdir(applications, { recursive: true })
-const staging = path.join(applications, `.myBot.install-${process.pid}`)
+const staging = path.join(applications, `.Bot.install-${process.pid}`)
 await cp(source, staging, {
   recursive: true,
   errorOnExist: true,
@@ -45,6 +46,11 @@ try {
 if (await access(destination).then(() => true, () => false)) {
   const backup = `${destination}.backup-${new Date().toISOString().replace(/[:.]/g, '-')}`
   await rename(destination, backup)
+}
+const legacyDestination = path.join(applications, legacyAppName)
+if (await access(legacyDestination).then(() => true, () => false)) {
+  const backup = `${legacyDestination}.backup-${new Date().toISOString().replace(/[:.]/g, '-')}`
+  await rename(legacyDestination, backup)
 }
 await rename(staging, destination)
 console.log(`Installed ${destination}`)

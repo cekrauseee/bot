@@ -22,6 +22,6 @@ def test_health_endpoint_has_no_api_prefix() -> None:
 def test_application_factory_accepts_typed_settings() -> None:
     application = create_app(Settings(environment="test"))
 
-    assert application.title == "myBot AI"
+    assert application.title == "Bot AI"
     assert application.state.settings.service_name == "ai"
-    assert app.title == "myBot AI"
+    assert app.title == "Bot AI"

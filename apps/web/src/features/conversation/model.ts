@@ -35,6 +35,7 @@ export type ProcessActivity =
       deletions?: number
       detail?: string
       id: string
+      label?: string
       status?: ProcessActivityStatus
       target?: string
       type: "tool"

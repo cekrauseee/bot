@@ -50,6 +50,9 @@ GRAPH_RECURSION_MARGIN = 4
 # two additional steps for the model's final summary and boundary handling.
 MAX_TOOL_CALLS_PER_RUN = max(1, (GRAPH_RECURSION_LIMIT - GRAPH_RECURSION_MARGIN - 2) // 2)
 MAX_TOOL_FAILURES_PER_RUN = 8
+GITHUB_TOOL_NAMES = frozenset(
+    spec.id for spec in DEFAULT_TOOL_REGISTRY.list() if spec.connection == "github"
+)
 CheckpointPhase = Literal["absent", "runnable", "completed"]
 _DEFAULT_INVOCATION = object()
 
@@ -82,6 +85,13 @@ def _blocks(chunk: Any) -> list[dict[str, Any]]:
     return [block for block in blocks or [] if isinstance(block, dict)]
 
 
+def _raw_blocks(message: Any) -> list[dict[str, Any]]:
+    content = getattr(message, "content", [])
+    if isinstance(content, dict):
+        return [content]
+    return [block for block in content or [] if isinstance(block, dict)]
+
+
 def _explicit_summary_values(value: Any) -> list[str]:
     """Extract text only from fields explicitly labelled as summaries."""
 
@@ -98,25 +108,26 @@ def _explicit_summary_values(value: Any) -> list[str]:
     return []
 
 
-def _reasoning_summaries(chunk: Any, provider: ProviderName | None) -> list[str]:
-    """Return explicit provider summaries without exposing raw reasoning."""
+def _reasoning_block_summaries(block: dict[str, Any]) -> list[str]:
+    """Return additive summary fragments from one ordered content block."""
+
+    summaries = _explicit_summary_values(block.get("summary"))
+    for key in ("reasoning", "text"):
+        value = block.get(key)
+        if isinstance(value, str) and value:
+            summaries.append(value)
+    return summaries
+
+
+def _metadata_reasoning_summaries(chunk: Any) -> list[str]:
+    """Return legacy summary fragments when no ordered reasoning block exists."""
 
     summaries: list[str] = []
     metadata = getattr(chunk, "response_metadata", {}) or {}
     additional = getattr(chunk, "additional_kwargs", {}) or {}
     for source in (metadata, additional):
         summaries.extend(_explicit_summary_values(source.get("reasoning_summary")))
-
-    for block in _blocks(chunk):
-        if block.get("type") != "reasoning":
-            continue
-        summaries.extend(_explicit_summary_values(block.get("summary")))
-        for key in ("reasoning", "text"):
-            value = block.get(key)
-            if isinstance(value, str) and value:
-                summaries.append(value)
-
-    return list(dict.fromkeys(summaries))
+    return summaries
 
 
 def _sources(value: Any) -> list[dict[str, str]]:
@@ -175,10 +186,25 @@ def _tool_label(name: str, status: str) -> str:
             "Entered text on the page",
             "Could not enter text on the page",
         ),
+        "browser_press": (
+            "Pressing a key",
+            "Pressed a key",
+            "Could not press a key",
+        ),
         "browser_close": (
             "Closing the browser",
             "Closed the browser",
             "Could not close the browser",
+        ),
+        "search_repositories": (
+            "Searching repositories",
+            "Searched repositories",
+            "Could not search repositories",
+        ),
+        "get_file_contents": (
+            "Reading from GitHub",
+            "Read from GitHub",
+            "Could not read from GitHub",
         ),
     }
     pending, completed, error = labels.get(
@@ -192,12 +218,28 @@ def _tool_target(name: str, data: dict[str, Any]) -> str | None:
     tool_input = data.get("input")
     if not isinstance(tool_input, dict):
         return None
+    if name == "get_file_contents":
+        owner = tool_input.get("owner")
+        repo = tool_input.get("repo")
+        path = tool_input.get("path")
+        revision = tool_input.get("ref") or tool_input.get("sha")
+        if not isinstance(owner, str) or not isinstance(repo, str):
+            return None
+        location = f"{owner}/{repo}"
+        if isinstance(path, str) and path:
+            location = f"{location}/{path.lstrip('/')}"
+        if isinstance(revision, str) and revision:
+            location = f"{location} @ {revision}"
+        return location[:4_096]
     field = {
         "filesystem_list": "path",
         "filesystem_read": "path",
         "filesystem_write": "path",
         "shell_exec": "command",
         "browser_open": "url",
+        "browser_press": "key",
+        "delegate_to_child_agent": "task",
+        "search_repositories": "query",
     }.get(name)
     value = tool_input.get(field) if field else None
     return value[:4_096] if isinstance(value, str) and value else None
@@ -234,6 +276,93 @@ def _object_output(value: Any) -> dict[str, Any] | None:
     except ValueError:
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def _server_tool_arguments(block: dict[str, Any]) -> dict[str, Any]:
+    args = block.get("args")
+    if isinstance(args, dict):
+        return args
+    arguments = block.get("arguments")
+    if not isinstance(arguments, str):
+        return {}
+    try:
+        parsed = json.loads(arguments)
+    except ValueError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _hosted_tool_events(
+    block: dict[str, Any],
+    hosted_tools: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    block_type = block.get("type")
+    block_id = str(block.get("id") or block.get("tool_call_id") or "")
+    existing_tool = hosted_tools.get(block_id)
+    extras = block.get("extras")
+    extras = extras if isinstance(extras, dict) else {}
+    server_label = block.get("server_label") or extras.get("server_label")
+    raw_name = str(block.get("name", "")).lower()
+    if raw_name == "remote_mcp":
+        raw_name = str(extras.get("tool_name", "")).lower()
+    tool_name = raw_name or str((existing_tool or {}).get("name", ""))
+    if server_label not in {None, "github"}:
+        return []
+    if tool_name not in GITHUB_TOOL_NAMES:
+        return []
+
+    tool_id = block_id or f"github-tool-{len(hosted_tools) + 1}"
+    existing_tool = hosted_tools.get(tool_id)
+    status = "in_progress"
+    if block_type in {"mcp_call", "server_tool_result"}:
+        result_status = str(block.get("status", "completed")).lower()
+        if result_status in {"error", "failed", "incomplete"}:
+            status = "failed"
+        elif result_status in {"completed", "success"}:
+            status = "completed"
+
+    if (
+        existing_tool
+        and existing_tool.get("status") in {"completed", "failed"}
+        and status == "in_progress"
+    ):
+        # A late provider chunk cannot reopen a terminal lifecycle.
+        return []
+
+    target = _tool_target(tool_name, {"input": _server_tool_arguments(block)})
+    tool = {
+        **(existing_tool or {}),
+        "id": tool_id,
+        "name": tool_name,
+        "label": _tool_label(tool_name, status),
+        "status": status,
+    }
+    if target:
+        tool["target"] = target
+    if status == "failed":
+        tool["detail"] = "GitHub could not complete this action."
+
+    if existing_tool == tool:
+        # A streamed chunk is itself a lifecycle observation even when its
+        # public projection has not changed yet. Keep the update visible so a
+        # consumer can distinguish started → updated → completed.
+        if block_type == "server_tool_call_chunk":
+            return [{"type": "tool.updated", "data": {"tool": tool}}]
+        return []
+    hosted_tools[tool_id] = tool
+    # Responses API can deliver the first observation only after the hosted
+    # call has finished. A terminal-only lifecycle is more truthful than a
+    # synthetic start immediately followed by completion.
+    if status in {"completed", "failed"} and not existing_tool:
+        return [{"type": "tool.completed", "data": {"tool": tool}}]
+    event_type = (
+        "tool.completed"
+        if status in {"completed", "failed"}
+        else "tool.updated"
+        if existing_tool
+        else "tool.started"
+    )
+    return [{"type": event_type, "data": {"tool": tool}}]
 
 
 def _tool_failure(output: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -458,7 +587,7 @@ def _tool_event(event: dict[str, Any]) -> NormalizedEvent | None:
             data={
                 "skill": {
                     key: skill[key]
-                    for key in ("id", "name", "detail", "status")
+                    for key in ("id", "skill_id", "name", "detail", "status")
                     if key in skill
                 }
             },
@@ -506,6 +635,10 @@ def _tool_event(event: dict[str, Any]) -> NormalizedEvent | None:
         if kind == "on_tool_start" and plan:
             return NormalizedEvent(type="plan.updated", data={"plan": plan})
         return None
+    if name == "load_skill":
+        # The tool publishes dedicated skill.started/completed events. Keeping
+        # its generic wrapper would show the same action twice in the process.
+        return None
 
     failure = _output_failure(data.get("output"))
     status = {
@@ -529,6 +662,9 @@ def _tool_event(event: dict[str, Any]) -> NormalizedEvent | None:
             if status == "failed"
             else "Delegated a task"
         )
+        task = child.pop("target", None)
+        if isinstance(task, str) and "detail" not in child:
+            child["detail"] = task
         return NormalizedEvent(type=event_type, data={"child": child})
 
     event_type = {
@@ -621,8 +757,66 @@ async def stream_model(
     if invocation is _DEFAULT_INVOCATION:
         invocation = {"messages": messages}
     searches: dict[str, dict[str, Any]] = {}
+    hosted_tools: dict[str, dict[str, Any]] = {}
     pending_sources: list[dict[str, str]] = []
     emitted_text: list[str] = []
+    reasoning_activity_fallback = "reasoning"
+    if config is not None:
+        configurable = config.get("configurable")
+        if isinstance(configurable, dict) and isinstance(configurable.get("thread_id"), str):
+            reasoning_activity_fallback = configurable["thread_id"]
+    reasoning_segment_counts: dict[str, int] = {}
+    active_reasoning_key: str | None = None
+    active_reasoning_id: str | None = None
+    child_delegation_runs: set[str] = set()
+
+    def close_reasoning_segment() -> None:
+        nonlocal active_reasoning_key, active_reasoning_id
+        active_reasoning_key = None
+        active_reasoning_id = None
+
+    def reasoning_event(summary: str, event: dict[str, Any]) -> dict[str, Any]:
+        """Give each contiguous visible reasoning phase a stable ordered identity."""
+
+        nonlocal active_reasoning_key, active_reasoning_id
+        provider_run_id = event.get("run_id")
+        key = (
+            provider_run_id
+            if isinstance(provider_run_id, str) and provider_run_id
+            else reasoning_activity_fallback
+        )
+        if len(key) > 160:
+            key = sha256(key.encode()).hexdigest()[:32]
+        if active_reasoning_key != key or active_reasoning_id is None:
+            segment = reasoning_segment_counts.get(key, 0) + 1
+            reasoning_segment_counts[key] = segment
+            active_reasoning_key = key
+            active_reasoning_id = f"reasoning:{key}:{segment}"
+        return {
+            "type": "reasoning.delta",
+            "data": {"delta": summary, "activity_id": active_reasoning_id},
+        }
+
+    def close_active_activities(status: Literal["completed", "failed"]):
+        """Close provider activities that never delivered their terminal block."""
+
+        for search in list(searches.values()):
+            if search.get("status") != "in_progress":
+                continue
+            search["status"] = status
+            if status == "failed":
+                search["detail"] = "The web search could not complete."
+            yield {"type": "step.completed", "data": {"step": search}}
+
+        for tool in list(hosted_tools.values()):
+            if tool.get("status") != "in_progress":
+                continue
+            tool["status"] = status
+            tool["label"] = _tool_label(str(tool.get("name", "tool")), status)
+            if status == "failed":
+                tool["detail"] = "The hosted tool could not complete."
+            yield {"type": "tool.completed", "data": {"tool": tool}}
+
     stream_kwargs: dict[str, Any] = {"version": "v2", "durability": "sync"}
     if config is not None:
         stream_kwargs["config"] = config
@@ -632,12 +826,43 @@ async def stream_model(
             data = event.get("data") or {}
             if not isinstance(data, dict):
                 data = {}
+            name = _event_name(event, data)
+            parent_ids = event.get("parent_ids")
+            parents = parent_ids if isinstance(parent_ids, (list, tuple)) else []
+            inside_child = any(
+                isinstance(parent_id, str) and parent_id in child_delegation_runs
+                for parent_id in parents
+            )
+            if inside_child:
+                # Child execution is represented by its parent child.started /
+                # child.completed lifecycle. Its internal model, tool, and
+                # browser events must never become root response activity.
+                continue
+            if kind == "on_tool_start" and name == "delegate_to_child_agent":
+                delegation_run_id = event.get("run_id")
+                if isinstance(delegation_run_id, str) and delegation_run_id:
+                    child_delegation_runs.add(delegation_run_id)
+
             chunk = data.get("chunk")
             if kind == "on_chat_model_stream" and chunk is not None:
                 blocks = _blocks(chunk)
                 chunk_emitted_text = False
+                has_reasoning_block = any(block.get("type") == "reasoning" for block in blocks)
+                if not has_reasoning_block:
+                    for summary in _metadata_reasoning_summaries(chunk):
+                        if summary:
+                            yield reasoning_event(summary, event)
+
                 for block in blocks:
-                    if block.get("type") == "text" and block.get("text"):
+                    block_type = block.get("type")
+                    if block_type == "reasoning":
+                        for summary in _reasoning_block_summaries(block):
+                            if summary:
+                                yield reasoning_event(summary, event)
+                        continue
+
+                    if block_type == "text" and block.get("text"):
+                        close_reasoning_segment()
                         chunk_emitted_text = True
                         delta = str(block["text"])
                         emitted_text.append(delta)
@@ -646,6 +871,7 @@ async def stream_model(
                     if annotations:
                         citations = _sources(annotations)
                         if citations and searches:
+                            close_reasoning_segment()
                             search_id = next(reversed(searches))
                             searches[search_id]["sources"] = citations
                             yield {
@@ -654,30 +880,22 @@ async def stream_model(
                             }
                         elif citations:
                             pending_sources = citations
-                if not chunk_emitted_text:
-                    plain_text = getattr(chunk, "content", "")
-                    if isinstance(plain_text, str) and plain_text:
-                        emitted_text.append(plain_text)
-                        yield {"type": "text.delta", "data": {"delta": plain_text}}
-
-                for summary in _reasoning_summaries(chunk, provider):
-                    yield {"type": "reasoning.delta", "data": {"delta": summary}}
-
-                for block in blocks:
-                    block_type = block.get("type")
                     if block_type not in {
+                        "mcp_call",
                         "server_tool_call",
                         "server_tool_call_chunk",
                         "server_tool_result",
                     }:
                         continue
+                    close_reasoning_segment()
                     block_id = str(block.get("id") or block.get("tool_call_id") or "")
                     name = str(block.get("name", "")).lower()
-                    if (
-                        "web_search" not in name
-                        and block_id not in searches
-                        and block_type not in {"server_tool_call", "server_tool_call_chunk"}
-                    ):
+                    is_web_search = "web_search" in name or block_id in searches
+                    if not is_web_search:
+                        hosted_event = _hosted_tool_events(block, hosted_tools)
+                        if hosted_event is not None:
+                            for normalized in hosted_event:
+                                yield normalized
                         continue
                     search_id = block_id or "web-search"
                     existing = searches.get(search_id)
@@ -705,9 +923,31 @@ async def stream_model(
                     yield {"type": event_type, "data": {"step": step}}
                     continue
 
+                if not chunk_emitted_text:
+                    plain_text = getattr(chunk, "content", "")
+                    if isinstance(plain_text, str) and plain_text:
+                        close_reasoning_segment()
+                        emitted_text.append(plain_text)
+                        yield {"type": "text.delta", "data": {"delta": plain_text}}
+
+            if kind == "on_chat_model_end":
+                for block in _raw_blocks(data.get("output")):
+                    if block.get("type") != "mcp_call":
+                        continue
+                    close_reasoning_segment()
+                    hosted_event = _hosted_tool_events(block, hosted_tools)
+                    if hosted_event is not None:
+                        for normalized in hosted_event:
+                            yield normalized
+
             normalized_tool = _tool_event(event)
             if normalized_tool is not None:
+                if normalized_tool.type != "browser.frame":
+                    close_reasoning_segment()
                 yield normalized_tool.model_dump(mode="json")
+        close_reasoning_segment()
+        for normalized in close_active_activities("completed"):
+            yield normalized
     except GraphRecursionError:
         # Recursion is an execution boundary, not an upstream provider failure.
         # Read the durable checkpoint and finish with whatever answer was saved.
@@ -716,6 +956,9 @@ async def stream_model(
             with suppress(Exception):
                 partial = _checkpoint_content(await graph.aget_state(config))
         already_emitted = "".join(emitted_text)
+        close_status = "completed" if partial or already_emitted else "failed"
+        for normalized in close_active_activities(close_status):
+            yield normalized
         if partial and partial.startswith(already_emitted) and len(partial) > len(already_emitted):
             yield {"type": "text.delta", "data": {"delta": partial[len(already_emitted):]}}
         if partial or already_emitted:
@@ -744,6 +987,17 @@ async def stream_model(
                 },
             }
         return
+    except asyncio.CancelledError:
+        raise
+    except GeneratorExit:
+        raise
+    except Exception:
+        # Preserve the original provider exception for router classification,
+        # but do not leave a visible tool/search row active in the terminal
+        # projection.
+        for normalized in close_active_activities("failed"):
+            yield normalized
+        raise
 def _result_text(result: Any) -> str:
     messages = result.get("messages", []) if isinstance(result, dict) else []
     if not messages:
@@ -925,6 +1179,17 @@ def build_model(
             system_prompt += (
                 " If required information is missing, report the smallest concrete blocker "
                 "to the parent agent."
+            )
+        if depth == 0 and github_mcp is not None:
+            account_login = json.dumps(github_mcp.account_login)
+            system_prompt += (
+                " A connected GitHub account is available with login "
+                f"{account_login}. For requests about that account, its repositories, or "
+                "repository contents, call load_skill with skill_id github before the first "
+                "GitHub MCP call in this run. Then use the GitHub MCP tools directly; do not "
+                "use web_search or the browser as a precursor or substitute when those tools "
+                "can answer the request. For requests for 'my repositories', search with the "
+                f"exact qualifier user:{github_mcp.account_login}."
             )
         if depth == 0 and current_task_plan:
             serialized_plan = json.dumps(

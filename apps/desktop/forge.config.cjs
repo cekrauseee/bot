@@ -16,7 +16,7 @@ module.exports = {
     },
     prune: false,
     icon: path.resolve(__dirname, 'assets/icon'),
-    protocols: [{ name: 'myBot authentication', schemes: ['mybot'] }],
+    protocols: [{ name: 'Bot authentication', schemes: ['mybot'] }],
     // Electron Packager accepts source paths here (not electron-builder's
     // { from, to } objects). The directory basename becomes Resources/dist.
     extraResource: [
@@ -38,8 +38,8 @@ module.exports = {
     },
   }],
   makers: [
-    { name: '@electron-forge/maker-squirrel', config: { name: 'myBot' } },
+    { name: '@electron-forge/maker-squirrel', config: { name: 'Bot' } },
     { name: '@electron-forge/maker-zip', platforms: ['darwin', 'linux'] },
-    { name: '@electron-forge/maker-dmg', config: { name: 'myBot' } },
+    { name: '@electron-forge/maker-dmg', config: { name: 'Bot' } },
   ],
 }

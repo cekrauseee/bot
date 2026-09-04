@@ -65,6 +65,8 @@ import {
 } from './logger.js'
 
 const DESKTOP_RENDERER_ORIGIN = 'app://mybot'
+export const AGENT_RUN_SOCKET_RECONCILE_INTERVAL_MS = 1_000
+export const ACTIVE_RUN_DISCOVERY_RECONCILE_INTERVAL_MS = 5_000
 
 export type Services = {
   database: Database
@@ -609,7 +611,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id', 'X-Correlation-Id'],
       exposeHeaders: ['X-Request-Id', 'X-Correlation-Id'],
     }))
-    .use(openapi({ documentation: { info: { title: 'myBot API', version: '0.1.0' } } }))
+    .use(openapi({ documentation: { info: { title: 'Bot API', version: '0.1.0' } } }))
     .onError(({ error, request, route, set }) => {
       const context = requestContexts.get(request)
       if (context) {
@@ -815,7 +817,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     const state = verifySignedValue(cookieValue(request, oauthStateCookieName), settings.sessionSecret)
     try {
       const profile = await services.google.callback(query, state)
-      const issued = await services.database.transaction(async (db) => {
+      const authenticated = await services.database.transaction(async (db) => {
         const repository = new AuthRepository(db)
         const user = await repository.getOrCreateGoogleUser({
           providerSubject: profile.subject,
@@ -825,14 +827,21 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
           avatarUrl: profile.avatarUrl,
           providerEmail: profile.email,
         })
-        return services.sessions.issue(repository, user.id)
+        return {
+          userId: user.id,
+          session: await services.sessions.issue(repository, user.id),
+        }
       })
       const transactionId = cookieValue(request, desktopTransactionCookieName)
+      const desktopCompletion = transactionId
+        ? await services.desktopAuth?.complete(transactionId, authenticated.userId)
+        : undefined
+      if (transactionId && !desktopCompletion) {
+        throw new AuthError('desktop_auth_unavailable', 'Desktop sign-in is unavailable.', 503)
+      }
       set.status = 303
-      set.headers.Location = transactionId
-        ? `${settings.webOrigin}/sign?desktop_transaction=${encodeURIComponent(transactionId)}`
-        : `${settings.webOrigin}/`
-      set.headers['set-cookie'] = [services.sessions.cookie(issued.token), clearOauthStateCookie(), `${desktopTransactionCookieName}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax`] as any
+      set.headers.Location = desktopCompletion?.callbackUrl ?? `${settings.webOrigin}/`
+      set.headers['set-cookie'] = [services.sessions.cookie(authenticated.session.token), clearOauthStateCookie(), `${desktopTransactionCookieName}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax`] as any
       return undefined
     } catch {
       set.status = 303
@@ -850,19 +859,29 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     const url = new URL(request.url)
     const query = Object.fromEntries(url.searchParams.entries())
     const signed = cookieValue(request, githubOauthStateCookieName)
+    let callbackTarget: 'web' | 'desktop' = 'web'
+    let callbackStatus: 'connected' | 'error' = 'connected'
     try {
       const state = verifySignedValue(signed, settings.sessionSecret)
       const hasSession = Boolean(
         request.headers.get('authorization') || cookieValue(request, settings.sessionCookieName),
       )
       const expectedUserId = hasSession ? (await sessionUser(request)).id : undefined
-      await services.github.completeCallback(query, state, expectedUserId)
-      set.status = 303
-      set.headers.Location = `${settings.webOrigin}/?github=connected`
-    } catch {
-      set.status = 303
-      set.headers.Location = `${settings.webOrigin}/?github=error`
+      const completion = await services.github.completeCallback(query, state, expectedUserId)
+      callbackTarget = completion.callbackTarget
+    } catch (error) {
+      callbackStatus = 'error'
+      if (
+        error &&
+        typeof error === 'object' &&
+        'callbackTarget' in error &&
+        error.callbackTarget === 'desktop'
+      ) callbackTarget = 'desktop'
     }
+    set.status = 303
+    set.headers.Location = callbackTarget === 'desktop'
+      ? `${settings.webOrigin}/connections/github/callback?status=${callbackStatus}&target=desktop`
+      : `${settings.webOrigin}/connections/github/callback?status=${callbackStatus}`
     set.headers['set-cookie'] = clearGithubOauthStateCookie()
     return undefined
   }, { response: { 303: t.Void(), 503: detailSchema } })
@@ -991,6 +1010,9 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     }
     return registration.adapter
   }
+  const providerConnectionContext = (request: Request) => ({
+    callbackTarget: bearerValue(request) ? 'desktop' as const : 'web' as const,
+  })
   const providerConnectionCall = async <T>(operation: () => Promise<T>) => {
     try {
       return await operation()
@@ -1004,6 +1026,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   const resolvedProviderConnection = async (
     userId: string,
     registration: ProviderConnectionRegistry[string],
+    request: Request,
   ) => {
     if (!registration.adapter) {
       return publicProviderConnection({
@@ -1014,7 +1037,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       }, false)
     }
     const connection = await providerConnectionCall(() =>
-      registration.adapter!.connection(userId))
+      registration.adapter!.connection(userId, providerConnectionContext(request)))
     const active = connection.status === 'connected'
       ? await services.providerConnectionSettings?.isActive(userId, registration.provider) ?? true
       : false
@@ -1106,7 +1129,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       const connections = await Promise.all(registrations.map(async ([connectionId, registration]) => ({
         connection_id: connectionId,
         provider: registration.provider,
-        ...await resolvedProviderConnection(user.id, registration),
+        ...await resolvedProviderConnection(user.id, registration, request),
       })))
       return { connections }
     },
@@ -1124,7 +1147,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       set.headers['cache-control'] = 'no-store'
       const user = await sessionUser(request)
       const registration = providerConnectionRegistration(params.connectionId)
-      return resolvedProviderConnection(user.id, registration)
+      return resolvedProviderConnection(user.id, registration, request)
     },
     {
       params: connectionParams,
@@ -1138,7 +1161,8 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       browserOrigin(request)
       const user = await sessionUser(request)
       const adapter = providerConnectionAdapter(params.connectionId)
-      const login = await providerConnectionCall(() => adapter.startLogin(user.id))
+      const login = await providerConnectionCall(() =>
+        adapter.startLogin(user.id, providerConnectionContext(request)))
       set.status = 202
       set.headers['cache-control'] = 'no-store'
       if (login.type === 'browser' && login.state) set.headers['set-cookie'] = githubOauthStateCookie(login.state)
@@ -1246,7 +1270,8 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       const user = await sessionUser(request)
       const registration = providerConnectionRegistration(params.connectionId)
       const adapter = providerConnectionAdapter(params.connectionId)
-      const connection = await providerConnectionCall(() => adapter.connection(user.id))
+      const connection = await providerConnectionCall(() =>
+        adapter.connection(user.id, providerConnectionContext(request)))
       if (connection.status !== 'connected') {
         throw new AuthError(
           'provider_not_connected',
@@ -1399,11 +1424,12 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       const conversation = await new ConversationRepository(db).get(user.id, params.conversationId)
       if (!conversation) return undefined
       const runs = new AgentRunRepository(db)
-      const [activeRun, plan] = await Promise.all([
+      const [activeRun, plan, eventCursor] = await Promise.all([
         runs.activeForConversation(conversation.id),
         runs.taskPlanFor(user.id, conversation.id),
+        runs.eventCursorForConversation(conversation.id),
       ])
-      return { conversation, activeRun, plan }
+      return { conversation, activeRun, plan, eventCursor }
     }, { isolationLevel: 'repeatable read' })
     if (!result) {
       set.status = 404
@@ -1414,6 +1440,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       messages: result.conversation.messages.map(publicMessage),
       plan: result.plan,
       active_run: result.activeRun ? activeRunProjection(result.activeRun) : null,
+      event_cursor: result.eventCursor.toString(),
     }
   }, { params: conversationParams })
 
@@ -1769,6 +1796,9 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   // Key by socket object instead of provider-assigned ids so a recycled id
   // cannot overwrite another connection's cleanup callback.
   const socketSubscriptions = new WeakMap<object, () => void>()
+  // Reconciliation is deliberately short: fanout is only a wake hint, so an
+  // open browser socket repairs a missed Redis message without waiting for a
+  // reconnect.
   type ActiveRunDiscoveryMessage = {
     version: 2
     type: 'active_run.discovered'
@@ -1791,12 +1821,14 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       const request = (socket.data as unknown as { request: Request }).request
       const user = await sessionUser(request)
       let closed = false
-      const discovered = new Set<string>()
+      const discovered = new Map<string, string>()
       let replaying = true
       const buffered: AgentRun[] = []
       const send = (run: AgentRun) => {
-        if (closed || discovered.has(run.id)) return
-        discovered.add(run.id)
+        if (closed) return
+        const fingerprint = `${run.lastEventSequence?.toString() ?? '0'}:${run.status}`
+        if (discovered.get(run.id) === fingerprint) return
+        discovered.set(run.id, fingerprint)
         socket.send(JSON.stringify(activeRunDiscovery(run)))
       }
       const receive = (event: ReturnType<typeof publicAgentEvent>) => {
@@ -1810,17 +1842,26 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
         }).catch(() => undefined)
       }
       const unsubscribe = agentExecutor.hub.subscribeAll(receive)
+      let reconcileTimer: ReturnType<typeof setInterval> | undefined
       socketSubscriptions.set(socket, () => {
         closed = true
         unsubscribe()
+        if (reconcileTimer) clearInterval(reconcileTimer)
       })
-      const entries = await services.database.transaction((db) =>
-        new AgentRunRepository(db).activeForUser(user.id))
-      for (const { run } of entries) send(run)
+      const reconcile = async () => {
+        const entries = await services.database.transaction((db) =>
+          new AgentRunRepository(db).activeForUser(user.id))
+        if (closed) return
+        for (const { run } of entries) send(run)
+      }
+      await reconcile()
       // Events received while the snapshot was being read are emitted after it,
       // with run-id deduplication preserving exactly one discovery per run.
       replaying = false
       for (const run of buffered) send(run)
+      if (!closed) {
+        reconcileTimer = setInterval(() => void reconcile().catch(() => undefined), ACTIVE_RUN_DISCOVERY_RECONCILE_INTERVAL_MS)
+      }
     },
     close: (socket) => {
       socketSubscriptions.get(socket)?.()
@@ -1849,40 +1890,60 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       const afterValue = socket.data.query.after ?? '0'
       const after = BigInt(afterValue)
       let cursor = after
-      let replaying = true
-      const buffered: ReturnType<typeof publicAgentEvent>[] = []
+      let pumping = false
+      let reconcileTimer: ReturnType<typeof setInterval> | undefined
+      let closed = false
       const send = (event: ReturnType<typeof publicAgentEvent>) => {
         const sequence = BigInt(event.sequence)
         if (sequence <= cursor) return
-        cursor = sequence
         socket.send(JSON.stringify(event))
+        cursor = sequence
+        if (event.type === 'turn.completed' || event.type === 'turn.failed') {
+          closed = true
+          socketSubscriptions.get(socket)?.()
+          socket.close()
+        }
       }
-      const receive = (event: ReturnType<typeof publicAgentEvent>) => {
-        if (replaying) buffered.push(event)
-        else send(event)
+      const pump = async () => {
+        if (closed || pumping) return
+        pumping = true
+        try {
+          while (!closed) {
+            const page = await services.database.transaction(async (db) => {
+              const repository = new AgentRunRepository(db)
+              const run = await repository.get(runId)
+              if (!run) return undefined
+              const highWater = await repository.replayHighWater(runId)
+              return { highWater, page: await repository.replayPage(runId, cursor, highWater) }
+            })
+            if (!page || closed) break
+            for (const event of page.page.events) {
+              if (closed) break
+              send(publicAgentEvent(event))
+            }
+            if (!page.page.hasMore) break
+          }
+        } catch {
+          // The next fanout wake or reconciliation interval retries the tail.
+        } finally {
+          pumping = false
+        }
       }
+      const receive = () => { void pump() }
       const unsubscribeEvents = agentExecutor.hub.subscribe(runId, receive)
       const unsubscribeFrames = agentExecutor.hub.subscribeFrames(runId, (frame) => {
-        socket.send(JSON.stringify({ version: 2, run_id: runId, type: 'browser.frame', data: frame }))
+        if (!closed) socket.send(JSON.stringify({ version: 2, run_id: runId, type: 'browser.frame', data: frame }))
       })
       socketSubscriptions.set(socket, () => {
+        closed = true
         unsubscribeEvents()
         unsubscribeFrames()
+        if (reconcileTimer) clearInterval(reconcileTimer)
       })
-      const highWater = await services.database.transaction((db) =>
-        new AgentRunRepository(db).replayHighWater(runId))
-      while (cursor < highWater) {
-        const page = await services.database.transaction((db) =>
-          new AgentRunRepository(db).replayPage(runId, cursor, highWater))
-        for (const event of page.events) send(publicAgentEvent(event))
-        if (!page.hasMore) break
+      await pump()
+      if (!closed) {
+        reconcileTimer = setInterval(() => void pump(), AGENT_RUN_SOCKET_RECONCILE_INTERVAL_MS)
       }
-      while (buffered.length) {
-        const batch = buffered.splice(0).sort((left, right) =>
-          BigInt(left.sequence) < BigInt(right.sequence) ? -1 : 1)
-        for (const event of batch) send(event)
-      }
-      replaying = false
     },
     close: (socket) => {
       socketSubscriptions.get(socket)?.()

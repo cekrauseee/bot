@@ -67,10 +67,10 @@ const step = (
 
 export function createConversationSimulation(
   startedAt: number,
-  prompt = "Research our three closest competitors and turn the findings into a launch plan."
+  prompt = "Research our three closest competitors, review the launch brief in our GitHub repository, and turn the findings into a launch plan."
 ): SimulationStep[] {
   const firstTurnAt = new Date(startedAt).toISOString()
-  const secondTurnAt = new Date(startedAt + 22_000).toISOString()
+  const secondTurnAt = new Date(startedAt + 28_000).toISOString()
 
   return [
     step({
@@ -318,14 +318,95 @@ export function createConversationSimulation(
       description: "The parent agent integrates the delegated result.",
       event: event(14, "reasoning.delta", {
         delta:
-          "The strongest opening is not feature breadth; it is a calmer path from request to finished work, with visible progress and explicit handoffs.",
+          "The market signal is clear. Now I’ll inspect the connected GitHub repository and validate the recommendation against the team’s launch brief.",
       }),
       label: "Synthesizing findings",
       phase: "reasoning",
     }),
     step({
+      description:
+        "The GitHub skill starts loading before repository tools are used.",
+      event: event(15, "skill.started", {
+        skill: {
+          id: "github-skill",
+          name: "github",
+          detail: "Repository inspection guidance",
+          status: "in_progress",
+        },
+      }),
+      label: "Loading GitHub skill",
+      phase: "tools",
+    }),
+    step({
+      description: "The GitHub guidance is ready for the current run.",
+      event: event(16, "skill.completed", {
+        skill: {
+          id: "github-skill",
+          name: "github",
+          detail: "Repository inspection guidance",
+          status: "completed",
+        },
+      }),
+      label: "GitHub skill loaded",
+      phase: "tools",
+    }),
+    step({
+      description:
+        "The connected GitHub MCP starts searching the account’s repositories.",
+      event: event(17, "tool.started", {
+        tool: {
+          id: "github-search-repositories",
+          name: "search_repositories",
+          target: "org:acme workspace launch",
+          status: "in_progress",
+        },
+      }),
+      label: "Searching GitHub repositories",
+      phase: "tools",
+    }),
+    step({
+      description: "The repository search resolves to the product repository.",
+      event: event(18, "tool.completed", {
+        tool: {
+          id: "github-search-repositories",
+          name: "search_repositories",
+          target: "org:acme workspace launch",
+          status: "completed",
+        },
+      }),
+      label: "GitHub repository found",
+      phase: "tools",
+    }),
+    step({
+      description: "The GitHub MCP starts reading a file from the main branch.",
+      event: event(19, "tool.started", {
+        tool: {
+          id: "github-read-launch-brief",
+          name: "get_file_contents",
+          target: "acme/atlas/product/launch-brief.md @ refs/heads/main",
+          status: "in_progress",
+        },
+      }),
+      label: "Reading from GitHub",
+      phase: "tools",
+    }),
+    step({
+      description:
+        "The repository file read completes and remains grouped with the search.",
+      event: event(20, "tool.completed", {
+        tool: {
+          id: "github-read-launch-brief",
+          name: "get_file_contents",
+          target: "acme/atlas/product/launch-brief.md @ refs/heads/main",
+          status: "completed",
+        },
+      }),
+      label: "GitHub brief read",
+      phase: "tools",
+    }),
+    step({
       description: "The agent starts inspecting a workspace file.",
-      event: event(15, "tool.started", {
+      event: event(21, "tool.started", {
         tool: {
           id: "read-brief",
           name: "filesystem_read",
@@ -338,7 +419,7 @@ export function createConversationSimulation(
     }),
     step({
       description: "The read completes and its status changes in place.",
-      event: event(16, "tool.completed", {
+      event: event(22, "tool.completed", {
         tool: {
           id: "read-brief",
           name: "filesystem_read",
@@ -351,7 +432,7 @@ export function createConversationSimulation(
     }),
     step({
       description: "A launch plan artifact is written to the workspace.",
-      event: event(17, "tool.started", {
+      event: event(23, "tool.started", {
         tool: {
           id: "write-plan",
           name: "filesystem_write",
@@ -364,7 +445,7 @@ export function createConversationSimulation(
     }),
     step({
       description: "The file update completes.",
-      event: event(18, "tool.completed", {
+      event: event(24, "tool.completed", {
         tool: {
           id: "write-plan",
           name: "filesystem_write",
@@ -377,7 +458,7 @@ export function createConversationSimulation(
     }),
     step({
       description: "The agent starts a verification command.",
-      event: event(19, "tool.started", {
+      event: event(25, "tool.started", {
         tool: {
           id: "verify-plan",
           name: "shell_exec",
@@ -391,7 +472,7 @@ export function createConversationSimulation(
     step({
       delayMs: 850,
       description: "The command succeeds and the process is ready to answer.",
-      event: event(20, "tool.completed", {
+      event: event(26, "tool.completed", {
         tool: {
           id: "verify-plan",
           name: "shell_exec",
@@ -405,9 +486,9 @@ export function createConversationSimulation(
     step({
       delayMs: 420,
       description: "The assistant response begins streaming below the process.",
-      event: event(21, "text.delta", {
+      event: event(27, "text.delta", {
         delta:
-          "I compared the market and drafted the launch plan. **The clearest wedge is operational clarity**: make every handoff, browser action, and delegated task visible without making the interface feel busy.\n\n",
+          "I compared the market, reviewed the launch brief in `acme/atlas`, and drafted the launch plan. **The clearest wedge is operational clarity**: make every handoff, browser action, and delegated task visible without making the interface feel busy.\n\n",
       }),
       label: "Streaming the answer",
       phase: "response",
@@ -415,7 +496,7 @@ export function createConversationSimulation(
     step({
       delayMs: 470,
       description: "A second answer chunk adds the recommendation list.",
-      event: event(22, "text.delta", {
+      event: event(28, "text.delta", {
         delta:
           "1. Lead with transparent execution, not model choice.\n2. Package browser work as a visible, resumable capability.\n3. Show delegation as a compact chain with clear ownership.\n\n",
       }),
@@ -425,7 +506,7 @@ export function createConversationSimulation(
     step({
       delayMs: 540,
       description: "The final answer chunk links the created artifact.",
-      event: event(23, "text.delta", {
+      event: event(29, "text.delta", {
         delta:
           "I also created `product/launch-plan.md` with positioning, rollout phases, success metrics, and the source comparison.",
       }),
@@ -435,7 +516,7 @@ export function createConversationSimulation(
     step({
       delayMs: 900,
       description: "The first turn completes and all active indicators settle.",
-      event: event(24, "turn.completed", {}),
+      event: event(30, "turn.completed", {}),
       frame: null,
       label: "Turn completed",
       phase: "complete",
@@ -443,7 +524,7 @@ export function createConversationSimulation(
     step({
       description: "A follow-up user message starts a second turn.",
       event: event(
-        25,
+        31,
         "turn.started",
         {
           user_message: message(
@@ -469,7 +550,7 @@ export function createConversationSimulation(
     step({
       description: "The assistant reasons briefly using the existing context.",
       event: event(
-        26,
+        32,
         "reasoning.delta",
         {
           delta:
@@ -485,7 +566,7 @@ export function createConversationSimulation(
       delayMs: 430,
       description: "The concise response starts streaming.",
       event: event(
-        27,
+        33,
         "text.delta",
         {
           delta:
@@ -501,7 +582,7 @@ export function createConversationSimulation(
       delayMs: 480,
       description: "The assistant completes the actionable follow-up.",
       event: event(
-        28,
+        34,
         "text.delta",
         {
           delta:
@@ -517,7 +598,7 @@ export function createConversationSimulation(
       delayMs: 1_200,
       description:
         "The full two-turn scenario is complete and can loop from the start.",
-      event: event(29, "turn.completed", {}, RUN_TWO, TURN_TWO),
+      event: event(35, "turn.completed", {}, RUN_TWO, TURN_TWO),
       label: "Scenario completed",
       phase: "complete",
     }),

@@ -5,10 +5,19 @@ import {
   subscribeToRunDiscovery,
 } from "@/features/app-shell/run-discovery"
 
-const run = { id: "run-1", conversation_id: "conversation-1", turn_id: "turn-1", last_event_sequence: "9007199254740993" }
+const run = {
+  id: "run-1",
+  conversation_id: "conversation-1",
+  turn_id: "turn-1",
+  last_event_sequence: "9007199254740993",
+}
 
 const discovery = (activeRun: unknown = run) =>
-  JSON.stringify({ active_run: activeRun, type: "active_run.discovered", version: 2 })
+  JSON.stringify({
+    active_run: activeRun,
+    type: "active_run.discovered",
+    version: 2,
+  })
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = []
@@ -22,8 +31,15 @@ class FakeWebSocket {
     this.url = url
     FakeWebSocket.instances.push(this)
   }
-  close() { if (this.readyState < FakeWebSocket.CLOSING) { this.readyState = 3; this.onclose?.() } }
-  receive(data: unknown) { this.onmessage?.({ data }) }
+  close() {
+    if (this.readyState < FakeWebSocket.CLOSING) {
+      this.readyState = 3
+      this.onclose?.()
+    }
+  }
+  receive(data: unknown) {
+    this.onmessage?.({ data })
+  }
 }
 
 describe("active run discovery transport", () => {
@@ -37,7 +53,10 @@ describe("active run discovery transport", () => {
       setTimeout: globalThis.setTimeout,
     })
   })
-  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
 
   it("parses versioned discoveries with a canonical durable cursor", () => {
     expect(parseRunDiscovery(discovery())).toEqual(run)

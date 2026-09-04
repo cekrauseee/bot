@@ -35,7 +35,7 @@ export function GithubProviderCard({
 }: GithubProviderCardProps) {
   if (connection.status === "unavailable") {
     return (
-      <Card size="sm" className="ring-0">
+      <Card size="sm" className="gap-0 py-0 ring-0">
         <CardContent className="flex min-h-10 items-center gap-2 px-3 py-2 text-sm">
           <GitHubLogo className="size-4 shrink-0" />
           <span className="font-medium">GitHub</span>
@@ -49,7 +49,7 @@ export function GithubProviderCard({
 
   if (connection.status === "disconnected" && !login) {
     return (
-      <Card size="sm" className="ring-0">
+      <Card size="sm" className="gap-0 py-0 ring-0">
         <CardContent className="flex min-h-10 items-center gap-2 px-3 py-2">
           <GitHubLogo className="size-4 shrink-0" />
           <span className="font-medium">GitHub</span>
@@ -70,7 +70,7 @@ export function GithubProviderCard({
 
   if (connection.status === "connecting" || login) {
     return (
-      <Card size="sm" className="ring-0">
+      <Card size="sm" className="gap-0 py-0 ring-0">
         <CardContent className="flex flex-col gap-3 px-3 py-3 text-sm">
           <div className="flex items-center gap-2">
             <GitHubLogo className="size-4 shrink-0" />
@@ -122,7 +122,7 @@ export function GithubProviderCard({
   }
 
   return (
-    <Card size="sm" className="ring-0">
+    <Card size="sm" className="gap-0 py-0 ring-0">
       <CardContent className="flex min-h-10 items-center gap-2 px-3 py-2">
         <GitHubLogo className="size-4 shrink-0" />
         <div className="min-w-0 truncate">

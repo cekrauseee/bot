@@ -11,7 +11,7 @@ import {
 } from '@react-email/components'
 import type { CSSProperties } from 'react'
 
-export const loginOtpSubject = 'Your myBot sign-in code'
+export const loginOtpSubject = 'Your Bot sign-in code'
 
 export type LoginOtpEmailProps = {
   otpCode?: string
@@ -46,7 +46,7 @@ export default function LoginOtpEmail({
   return (
     <Html>
       <Head />
-      <Preview>Your myBot sign-in code is {otpCode}. It expires in {expiry} minutes.</Preview>
+      <Preview>Your Bot sign-in code is {otpCode}. It expires in {expiry} minutes.</Preview>
       <Body style={{ backgroundColor: colors.background, margin: '0', padding: '32px 16px' }}>
         <Container
           style={{
@@ -59,13 +59,13 @@ export default function LoginOtpEmail({
           }}
         >
           <Text style={{ ...textStyle, fontSize: '14px', fontWeight: 600, letterSpacing: '-0.01em' }}>
-            myBot
+            Bot
           </Text>
           <Heading as="h1" style={{ ...textStyle, fontSize: '24px', fontWeight: 600, letterSpacing: '-0.03em', lineHeight: '32px', margin: '28px 0 0' }}>
             Your sign-in code
           </Heading>
           <Text style={{ ...textStyle, color: colors.muted, marginTop: '8px' }}>
-            Enter this code to continue to myBot.
+          Enter this code to continue to Bot.
           </Text>
           <Section
             aria-label="Your six-digit sign-in code"
@@ -84,7 +84,7 @@ export default function LoginOtpEmail({
           </Text>
         </Container>
         <Text style={{ ...textStyle, color: colors.muted, fontSize: '12px', lineHeight: '18px', margin: '20px auto 0', maxWidth: '480px', textAlign: 'center' }}>
-          This is an automated message from myBot.
+          This is an automated message from Bot.
         </Text>
       </Body>
     </Html>

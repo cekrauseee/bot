@@ -1,6 +1,6 @@
 {
   "name": "@my-bot/desktop",
-  "productName": "myBot",
+  "productName": "Bot",
   "version": "0.1.0",
   "private": true,
   "type": "module",

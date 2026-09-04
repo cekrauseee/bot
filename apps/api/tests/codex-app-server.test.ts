@@ -19,7 +19,6 @@ class FakeCodexProcess extends EventEmitter {
   readonly stderr = new PassThrough()
   exitCode: number | null = null
   account: { type: 'chatgpt'; email: string; planType: string } | null = null
-  loginMode: 'browser' | 'device' = 'device'
   readonly requests: RpcRequest[] = []
   private buffer = ''
 
@@ -68,8 +67,9 @@ class FakeCodexProcess extends EventEmitter {
       })
     }
     if (request.method === 'account/login/start') {
+      const browserLogin = request.params?.type === 'chatgpt'
       return this.respond(request.id, {
-        type: this.loginMode === 'browser' ? 'chatgpt' : 'chatgptDeviceCode',
+        type: browserLogin ? 'chatgpt' : 'chatgptDeviceCode',
         loginId: 'login-1',
         authUrl: 'https://auth.openai.com/codex/login',
         verificationUrl: 'https://auth.openai.com/codex/device',
@@ -135,7 +135,6 @@ async function fixture(loginMode: 'browser' | 'device' = 'device') {
     loginMode,
     spawnCodex: (command, args, options) => {
       const process = new FakeCodexProcess()
-      process.loginMode = loginMode
       processes.push(process)
       spawns.push({ command, args, env: options.env })
       return process as never
@@ -230,12 +229,42 @@ describe('Codex app-server connection manager', () => {
       loginId: 'login-1',
       authUrl: 'https://auth.openai.com/codex/login',
     })
+    expect(
+      processes[0].requests.find(
+        ({ method }) => method === 'account/login/start',
+      )?.params,
+    ).toEqual({
+      type: 'chatgpt',
+      useHostedLoginSuccessPage: false,
+    })
     await manager.cancelLogin('user-one', login.loginId)
     expect(
       processes[0].requests.find(
         ({ method }) => method === 'account/login/cancel',
       )?.params,
     ).toEqual({ loginId: 'login-1' })
+    await manager.close()
+  })
+
+  it('uses browser callback login for desktop clients when web uses device code', async () => {
+    const { manager, processes } = await fixture('device')
+    const login = await manager.startLogin('user-one', {
+      callbackTarget: 'desktop',
+    })
+
+    expect(login).toEqual({
+      type: 'browser',
+      loginId: 'login-1',
+      authUrl: 'https://auth.openai.com/codex/login',
+    })
+    expect(
+      processes[0].requests.find(
+        ({ method }) => method === 'account/login/start',
+      )?.params,
+    ).toEqual({
+      type: 'chatgpt',
+      useHostedLoginSuccessPage: false,
+    })
     await manager.close()
   })
 })

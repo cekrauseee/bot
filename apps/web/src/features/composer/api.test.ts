@@ -20,7 +20,11 @@ const conversation = {
   updated_at: "2026-09-03T00:00:00.000Z",
 }
 
-const streamEvent = (sequence: string, type: string, data: Record<string, unknown>) =>
+const streamEvent = (
+  sequence: string,
+  type: string,
+  data: Record<string, unknown>
+) =>
   `event: ${type}\ndata: ${JSON.stringify({ data, run_id: "run-1", sequence, turn_id: "turn-1", type, version: 2 })}\n\n`
 
 describe("conversation turn stream", () => {
@@ -52,14 +56,21 @@ describe("conversation turn stream", () => {
       },
       cancel,
     })
-    const fetchMock = vi.fn().mockResolvedValue(new Response(body, { status: 200 }))
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(body, { status: 200 }))
     vi.stubGlobal("fetch", fetchMock)
     try {
       const onStarted = vi.fn()
       const onEvent = vi.fn<(event: TurnStreamEvent) => void>()
       await startConversationTurn(
         null,
-        { message: "Hello", model: "gpt-5.6-sol", reasoning_effort: "medium", speed: "standard" },
+        {
+          message: "Hello",
+          model: "gpt-5.6-sol",
+          reasoning_effort: "medium",
+          speed: "standard",
+        },
         onStarted,
         onEvent,
         new AbortController().signal

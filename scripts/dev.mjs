@@ -44,7 +44,7 @@ try {
   const environment = await prepareEnvironment()
   await assertDevelopmentPortsAvailable()
   await prepareDevelopment({ environment })
-  console.log('\nmyBot is starting at:\n  Web: http://localhost:5173\n  Desktop: Electron application\n')
+  console.log('\nBot is starting at:\n  Web: http://localhost:5173\n  Desktop: Electron application\n')
 
   const invocation = turboInvocation()
   const turbo = start(

@@ -10,6 +10,7 @@ export type ProcessActivityFamily =
   | "files-inspected"
   | "files-read"
   | "files-updated"
+  | "github"
   | "web-search"
   | "skills"
 
@@ -28,12 +29,24 @@ const COLLAPSED_FAMILIES = new Set<ProcessActivityFamily>([
   "web-search",
 ])
 const BROWSER_ACTIVE_STATES = new Set(["launching", "live", "awaiting_user"])
+const SKILL_NAMES: Readonly<Record<string, string>> = {
+  github: "GitHub",
+}
+const GENERIC_CHILD_LABELS = new Set([
+  "Delegating a task",
+  "Delegated a task",
+  "Could not delegate the task",
+])
 const TOOL_FAMILY_RULES: readonly {
   actions?: readonly string[]
   family: ProcessActivityFamily
   prefix?: string
 }[] = [
   { family: "browser", prefix: "browser_" },
+  {
+    actions: ["get_file_contents", "search_repositories"],
+    family: "github",
+  },
   {
     actions: ["filesystem_list", "list"],
     family: "files-inspected",
@@ -73,6 +86,7 @@ const GROUP_LABELS: Record<ProcessActivityFamily, [string, string, string]> = {
     "Updated files",
     "Had trouble updating files",
   ],
+  github: ["Working in GitHub", "Worked in GitHub", "Had trouble with GitHub"],
   "web-search": [
     "Searching the web",
     "Searched the web",
@@ -123,7 +137,11 @@ export function processSearchCopy(
   activity: Extract<ProcessActivity, { type: "search" }>
 ) {
   const verb =
-    activity.status === "in_progress" ? "Searching for" : "Searched for"
+    activity.status === "in_progress"
+      ? "Searching for"
+      : activity.status === "failed"
+        ? "Could not search for"
+        : "Searched for"
   const query = `“${activity.query}”`
   return {
     label: `${verb} ${query}`,
@@ -210,6 +228,22 @@ const TOOL_COPY_DEFINITIONS: Record<string, ToolCopyDefinition> = {
     ["Updating", "Updated", "Could not update"],
     fileDetail
   ),
+  search_repositories: defineToolCopy(
+    [
+      "Searching repositories",
+      "Searched repositories",
+      "Could not search repositories",
+    ],
+    targetDetail
+  ),
+  get_file_contents: defineToolCopy(
+    ["Reading from GitHub", "Read from GitHub", "Could not read from GitHub"],
+    targetDetail
+  ),
+  load_skill: defineToolCopy(
+    ["Loading skill", "Loaded skill", "Could not load skill"],
+    targetDetail
+  ),
   browser_click: defineToolCopy(
     [
       "Interacting with the page",
@@ -231,8 +265,8 @@ const TOOL_COPY_DEFINITIONS: Record<string, ToolCopyDefinition> = {
     browserDetail
   ),
   browser_press: defineToolCopy(
-    ["Submitting the page", "Submitted the page", "Could not submit the page"],
-    failureDetail
+    ["Pressing a key", "Pressed a key", "Could not press a key"],
+    targetDetail
   ),
   browser_snapshot: defineToolCopy(
     ["Inspecting the page", "Inspected the page", "Could not inspect the page"],
@@ -255,10 +289,14 @@ const DEFAULT_TOOL_COPY = defineToolCopy(
 
 export function processToolCopy(activity: ProcessTool) {
   const action = normalizeProcessAction(activity.action)
-  const copy = TOOL_COPY_DEFINITIONS[action] ?? DEFAULT_TOOL_COPY
+  const knownCopy = TOOL_COPY_DEFINITIONS[action]
+  const copy = knownCopy ?? DEFAULT_TOOL_COPY
   const detail = activity.status === "failed" ? activity.detail : undefined
   return {
-    label: statusLabel(activity.status, ...copy.labels),
+    label:
+      knownCopy || !activity.label?.trim()
+        ? statusLabel(activity.status, ...copy.labels)
+        : activity.label.trim(),
     detail: copy.detail({
       activity,
       failureDetail: detail,
@@ -277,6 +315,25 @@ export function processSkillCopy(
     label: statusLabel(activity.status, pending, completed, failed),
     detail: activity.detail,
   }
+}
+
+export function processSkillName(name: string) {
+  return SKILL_NAMES[name.trim().toLowerCase()] ?? name
+}
+
+export function processChildCopy(
+  activity: Extract<ProcessActivity, { type: "trace" }>
+) {
+  const subject = GENERIC_CHILD_LABELS.has(activity.label)
+    ? "a task"
+    : activity.label
+  const label =
+    activity.status === "in_progress"
+      ? `Delegating ${subject}`
+      : activity.status === "failed"
+        ? `Could not delegate ${subject}`
+        : `Delegated ${subject}`
+  return { label, detail: activity.detail }
 }
 
 export function processActivityFamily(
@@ -298,10 +355,22 @@ export function processActivityFamily(
 export function groupProcessActivities(
   activities: readonly ProcessActivity[]
 ): ProcessActivityItem[] {
+  const hasSkillLifecycle = activities.some(
+    (activity) => activity.type === "skill"
+  )
+  const visibleActivities = hasSkillLifecycle
+    ? activities.filter(
+        (activity) =>
+          !(
+            activity.type === "tool" &&
+            normalizeProcessAction(activity.action) === "load_skill"
+          )
+      )
+    : activities
   const items: ProcessActivityItem[] = []
 
-  for (let index = 0; index < activities.length;) {
-    const activity = activities[index]
+  for (let index = 0; index < visibleActivities.length;) {
+    const activity = visibleActivities[index]
     const family = processActivityFamily(activity)
     if (!family) {
       items.push({ activity, type: "activity" })
@@ -311,12 +380,12 @@ export function groupProcessActivities(
 
     let end = index + 1
     while (
-      end < activities.length &&
-      processActivityFamily(activities[end]) === family
+      end < visibleActivities.length &&
+      processActivityFamily(visibleActivities[end]) === family
     ) {
       end += 1
     }
-    const grouped = activities.slice(index, end)
+    const grouped = visibleActivities.slice(index, end)
     const shouldGroupSearch =
       family === "web-search" &&
       activity.type === "search" &&
@@ -351,10 +420,9 @@ export function processActivityGroupLabel(
     return processSearchCopy(first).label
   }
 
-  // Tool calls are sequential from the agent's perspective. The latest
-  // status is therefore the source of truth for the current group state;
-  // historical failures remain visible in the child rows but must not poison
-  // a later successful retry.
+  // A model can issue multiple calls in parallel. Any open child keeps the
+  // group active; once all children are terminal, the latest terminal result
+  // determines whether a later retry recovered an earlier failure.
   const latest = [...activities]
     .reverse()
     .find(
@@ -371,7 +439,11 @@ export function processActivityGroupLabel(
         Boolean(activity.status)
     )
   const active =
-    browserActive || (latest !== undefined && latest.status === "in_progress")
+    browserActive ||
+    activities.some(
+      (activity) =>
+        activity.type !== "text" && activity.status === "in_progress"
+    )
   const failed = latest !== undefined && latest.status === "failed"
   const [pending, completed, error] = GROUP_LABELS[family]
   if (

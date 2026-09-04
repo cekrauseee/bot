@@ -908,6 +908,15 @@ describe('PostgreSQL conversation flow', () => {
             String(input.run_id), String(input.turn_id), 1,
             'turn.started', { model: input.model },
           )))
+          controller.enqueue(encoder.encode(providerFrame(
+            String(input.run_id), String(input.turn_id), 2,
+            'tool.started', {
+              tool: {
+                id: 'cancelled-tool', name: 'filesystem_read',
+                label: 'Reading files', status: 'in_progress',
+              },
+            },
+          )))
           const abort = () => controller.error(new Error('aborted'))
           if (signal.aborted) abort()
           else signal.addEventListener('abort', abort, { once: true })
@@ -970,6 +979,15 @@ describe('PostgreSQL conversation flow', () => {
         'select browser_projection from agent_runs where id = $1', [runId],
       )
       expect(clearedProjection.rows[0].browser_projection).toBeNull()
+      const assistant = await pool.query<{ activities: Array<Record<string, unknown>> }>(
+        `select m.activities from messages m
+         join agent_runs r on r.assistant_message_id = m.id
+         where r.id = $1`,
+        [runId],
+      )
+      expect(assistant.rows[0].activities).toEqual([
+        expect.objectContaining({ id: 'cancelled-tool', status: 'failed' }),
+      ])
       await executor.recover()
       const terminalEvents = await pool.query<{ count: string }>(
         `select count(*) from agent_events

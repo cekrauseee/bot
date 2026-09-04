@@ -118,7 +118,7 @@ export function infrastructurePortError(checks) {
     ),
     ...unready.map(
       ({ service, result }) =>
-        `myBot's ${service.label} already uses port ${service.port}, but it is not ready yet (status: ${result.health}).`,
+        `Bot's ${service.label} already uses port ${service.port}, but it is not ready yet (status: ${result.health}).`,
     ),
   ]
 

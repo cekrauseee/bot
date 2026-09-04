@@ -136,10 +136,73 @@ describe("response process", () => {
       })
     )
 
-    expect(markup).toContain("Read files")
+    expect(markup).toContain("Reading files")
     expect(markup).toContain('title="Reading package.json"')
     expect(markup).toContain('title="Read src/app.ts"')
     expect(markup).not.toContain("filesystem_read")
+  })
+
+  it("renders GitHub MCP activity as one detailed provider group", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(ResponseProcess, {
+        hasResponse: false,
+        process: {
+          activities: [
+            {
+              action: "search_repositories",
+              id: "github-search",
+              status: "completed",
+              target: "org:acme workspace launch",
+              type: "tool",
+            },
+            {
+              action: "get_file_contents",
+              id: "github-read",
+              status: "completed",
+              target: "acme/atlas/product/launch-brief.md @ refs/heads/main",
+              type: "tool",
+            },
+          ],
+          durationSeconds: 4,
+          status: "processing",
+        },
+      })
+    )
+
+    expect(markup).toContain("Worked in GitHub")
+    expect(markup).toContain("Searched repositories")
+    expect(markup).toContain("Read from GitHub")
+    expect(markup).toContain("org:acme workspace launch")
+    expect(markup).toContain(
+      "acme/atlas/product/launch-brief.md @ refs/heads/main"
+    )
+    expect(markup).not.toContain("search_repositories")
+    expect(markup).not.toContain("get_file_contents")
+  })
+
+  it("renders a failed child delegation without contradictory success copy", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(ResponseProcess, {
+        hasResponse: false,
+        process: {
+          activities: [
+            {
+              detail: "The child agent could not start.",
+              id: "child-failed",
+              kind: "child",
+              label: "Could not delegate the task",
+              status: "failed",
+              type: "trace",
+            },
+          ],
+          durationSeconds: 2,
+          status: "processing",
+        },
+      })
+    )
+
+    expect(markup).toContain("Could not delegate a task")
+    expect(markup).not.toContain("Delegated Could not delegate")
   })
 
   it("renders a search with results as a collapsible family item", () => {
@@ -239,7 +302,7 @@ describe("response process", () => {
     expect(markup).not.toContain("shell_exec")
 
     expect(markup).toMatch(
-      /<span class="inline-flex shrink-0 items-center gap-1\.5 text-muted-foreground"><span>Ran<\/span><svg[^>]*class="[^"]*command-chevron[^"]*"[^>]*>[\s\S]*?<span class="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">npm run test/
+      /<span class="shrink-0 text-muted-foreground">Ran<\/span><span class="inline-flex max-w-full min-w-0 items-center gap-1\.5"><span class="min-w-0 truncate font-mono text-sm text-muted-foreground">npm run test[\s\S]*?<svg[^>]*class="[^"]*command-chevron[^"]*"[^>]*>/
     )
   })
 

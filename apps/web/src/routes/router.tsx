@@ -8,6 +8,9 @@ const HomePage = lazy(() => import("@/routes/page"))
 const ConversationPage = lazy(
   () => import("@/routes/conversations/[conversationId]/page")
 )
+const ConnectionCallbackPage = lazy(
+  () => import("@/routes/connections/[connectionId]/callback/page")
+)
 const LoginPage = lazy(() => import("@/routes/login/page"))
 const NotFoundPage = lazy(() => import("@/routes/not-found"))
 const SignPage = lazy(() => import("@/routes/sign/page"))
@@ -26,6 +29,10 @@ export function AppRouter() {
           </Route>
           <Route path="sign" element={<SignPage />} />
           <Route path="login" element={<LoginPage />} />
+          <Route
+            path="connections/:connectionId/callback"
+            element={<ConnectionCallbackPage />}
+          />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Routes>

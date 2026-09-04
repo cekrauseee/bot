@@ -11,6 +11,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { ProviderConnectionSkeleton } from "@/features/provider-connections/components/provider-connection-skeleton"
+import { ProviderConnectionSuccessAlert } from "@/features/provider-connections/components/provider-connection-result"
 import { useProviderConnection } from "@/features/provider-connections/hooks/use-provider-connection"
 import {
   providerUiRegistry,
@@ -37,23 +38,26 @@ function ProviderConnectionEntry({
 }) {
   const {
     connection,
+    connectionSucceeded,
     error,
     loading,
     login,
     cancel,
     connect,
     disconnect,
+    dismissConnectionSuccess,
     setActive,
   } = useProviderConnection({
     api: registration.api,
+    providerId: registration.providerId,
     providerName: registration.providerName,
   })
   const ProviderCard = registration.Card
 
   return (
-    <div>
+    <div className="flex flex-col gap-2">
       {error && (
-        <p role="alert" className="px-3 pb-2 text-sm text-destructive">
+        <p role="alert" className="px-3 text-sm text-destructive">
           {error}
         </p>
       )}
@@ -70,6 +74,13 @@ function ProviderConnectionEntry({
       ) : (
         <ProviderConnectionSkeleton />
       )}
+      {registration.completionPresentations.includes("inline") &&
+      connectionSucceeded ? (
+        <ProviderConnectionSuccessAlert
+          providerName={registration.providerName}
+          onDismiss={dismissConnectionSuccess}
+        />
+      ) : null}
     </div>
   )
 }

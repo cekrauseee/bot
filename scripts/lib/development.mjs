@@ -121,7 +121,7 @@ export async function startInfrastructure() {
     .map(({ service }) => service.name)
 
   for (const { service } of checks.filter(({ result }) => result.status === 'owned')) {
-    console.log(`✓ Reusing myBot ${service.label} on port ${service.port}`)
+    console.log(`✓ Reusing Bot ${service.label} on port ${service.port}`)
   }
 
   if (servicesToStart.length === 0) return

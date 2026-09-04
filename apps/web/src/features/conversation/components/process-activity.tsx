@@ -21,6 +21,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import { GitHubLogo } from "@/components/ui/github-logo"
 import type {
   BrowserProjection,
   ProcessActivity,
@@ -35,12 +36,15 @@ import {
   isSingleSearchGroup,
   normalizeProcessAction,
   processActivityGroupLabel,
+  processChildCopy,
   processSearchCopy,
   processToolCopy,
   processSkillCopy,
+  processSkillName,
   type ProcessActivityFamily,
   type ProcessActivityItem,
 } from "@/features/conversation/process-activity-model"
+import { useSmoothStreamedContent } from "@/features/conversation/hooks/use-smooth-streamed-content"
 import { cn } from "@/lib/utils"
 
 function ActivityIcon({ children }: { children: ReactNode }) {
@@ -126,7 +130,10 @@ const TOOL_ICON_RULES: readonly {
   { icon: Globe2Icon, prefix: "browser_" },
 ]
 
-const GROUP_ICONS: Record<ProcessActivityFamily, LucideIcon> = {
+const GROUP_ICONS: Record<
+  Exclude<ProcessActivityFamily, "github">,
+  LucideIcon
+> = {
   browser: Globe2Icon,
   commands: SquareTerminalIcon,
   "files-inspected": FileTextIcon,
@@ -146,6 +153,13 @@ const TRACE_ICONS: Record<string, LucideIcon> = {
 
 function ToolIcon({ action }: { action: string }) {
   const normalized = normalizeProcessAction(action)
+  if (normalized === "load_skill") return <SparklesIcon />
+  if (
+    normalized === "search_repositories" ||
+    normalized === "get_file_contents"
+  ) {
+    return <GitHubLogo />
+  }
   const matchingRule = TOOL_ICON_RULES.find(
     ({ actions, prefix }) =>
       actions?.includes(normalized) ||
@@ -156,6 +170,7 @@ function ToolIcon({ action }: { action: string }) {
 }
 
 function GroupIcon({ family }: { family: ProcessActivityFamily }) {
+  if (family === "github") return <GitHubLogo />
   const Icon = GROUP_ICONS[family]
   return <Icon />
 }
@@ -266,24 +281,26 @@ function CommandActivity({
 
   return (
     <Collapsible className="flex min-w-0 flex-col">
-      <CollapsibleTrigger className="group/command -ms-1 flex min-h-6 max-w-full min-w-0 items-center gap-2 rounded-md px-1 text-start leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background data-[panel-open]:[&_.command-chevron]:rotate-90">
+      <CollapsibleTrigger className="group/command -ms-1 flex min-h-6 max-w-full min-w-0 items-center gap-2 rounded-md px-1 text-start text-base leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background data-[panel-open]:[&_.command-chevron]:rotate-90">
         <ActivityIcon>
           <SquareTerminalIcon />
         </ActivityIcon>
         <span
           className={cn(
-            "inline-flex shrink-0 items-center gap-1.5 text-muted-foreground",
+            "shrink-0 text-muted-foreground",
             isProcessActivityActive(activity) && "shimmer"
           )}
         >
-          <span>{copy.label}</span>
+          {copy.label}
+        </span>
+        <span className="inline-flex max-w-full min-w-0 items-center gap-1.5">
+          <span className="min-w-0 truncate font-mono text-sm text-muted-foreground">
+            {summary}
+          </span>
           <ChevronRightIcon
             aria-hidden="true"
-            className="command-chevron size-3.5 shrink-0 motion-safe:transition-transform"
+            className="command-chevron size-3.5 shrink-0 text-muted-foreground motion-safe:transition-transform"
           />
-        </span>
-        <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
-          {summary}
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent hiddenUntilFound className="ps-5.5 pt-1">
@@ -295,11 +312,55 @@ function CommandActivity({
   )
 }
 
-function ProcessActivityRow({ activity }: { activity: ProcessActivity }) {
+function StreamingReasoningText({
+  content,
+  streaming,
+}: {
+  content: string
+  streaming: boolean
+}) {
+  const { animateFromOffset, animationEnabled, displayedContent } =
+    useSmoothStreamedContent(content, streaming, {
+      animateInitial: true,
+      flushOnStreamEnd: true,
+    })
+
+  if (!animationEnabled) return displayedContent
+
+  return [...displayedContent.matchAll(/\s+|\S+/gu)].map((match) => {
+    const part = match[0]
+    const startOffset = match.index
+
+    if (/^\s+$/u.test(part)) return part
+
+    return (
+      <span
+        key={startOffset}
+        className={cn(
+          "streaming-word",
+          startOffset >= animateFromOffset && "streaming-word-animated"
+        )}
+      >
+        {part}
+      </span>
+    )
+  })
+}
+
+function ProcessActivityRow({
+  activity,
+  streaming = false,
+}: {
+  activity: ProcessActivity
+  streaming?: boolean
+}) {
   if (activity.type === "text") {
     return (
-      <p className="min-h-6 py-0.5 text-sm leading-6 wrap-break-word whitespace-pre-wrap text-foreground/90">
-        {activity.content}
+      <p className="min-h-6 py-0.5 text-base leading-6 wrap-break-word whitespace-pre-wrap text-foreground/90">
+        <StreamingReasoningText
+          content={activity.content}
+          streaming={streaming}
+        />
       </p>
     )
   }
@@ -322,14 +383,15 @@ function ProcessActivityRow({ activity }: { activity: ProcessActivity }) {
 
   if (activity.type === "skill") {
     const copy = processSkillCopy(activity)
+    const skillName = processSkillName(activity.name)
     return (
       <ActivityRow
         icon={<SparklesIcon />}
         label={copy.label}
-        detail={<span className="font-mono text-xs">{activity.name}</span>}
+        detail={<span className="font-mono text-sm">{skillName}</span>}
         separator="space"
         active={isProcessActivityActive(activity)}
-        title={[copy.label, activity.name, activity.detail]
+        title={[copy.label, skillName, activity.detail]
           .filter(Boolean)
           .join(" · ")}
       />
@@ -352,7 +414,7 @@ function ProcessActivityRow({ activity }: { activity: ProcessActivity }) {
         label={copy.label}
         detail={
           copy.detail ? (
-            <span className="font-mono text-xs">{copy.detail}</span>
+            <span className="font-mono text-sm">{copy.detail}</span>
           ) : undefined
         }
         separator="space"
@@ -375,19 +437,14 @@ function ProcessActivityRow({ activity }: { activity: ProcessActivity }) {
   }
 
   if (activity.kind === "child") {
-    const taskLabel =
-      activity.label === "Delegated a task" ? "a task" : activity.label
+    const copy = processChildCopy(activity)
     return (
       <ActivityRow
         icon={<WaypointsIcon />}
-        label={
-          activity.status === "in_progress"
-            ? `Delegating ${taskLabel}`
-            : `Delegated ${taskLabel}`
-        }
-        detail={activity.detail}
+        label={copy.label}
+        detail={copy.detail}
         active={isProcessActivityActive(activity)}
-        title={[activity.label, activity.detail].filter(Boolean).join(" · ")}
+        title={[copy.label, copy.detail].filter(Boolean).join(" · ")}
       />
     )
   }
@@ -427,7 +484,7 @@ function ProcessActivityGroup({
       defaultOpen={isProcessFamilyDefaultOpen(item.family, defaultOpen)}
       className="flex min-w-0 flex-col"
     >
-      <CollapsibleTrigger className="group/activity-group -ms-1 flex min-h-6 max-w-full min-w-0 items-center gap-2 rounded-md px-1 text-start leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background data-[panel-open]:[&_.activity-group-chevron]:rotate-90">
+      <CollapsibleTrigger className="group/activity-group -ms-1 flex min-h-6 max-w-full min-w-0 items-center gap-2 rounded-md px-1 text-start text-base leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background data-[panel-open]:[&_.activity-group-chevron]:rotate-90">
         <ActivityIcon>
           <GroupIcon family={item.family} />
         </ActivityIcon>
@@ -466,41 +523,60 @@ function ProcessActivityGroup({
   )
 }
 
+function isReasoningItem(item: ProcessActivityItem) {
+  return item.type === "activity" && item.activity.type === "text"
+}
+
 export function ProcessActivityList({
   activities,
   browserProjection,
   className,
   defaultGroupsOpen = false,
+  streaming = false,
 }: {
   activities: readonly ProcessActivity[]
   browserProjection?: BrowserProjection | null
   className?: string
   defaultGroupsOpen?: boolean
+  streaming?: boolean
 }) {
   const items = groupProcessActivities(activities)
   const browserActive = isBrowserProcessActive(browserProjection)
+  const lastActivity = activities.at(-1)
+  const streamingReasoningId =
+    streaming && lastActivity?.type === "text" ? lastActivity.id : undefined
 
   return (
     <ol
       aria-label="Process activity"
-      className={cn("flex min-w-0 flex-col gap-1", className)}
+      className={cn("flex min-w-0 flex-col gap-2 text-base", className)}
     >
-      {items.map((item) => (
-        <li
-          key={item.type === "group" ? item.id : item.activity.id}
-          className="min-w-0"
-        >
-          {item.type === "group" ? (
-            <ProcessActivityGroup
-              browserActive={browserActive && item.family === "browser"}
-              defaultOpen={defaultGroupsOpen}
-              item={item}
-            />
-          ) : (
-            <ProcessActivityRow activity={item.activity} />
-          )}
-        </li>
-      ))}
+      {items.map((item, index) => {
+        const previousItem = index > 0 ? items[index - 1] : undefined
+        const kindChanged =
+          previousItem !== undefined &&
+          isReasoningItem(item) !== isReasoningItem(previousItem)
+
+        return (
+          <li
+            key={item.type === "group" ? item.id : item.activity.id}
+            className={cn("min-w-0", kindChanged && "mt-2")}
+          >
+            {item.type === "group" ? (
+              <ProcessActivityGroup
+                browserActive={browserActive && item.family === "browser"}
+                defaultOpen={defaultGroupsOpen}
+                item={item}
+              />
+            ) : (
+              <ProcessActivityRow
+                activity={item.activity}
+                streaming={item.activity.id === streamingReasoningId}
+              />
+            )}
+          </li>
+        )
+      })}
     </ol>
   )
 }

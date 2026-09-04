@@ -15,7 +15,7 @@ npm run setup
 npm run dev
 ```
 
-Setup aligns the root `.env` with `.env.example`, generates local secrets without printing them, installs workspace dependencies, builds email assets, starts infrastructure, and applies migrations. `npm run dev` launches both the browser and Electron applications with the API, AI, and runtime services. The root environment is shared by Vite, the API, AI, and runtime. `VITE_API_BASE_URL` is the only browser-exposed value. Google and Resend credentials are optional for local UI work.
+Setup aligns the root `.env` with `.env.example`, generates local service secrets and the Base64 GitHub token-encryption key without printing them, installs workspace dependencies, builds email assets, starts infrastructure, and applies migrations. Existing secrets are preserved. `npm run dev` launches both the browser and Electron applications with the API, AI, and runtime services. The root environment is shared by Vite, the API, AI, and runtime. `VITE_API_BASE_URL` is the only browser-exposed value. Google, GitHub OAuth, and Resend credentials are optional for local UI work.
 
 Use `localhost` with the documented origins (`WEB_BASE_URL=http://localhost:5173`, `API_BASE_URL=http://localhost:8000`). `npm run infra:stop` stops the dedicated containers; `infra:reset` deletes their local data.
 
@@ -30,7 +30,7 @@ Use `localhost` with the documented origins (`WEB_BASE_URL=http://localhost:5173
 | `npm run scripts:test` | Root script tests |
 | `npm run desktop:package` | Build an ad hoc signed desktop package |
 | `npm run desktop:make` | Build Forge distributables |
-| `npm run desktop:install` | Stage and install `myBot.app` on macOS |
+| `npm run desktop:install` | Stage and install `Bot.app` on macOS |
 | `npm run icons:build` | Regenerate deterministic icon assets |
 
 Desktop builds generate a public config artifact from the root `.env` and process overrides. It contains only validated HTTP(S) origins; the packaged app does not depend on Finder inheriting shell variables. The installer is deliberately not part of ordinary checks, validates the copied bundle before replacing the current installation, and keeps a timestamped backup of an existing user installation.

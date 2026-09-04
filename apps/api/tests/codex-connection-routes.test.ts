@@ -95,7 +95,10 @@ describe('OpenAI Codex provider connection routes', () => {
   it('completes GitHub OAuth from a system browser without an app session cookie', async () => {
     const dependencies = services()
     dependencies.github = {
-      completeCallback: vi.fn().mockResolvedValue('login-1'),
+      completeCallback: vi.fn().mockResolvedValue({
+        loginId: 'login-1',
+        callbackTarget: 'web',
+      }),
     }
     const app = createApp(settings, dependencies)
     const response = await app.handle(
@@ -103,11 +106,84 @@ describe('OpenAI Codex provider connection routes', () => {
     )
 
     expect(response.status).toBe(303)
-    expect(response.headers.get('location')).toBe(`${settings.webOrigin}/?github=connected`)
+    expect(response.headers.get('location')).toBe(
+      `${settings.webOrigin}/connections/github/callback?status=connected`,
+    )
     expect(dependencies.github.completeCallback).toHaveBeenCalledWith(
       { state: 'redis-state', code: 'oauth-code' }, undefined, undefined,
     )
     expect(dependencies.sessions.resolve).not.toHaveBeenCalled()
+  })
+
+  it('returns GitHub OAuth callbacks to the desktop app', async () => {
+    const dependencies = services()
+    dependencies.github = {
+      completeCallback: vi.fn().mockResolvedValue({
+        loginId: 'login-1',
+        callbackTarget: 'desktop',
+      }),
+    }
+    const app = createApp(settings, dependencies)
+    const response = await app.handle(
+      new Request('http://localhost/auth/github/callback?state=redis-state&code=oauth-code'),
+    )
+
+    expect(response.status).toBe(303)
+    expect(response.headers.get('location')).toBe(
+      `${settings.webOrigin}/connections/github/callback?status=connected&target=desktop`,
+    )
+  })
+
+  it('returns failed GitHub OAuth callbacks to the desktop app', async () => {
+    const dependencies = services()
+    dependencies.github = {
+      completeCallback: vi.fn().mockRejectedValue(
+        Object.assign(new Error('GitHub authorization failed'), {
+          callbackTarget: 'desktop',
+        }),
+      ),
+    }
+    const app = createApp(settings, dependencies)
+    const response = await app.handle(
+      new Request('http://localhost/auth/github/callback?state=redis-state&error=access_denied'),
+    )
+
+    expect(response.status).toBe(303)
+    expect(response.headers.get('location')).toBe(
+      `${settings.webOrigin}/connections/github/callback?status=error&target=desktop`,
+    )
+  })
+
+  it('marks provider logins started with bearer authentication as desktop callbacks', async () => {
+    const dependencies = services()
+    const github = {
+      startLogin: vi.fn().mockResolvedValue({
+        type: 'browser',
+        loginId: 'login-1',
+        authUrl: 'https://github.com/login/oauth/authorize',
+        state: 'state-1',
+      }),
+    }
+    dependencies.providerConnectionAdapters.github = {
+      provider: 'github',
+      loginMode: 'browser',
+      adapter: github,
+    }
+    const app = createApp(settings, dependencies)
+    const response = await app.handle(
+      new Request('http://localhost/provider-connections/github/logins', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${'d'.repeat(32)}`,
+          origin: 'app://mybot',
+        },
+      }),
+    )
+
+    expect(response.status).toBe(202)
+    expect(github.startLogin).toHaveBeenCalledWith(user.id, {
+      callbackTarget: 'desktop',
+    })
   })
 
   it('returns connected account metadata and safe rate-limit fields', async () => {
