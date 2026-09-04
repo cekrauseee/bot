@@ -70,6 +70,7 @@ export function ConversationView({
                         : undefined
                     }
                     message={message}
+                    streaming={message.id === activeAssistantId}
                   />
                 </MessageScrollerItem>
               ))}

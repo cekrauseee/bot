@@ -36,6 +36,7 @@ import {
   isSingleSearchGroup,
   normalizeProcessAction,
   processActivityGroupLabel,
+  processChildCopy,
   processSearchCopy,
   processToolCopy,
   processSkillCopy,
@@ -43,6 +44,7 @@ import {
   type ProcessActivityFamily,
   type ProcessActivityItem,
 } from "@/features/conversation/process-activity-model"
+import { useSmoothStreamedContent } from "@/features/conversation/hooks/use-smooth-streamed-content"
 import { cn } from "@/lib/utils"
 
 function ActivityIcon({ children }: { children: ReactNode }) {
@@ -310,11 +312,55 @@ function CommandActivity({
   )
 }
 
-function ProcessActivityRow({ activity }: { activity: ProcessActivity }) {
+function StreamingReasoningText({
+  content,
+  streaming,
+}: {
+  content: string
+  streaming: boolean
+}) {
+  const { animateFromOffset, animationEnabled, displayedContent } =
+    useSmoothStreamedContent(content, streaming, {
+      animateInitial: true,
+      flushOnStreamEnd: true,
+    })
+
+  if (!animationEnabled) return displayedContent
+
+  return [...displayedContent.matchAll(/\s+|\S+/gu)].map((match) => {
+    const part = match[0]
+    const startOffset = match.index
+
+    if (/^\s+$/u.test(part)) return part
+
+    return (
+      <span
+        key={startOffset}
+        className={cn(
+          "streaming-word",
+          startOffset >= animateFromOffset && "streaming-word-animated"
+        )}
+      >
+        {part}
+      </span>
+    )
+  })
+}
+
+function ProcessActivityRow({
+  activity,
+  streaming = false,
+}: {
+  activity: ProcessActivity
+  streaming?: boolean
+}) {
   if (activity.type === "text") {
     return (
       <p className="min-h-6 py-0.5 text-base leading-6 wrap-break-word whitespace-pre-wrap text-foreground/90">
-        {activity.content}
+        <StreamingReasoningText
+          content={activity.content}
+          streaming={streaming}
+        />
       </p>
     )
   }
@@ -391,19 +437,14 @@ function ProcessActivityRow({ activity }: { activity: ProcessActivity }) {
   }
 
   if (activity.kind === "child") {
-    const taskLabel =
-      activity.label === "Delegated a task" ? "a task" : activity.label
+    const copy = processChildCopy(activity)
     return (
       <ActivityRow
         icon={<WaypointsIcon />}
-        label={
-          activity.status === "in_progress"
-            ? `Delegating ${taskLabel}`
-            : `Delegated ${taskLabel}`
-        }
-        detail={activity.detail}
+        label={copy.label}
+        detail={copy.detail}
         active={isProcessActivityActive(activity)}
-        title={[activity.label, activity.detail].filter(Boolean).join(" · ")}
+        title={[copy.label, copy.detail].filter(Boolean).join(" · ")}
       />
     )
   }
@@ -491,14 +532,19 @@ export function ProcessActivityList({
   browserProjection,
   className,
   defaultGroupsOpen = false,
+  streaming = false,
 }: {
   activities: readonly ProcessActivity[]
   browserProjection?: BrowserProjection | null
   className?: string
   defaultGroupsOpen?: boolean
+  streaming?: boolean
 }) {
   const items = groupProcessActivities(activities)
   const browserActive = isBrowserProcessActive(browserProjection)
+  const lastActivity = activities.at(-1)
+  const streamingReasoningId =
+    streaming && lastActivity?.type === "text" ? lastActivity.id : undefined
 
   return (
     <ol
@@ -523,7 +569,10 @@ export function ProcessActivityList({
                 item={item}
               />
             ) : (
-              <ProcessActivityRow activity={item.activity} />
+              <ProcessActivityRow
+                activity={item.activity}
+                streaming={item.activity.id === streamingReasoningId}
+              />
             )}
           </li>
         )

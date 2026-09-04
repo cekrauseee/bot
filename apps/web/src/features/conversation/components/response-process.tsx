@@ -84,6 +84,7 @@ export function ResponseProcess({
           browserProjection={process.browserProjection}
           className="w-full"
           defaultGroupsOpen={process.status === "processing"}
+          streaming={process.status === "processing"}
         />
       ) : null}
       {children}
@@ -137,6 +138,7 @@ export function ResponseProcess({
             browserProjection={process.browserProjection}
             className="w-full"
             defaultGroupsOpen={false}
+            streaming={false}
           />
         </CollapsibleContent>
         {children}

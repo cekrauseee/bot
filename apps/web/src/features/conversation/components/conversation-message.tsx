@@ -1,3 +1,4 @@
+import { useMemo, type ComponentProps } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
@@ -5,27 +6,44 @@ import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Message, MessageContent } from "@/components/ui/message"
 import { HoverMessageMeta } from "@/features/conversation/components/message-meta"
 import { ResponseProcess } from "@/features/conversation/components/response-process"
+import { useSmoothStreamedContent } from "@/features/conversation/hooks/use-smooth-streamed-content"
 import type {
   BrowserProjection,
   ConversationMessageData,
   ResponseProcessData,
 } from "@/features/conversation/model"
+import { rehypeStreamingWords } from "@/features/conversation/smooth-streaming-text"
 import { cn } from "@/lib/utils"
 
 function AssistantMessage({
   browserProjection,
   content,
   process,
+  streaming,
 }: {
   content: string
   process?: ResponseProcessData
   browserProjection?: BrowserProjection | null
+  streaming: boolean
 }) {
-  const hasResponse = content.trim().length > 0
+  const { animateFromOffset, animationEnabled, displayedContent } =
+    useSmoothStreamedContent(content, streaming, { animateInitial: true })
+  const rehypePlugins = useMemo<
+    NonNullable<ComponentProps<typeof ReactMarkdown>["rehypePlugins"]>
+  >(
+    () =>
+      animationEnabled ? [[rehypeStreamingWords, { animateFromOffset }]] : [],
+    [animateFromOffset, animationEnabled]
+  )
+  const hasResponse = displayedContent.trim().length > 0
   const responseBody = hasResponse ? (
     <div className="typeset typeset-docs w-full max-w-none text-base select-text">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml>
-        {content}
+      <ReactMarkdown
+        rehypePlugins={rehypePlugins}
+        remarkPlugins={[remarkGfm]}
+        skipHtml
+      >
+        {displayedContent}
       </ReactMarkdown>
     </div>
   ) : null
@@ -48,9 +66,11 @@ function AssistantMessage({
 export function ConversationMessage({
   browserProjection,
   message,
+  streaming = false,
 }: {
   message: ConversationMessageData
   browserProjection?: BrowserProjection | null
+  streaming?: boolean
 }) {
   const isUser = message.role === "user"
   const align = isUser ? "end" : "start"
@@ -80,6 +100,7 @@ export function ConversationMessage({
                 content={message.content}
                 process={message.process}
                 browserProjection={browserProjection}
+                streaming={streaming}
               />
             )}
           </BubbleContent>
