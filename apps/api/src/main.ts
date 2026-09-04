@@ -37,9 +37,16 @@ const agentRuns = new AgentRunExecutor(
     const active = await providerConnectionSettings.isActive(userId, 'github')
     if (!active) return undefined
     try {
+      const connection = await github.connection(userId)
       const token = await github.accessToken(userId)
-      return token
-        ? { server_url: settings.githubMcpUrl, authorization: token, allowed_tools: ['search_repositories', 'get_file_contents'] }
+      const accountLogin = connection.account?.planType
+      return token && connection.status === 'connected' && accountLogin
+        ? {
+            server_url: settings.githubMcpUrl,
+            authorization: token,
+            allowed_tools: ['search_repositories', 'get_file_contents'],
+            account_login: accountLogin,
+          }
         : undefined
     } catch {
       return undefined

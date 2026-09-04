@@ -104,6 +104,7 @@ export type GithubMcpConfig = {
   server_url: string
   authorization: string
   allowed_tools: string[]
+  account_login: string
 }
 export type GithubMcpResolver = (userId: string) => Promise<GithubMcpConfig | undefined>
 

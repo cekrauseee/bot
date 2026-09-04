@@ -142,6 +142,44 @@ describe("response process", () => {
     expect(markup).not.toContain("filesystem_read")
   })
 
+  it("renders GitHub MCP activity as one detailed provider group", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(ResponseProcess, {
+        hasResponse: false,
+        process: {
+          activities: [
+            {
+              action: "search_repositories",
+              id: "github-search",
+              status: "completed",
+              target: "org:acme workspace launch",
+              type: "tool",
+            },
+            {
+              action: "get_file_contents",
+              id: "github-read",
+              status: "completed",
+              target: "acme/atlas/product/launch-brief.md @ refs/heads/main",
+              type: "tool",
+            },
+          ],
+          durationSeconds: 4,
+          status: "processing",
+        },
+      })
+    )
+
+    expect(markup).toContain("Worked in GitHub")
+    expect(markup).toContain("Searched repositories")
+    expect(markup).toContain("Read from GitHub")
+    expect(markup).toContain("org:acme workspace launch")
+    expect(markup).toContain(
+      "acme/atlas/product/launch-brief.md @ refs/heads/main"
+    )
+    expect(markup).not.toContain("search_repositories")
+    expect(markup).not.toContain("get_file_contents")
+  })
+
   it("renders a search with results as a collapsible family item", () => {
     const markup = renderToStaticMarkup(
       React.createElement(ResponseProcess, {

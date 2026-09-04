@@ -50,6 +50,9 @@ GRAPH_RECURSION_MARGIN = 4
 # two additional steps for the model's final summary and boundary handling.
 MAX_TOOL_CALLS_PER_RUN = max(1, (GRAPH_RECURSION_LIMIT - GRAPH_RECURSION_MARGIN - 2) // 2)
 MAX_TOOL_FAILURES_PER_RUN = 8
+GITHUB_TOOL_NAMES = frozenset(
+    spec.id for spec in DEFAULT_TOOL_REGISTRY.list() if spec.connection == "github"
+)
 CheckpointPhase = Literal["absent", "runnable", "completed"]
 _DEFAULT_INVOCATION = object()
 
@@ -175,10 +178,25 @@ def _tool_label(name: str, status: str) -> str:
             "Entered text on the page",
             "Could not enter text on the page",
         ),
+        "browser_press": (
+            "Submitting the page",
+            "Submitted the page",
+            "Could not submit the page",
+        ),
         "browser_close": (
             "Closing the browser",
             "Closed the browser",
             "Could not close the browser",
+        ),
+        "search_repositories": (
+            "Searching repositories",
+            "Searched repositories",
+            "Could not search repositories",
+        ),
+        "get_file_contents": (
+            "Reading from GitHub",
+            "Read from GitHub",
+            "Could not read from GitHub",
         ),
     }
     pending, completed, error = labels.get(
@@ -192,12 +210,26 @@ def _tool_target(name: str, data: dict[str, Any]) -> str | None:
     tool_input = data.get("input")
     if not isinstance(tool_input, dict):
         return None
+    if name == "get_file_contents":
+        owner = tool_input.get("owner")
+        repo = tool_input.get("repo")
+        path = tool_input.get("path")
+        revision = tool_input.get("ref") or tool_input.get("sha")
+        if not isinstance(owner, str) or not isinstance(repo, str):
+            return None
+        location = f"{owner}/{repo}"
+        if isinstance(path, str) and path:
+            location = f"{location}/{path.lstrip('/')}"
+        if isinstance(revision, str) and revision:
+            location = f"{location} @ {revision}"
+        return location[:4_096]
     field = {
         "filesystem_list": "path",
         "filesystem_read": "path",
         "filesystem_write": "path",
         "shell_exec": "command",
         "browser_open": "url",
+        "search_repositories": "query",
     }.get(name)
     value = tool_input.get(field) if field else None
     return value[:4_096] if isinstance(value, str) and value else None
@@ -506,6 +538,10 @@ def _tool_event(event: dict[str, Any]) -> NormalizedEvent | None:
         if kind == "on_tool_start" and plan:
             return NormalizedEvent(type="plan.updated", data={"plan": plan})
         return None
+    if name == "load_skill":
+        # The tool publishes dedicated skill.started/completed events. Keeping
+        # its generic wrapper would show the same action twice in the process.
+        return None
 
     failure = _output_failure(data.get("output"))
     status = {
@@ -621,6 +657,7 @@ async def stream_model(
     if invocation is _DEFAULT_INVOCATION:
         invocation = {"messages": messages}
     searches: dict[str, dict[str, Any]] = {}
+    hosted_tools: dict[str, dict[str, Any]] = {}
     pending_sources: list[dict[str, str]] = []
     emitted_text: list[str] = []
     stream_kwargs: dict[str, Any] = {"version": "v2", "durability": "sync"}
@@ -673,11 +710,42 @@ async def stream_model(
                         continue
                     block_id = str(block.get("id") or block.get("tool_call_id") or "")
                     name = str(block.get("name", "")).lower()
-                    if (
-                        "web_search" not in name
-                        and block_id not in searches
-                        and block_type not in {"server_tool_call", "server_tool_call_chunk"}
-                    ):
+                    is_web_search = "web_search" in name or block_id in searches
+                    if not is_web_search:
+                        existing_tool = hosted_tools.get(block_id)
+                        tool_name = name or str((existing_tool or {}).get("name", ""))
+                        if tool_name not in GITHUB_TOOL_NAMES:
+                            continue
+                        tool_id = block_id or f"github-tool-{len(hosted_tools) + 1}"
+                        existing_tool = hosted_tools.get(tool_id)
+                        status = "in_progress"
+                        if block_type == "server_tool_result":
+                            result_status = str(block.get("status", "completed")).lower()
+                            status = (
+                                "failed"
+                                if result_status in {"error", "failed", "incomplete"}
+                                else "completed"
+                            )
+                        tool = {
+                            **(existing_tool or {}),
+                            "id": tool_id,
+                            "name": tool_name,
+                            "label": _tool_label(tool_name, status),
+                            "status": status,
+                        }
+                        args = block.get("args") or {}
+                        target = _tool_target(
+                            tool_name,
+                            {"input": args if isinstance(args, dict) else {}},
+                        )
+                        if target:
+                            tool["target"] = target
+                        hosted_tools[tool_id] = tool
+                        if block_type == "server_tool_result":
+                            event_type = "tool.completed"
+                        else:
+                            event_type = "tool.updated" if existing_tool else "tool.started"
+                        yield {"type": event_type, "data": {"tool": tool}}
                         continue
                     search_id = block_id or "web-search"
                     existing = searches.get(search_id)
@@ -925,6 +993,17 @@ def build_model(
             system_prompt += (
                 " If required information is missing, report the smallest concrete blocker "
                 "to the parent agent."
+            )
+        if depth == 0 and github_mcp is not None:
+            account_login = json.dumps(github_mcp.account_login)
+            system_prompt += (
+                " A connected GitHub account is available with login "
+                f"{account_login}. For requests about that account, its repositories, or "
+                "repository contents, call load_skill with skill_id github before the first "
+                "GitHub MCP call in this run. Then use the GitHub MCP tools directly; do not "
+                "use web_search or the browser as a precursor or substitute when those tools "
+                "can answer the request. For requests for 'my repositories', search with the "
+                f"exact qualifier user:{github_mcp.account_login}."
             )
         if depth == 0 and current_task_plan:
             serialized_plan = json.dumps(

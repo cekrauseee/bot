@@ -39,6 +39,7 @@ describe('durable agent event contract', () => {
       server_url: 'https://api.githubcopilot.com/mcp/',
       authorization: 'in-memory-token',
       allowed_tools: ['search_repositories', 'get_file_contents'],
+      account_login: 'octocat',
     })
     expect(configured.github_mcp).toMatchObject({ server_url: 'https://api.githubcopilot.com/mcp/' })
     expect(request).not.toHaveProperty('github_mcp')

@@ -30,6 +30,40 @@ describe("conversation simulator state machine", () => {
     expect(snapshot.record.activeAssistantId).toBe("simulation-assistant-1")
   })
 
+  it("projects GitHub skill and MCP activity into the conversation process", () => {
+    const steps = createConversationSimulation(startedAt)
+    const githubReadIndex = steps.findIndex(
+      (step) => step.label === "GitHub brief read"
+    )
+    const snapshot = simulationSnapshotAt(steps, githubReadIndex, startedAt)
+    const activities = snapshot.record.messages[1]?.process?.activities ?? []
+
+    expect(activities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "github-skill",
+          name: "github",
+          status: "completed",
+          type: "skill",
+        }),
+        expect.objectContaining({
+          action: "search_repositories",
+          id: "github-search-repositories",
+          status: "completed",
+          target: "org:acme workspace launch",
+          type: "tool",
+        }),
+        expect.objectContaining({
+          action: "get_file_contents",
+          id: "github-read-launch-brief",
+          status: "completed",
+          target: "acme/atlas/product/launch-brief.md @ refs/heads/main",
+          type: "tool",
+        }),
+      ])
+    )
+  })
+
   it("builds both completed turns at the final state", () => {
     const steps = createConversationSimulation(startedAt)
     const snapshot = simulationSnapshotAt(steps, steps.length - 1, startedAt)

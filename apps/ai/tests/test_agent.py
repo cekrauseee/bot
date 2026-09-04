@@ -16,6 +16,7 @@ from my_bot_ai.features.agent.contracts import (
     AgentRequest,
     ConversationTitleRequest,
     ConversationTitleResponse,
+    GithubMcpConfig,
     PlanStep,
     resolve_model_settings,
 )
@@ -28,6 +29,7 @@ from my_bot_ai.features.agent.service import (
     MAX_TOOL_CALLS_PER_RUN,
     _safe_tool_error,
     _tool_error_middleware,
+    _tool_event,
     build_model,
     child_thread_id,
     prepare_agent_request,
@@ -154,12 +156,36 @@ class ResultChunk:
     content_blocks = [{"type": "server_tool_result", "tool_call_id": "ws1", "status": "completed"}]
 
 
+class GithubCallChunk:
+    content_blocks = [
+        {
+            "type": "server_tool_call",
+            "name": "search_repositories",
+            "id": "github-1",
+            "args": {"query": "user:octocat"},
+        }
+    ]
+
+
+class GithubResultChunk:
+    content_blocks = [
+        {"type": "server_tool_result", "tool_call_id": "github-1", "status": "completed"}
+    ]
+
+
 class FakeGraph:
     async def astream_events(self, _input, version, **_kwargs):
         assert version == "v2"
         assert _kwargs["durability"] == "sync"
         yield {"event": "on_chat_model_stream", "data": {"chunk": Chunk()}}
         yield {"event": "on_chat_model_stream", "data": {"chunk": ResultChunk()}}
+
+
+class GithubGraph:
+    async def astream_events(self, _input, version, **_kwargs):
+        assert version == "v2"
+        yield {"event": "on_chat_model_stream", "data": {"chunk": GithubCallChunk()}}
+        yield {"event": "on_chat_model_stream", "data": {"chunk": GithubResultChunk()}}
 
 
 class ActivityStream:
@@ -325,6 +351,37 @@ def test_stream_normalizes_reasoning_text_and_web_sources() -> None:
     ]
 
 
+def test_stream_normalizes_hosted_github_mcp_calls_as_tool_activity() -> None:
+    events = collect(stream_model(GithubGraph(), []))
+
+    assert events == [
+        {
+            "type": "tool.started",
+            "data": {
+                "tool": {
+                    "id": "github-1",
+                    "name": "search_repositories",
+                    "label": "Searching repositories",
+                    "status": "in_progress",
+                    "target": "user:octocat",
+                }
+            },
+        },
+        {
+            "type": "tool.completed",
+            "data": {
+                "tool": {
+                    "id": "github-1",
+                    "name": "search_repositories",
+                    "label": "Searched repositories",
+                    "status": "completed",
+                    "target": "user:octocat",
+                }
+            },
+        },
+    ]
+
+
 def test_recursion_limit_emits_saved_partial_answer_as_truthful_completion() -> None:
     events = collect(
         stream_model(
@@ -401,6 +458,53 @@ def test_plan_tool_and_child_events_are_normalized() -> None:
     }
     assert events[-1]["data"]["child"]["label"] == "Delegated a task"
     assert events[-1]["data"]["child"]["status"] == "completed"
+
+
+def test_github_tool_events_include_safe_inspectable_targets() -> None:
+    search = _tool_event(
+        {
+            "event": "on_tool_start",
+            "name": "search_repositories",
+            "run_id": "github-search",
+            "data": {"input": {"query": "org:acme workspace launch"}},
+        }
+    )
+    read = _tool_event(
+        {
+            "event": "on_tool_end",
+            "name": "get_file_contents",
+            "run_id": "github-read",
+            "data": {
+                "input": {
+                    "owner": "acme",
+                    "repo": "atlas",
+                    "path": "/product/launch-brief.md",
+                    "ref": "refs/heads/main",
+                }
+            },
+        }
+    )
+
+    assert search is not None
+    assert search.data["tool"]["target"] == "org:acme workspace launch"
+    assert read is not None
+    assert read.data["tool"]["target"] == (
+        "acme/atlas/product/launch-brief.md @ refs/heads/main"
+    )
+
+
+def test_load_skill_wrapper_is_hidden_in_favor_of_skill_lifecycle_events() -> None:
+    assert (
+        _tool_event(
+            {
+                "event": "on_tool_start",
+                "name": "load_skill",
+                "run_id": "load-github",
+                "data": {"input": {"skill_id": "github"}},
+            }
+        )
+        is None
+    )
 
 
 def test_browser_tool_events_project_truthful_durable_status() -> None:
@@ -750,6 +854,47 @@ def test_provider_constructors_receive_only_supported_settings() -> None:
     assert provider_builtin_tools(openai_settings) == [{"type": "web_search"}]
 
     assert resolve_model_settings("gpt-5.6-terra", "none", "standard").reasoning_effort == "none"
+
+
+def test_connected_github_context_routes_account_requests_to_mcp() -> None:
+    created: dict[str, object] = {}
+    secret = "github-secret"
+
+    def create(**kwargs):
+        created.update(kwargs)
+        return object()
+
+    with (
+        patch(
+            "my_bot_ai.features.agent.service.build_chat_model",
+            return_value=(
+                object(),
+                resolve_model_settings("gpt-5.6-luna", "medium", "standard"),
+            ),
+        ),
+        patch("my_bot_ai.features.agent.service.provider_builtin_tools", return_value=[]),
+        patch("my_bot_ai.features.agent.service.create_agent", side_effect=create),
+    ):
+        build_model(
+            Settings(environment="test"),
+            "gpt-5.6-luna",
+            "medium",
+            "standard",
+            run_id=RUN,
+            checkpointer=object(),
+            github_mcp=GithubMcpConfig(
+                server_url="https://mcp.github.example",
+                authorization=secret,
+                account_login="octocat",
+                allowed_tools=["search_repositories", "get_file_contents"],
+            ),
+        )
+
+    prompt = str(created["system_prompt"])
+    assert "load_skill with skill_id github" in prompt
+    assert "do not use web_search or the browser" in prompt
+    assert "user:octocat" in prompt
+    assert secret not in prompt
 
 
 def test_child_agents_are_recursive_configurable_and_checkpoint_led() -> None:

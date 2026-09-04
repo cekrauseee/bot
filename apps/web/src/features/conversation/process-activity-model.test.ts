@@ -8,6 +8,7 @@ import {
   processActivityGroupLabel,
   processSearchCopy,
   processSkillCopy,
+  processSkillName,
   processToolCopy,
 } from "@/features/conversation/process-activity-model"
 
@@ -138,6 +139,56 @@ describe("process activity model", () => {
         { id: "s3", name: "calendar", status: "in_progress", type: "skill" },
       ])
     ).toBe("Loading skills")
+    expect(processSkillName("github")).toBe("GitHub")
+    expect(processSkillName("calendar")).toBe("calendar")
+  })
+
+  it("hides the generic load wrapper when skill lifecycle activity exists", () => {
+    const items = groupProcessActivities([
+      tool("load-github", "load_skill"),
+      { id: "github", name: "github", status: "completed", type: "skill" },
+    ])
+
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({
+      activity: { id: "github", type: "skill" },
+      type: "activity",
+    })
+    expect(
+      processToolCopy({
+        action: "load_skill",
+        id: "load-calendar",
+        status: "completed",
+        type: "tool",
+      })
+    ).toEqual({ label: "Loaded skill" })
+  })
+
+  it("groups GitHub MCP calls with specific read-only copy", () => {
+    const search = tool(
+      "github-search",
+      "search_repositories",
+      "org:acme workspace launch"
+    )
+    const read = tool(
+      "github-read",
+      "get_file_contents",
+      "acme/atlas/product/launch-brief.md @ refs/heads/main"
+    )
+    const items = groupProcessActivities([search, read])
+
+    expect(items[0]).toMatchObject({ family: "github", type: "group" })
+    expect(processToolCopy({ ...search, status: "in_progress" })).toEqual({
+      label: "Searching repositories",
+      detail: "org:acme workspace launch",
+    })
+    expect(processToolCopy({ ...read, status: "completed" })).toEqual({
+      label: "Read from GitHub",
+      detail: "acme/atlas/product/launch-brief.md @ refs/heads/main",
+    })
+    expect(processActivityGroupLabel("github", [search, read])).toBe(
+      "Worked in GitHub"
+    )
   })
 
   it("shows a safe failure detail for a failed tool", () => {

@@ -10,6 +10,7 @@ export type ProcessActivityFamily =
   | "files-inspected"
   | "files-read"
   | "files-updated"
+  | "github"
   | "web-search"
   | "skills"
 
@@ -28,12 +29,19 @@ const COLLAPSED_FAMILIES = new Set<ProcessActivityFamily>([
   "web-search",
 ])
 const BROWSER_ACTIVE_STATES = new Set(["launching", "live", "awaiting_user"])
+const SKILL_NAMES: Readonly<Record<string, string>> = {
+  github: "GitHub",
+}
 const TOOL_FAMILY_RULES: readonly {
   actions?: readonly string[]
   family: ProcessActivityFamily
   prefix?: string
 }[] = [
   { family: "browser", prefix: "browser_" },
+  {
+    actions: ["get_file_contents", "search_repositories"],
+    family: "github",
+  },
   {
     actions: ["filesystem_list", "list"],
     family: "files-inspected",
@@ -73,6 +81,7 @@ const GROUP_LABELS: Record<ProcessActivityFamily, [string, string, string]> = {
     "Updated files",
     "Had trouble updating files",
   ],
+  github: ["Working in GitHub", "Worked in GitHub", "Had trouble with GitHub"],
   "web-search": [
     "Searching the web",
     "Searched the web",
@@ -210,6 +219,22 @@ const TOOL_COPY_DEFINITIONS: Record<string, ToolCopyDefinition> = {
     ["Updating", "Updated", "Could not update"],
     fileDetail
   ),
+  search_repositories: defineToolCopy(
+    [
+      "Searching repositories",
+      "Searched repositories",
+      "Could not search repositories",
+    ],
+    targetDetail
+  ),
+  get_file_contents: defineToolCopy(
+    ["Reading from GitHub", "Read from GitHub", "Could not read from GitHub"],
+    targetDetail
+  ),
+  load_skill: defineToolCopy(
+    ["Loading skill", "Loaded skill", "Could not load skill"],
+    targetDetail
+  ),
   browser_click: defineToolCopy(
     [
       "Interacting with the page",
@@ -279,6 +304,10 @@ export function processSkillCopy(
   }
 }
 
+export function processSkillName(name: string) {
+  return SKILL_NAMES[name.trim().toLowerCase()] ?? name
+}
+
 export function processActivityFamily(
   activity: ProcessActivity
 ): ProcessActivityFamily | null {
@@ -298,10 +327,22 @@ export function processActivityFamily(
 export function groupProcessActivities(
   activities: readonly ProcessActivity[]
 ): ProcessActivityItem[] {
+  const hasSkillLifecycle = activities.some(
+    (activity) => activity.type === "skill"
+  )
+  const visibleActivities = hasSkillLifecycle
+    ? activities.filter(
+        (activity) =>
+          !(
+            activity.type === "tool" &&
+            normalizeProcessAction(activity.action) === "load_skill"
+          )
+      )
+    : activities
   const items: ProcessActivityItem[] = []
 
-  for (let index = 0; index < activities.length;) {
-    const activity = activities[index]
+  for (let index = 0; index < visibleActivities.length;) {
+    const activity = visibleActivities[index]
     const family = processActivityFamily(activity)
     if (!family) {
       items.push({ activity, type: "activity" })
@@ -311,12 +352,12 @@ export function groupProcessActivities(
 
     let end = index + 1
     while (
-      end < activities.length &&
-      processActivityFamily(activities[end]) === family
+      end < visibleActivities.length &&
+      processActivityFamily(visibleActivities[end]) === family
     ) {
       end += 1
     }
-    const grouped = activities.slice(index, end)
+    const grouped = visibleActivities.slice(index, end)
     const shouldGroupSearch =
       family === "web-search" &&
       activity.type === "search" &&

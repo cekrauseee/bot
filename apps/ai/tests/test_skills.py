@@ -92,19 +92,33 @@ def test_github_mcp_config_requires_https_and_safe_bounded_tools() -> None:
     config = GithubMcpConfig(
         server_url="https://mcp.github.example",
         authorization=SecretStr("secret"),
+        account_login="octocat",
         allowed_tools=["search_repositories"],
     )
     assert config.allowed_tools == ["search_repositories"]
     assert GithubMcpConfig(
-        server_url="https://mcp.github.example", authorization=SecretStr("secret")
+        server_url="https://mcp.github.example",
+        authorization=SecretStr("secret"),
+        account_login="octocat",
     ).allowed_tools is None
     with pytest.raises(ValidationError):
-        GithubMcpConfig(server_url="http://mcp.github.example", authorization=SecretStr("secret"))
+        GithubMcpConfig(
+            server_url="http://mcp.github.example",
+            authorization=SecretStr("secret"),
+            account_login="octocat",
+        )
     with pytest.raises(ValidationError):
         GithubMcpConfig(
             server_url="https://mcp.github.example",
             authorization=SecretStr("secret"),
+            account_login="octocat",
             allowed_tools=["delete repository"],
+        )
+    with pytest.raises(ValidationError):
+        GithubMcpConfig(
+            server_url="https://mcp.github.example",
+            authorization=SecretStr("secret"),
+            account_login="invalid login",
         )
 
 

@@ -579,8 +579,7 @@ export function applyTurnEvent(
     return next
 
   const terminalEvent =
-    event.type === "turn.completed" ||
-    event.type === "turn.failed"
+    event.type === "turn.completed" || event.type === "turn.failed"
   if (next.stopRequested && !terminalEvent) {
     return {
       ...next,
@@ -632,6 +631,7 @@ export function applyTurnEvent(
   } else if (
     event.type.startsWith("step.") ||
     event.type.startsWith("tool.") ||
+    event.type.startsWith("skill.") ||
     event.type.startsWith("child.")
   ) {
     const activity = eventActivity(event)
@@ -680,10 +680,7 @@ export function applyTurnEvent(
           : undefined,
       }))
     }
-  } else if (
-    event.type === "turn.completed" ||
-    event.type === "turn.failed"
-  ) {
+  } else if (event.type === "turn.completed" || event.type === "turn.failed") {
     next = updateAssistant(next, (assistant) => {
       const error = record(event.data.error)
       const errorMessage = string(error?.message)

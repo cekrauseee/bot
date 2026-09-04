@@ -162,6 +162,14 @@ class GithubMcpConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     server_url: str
     authorization: SecretStr
+    account_login: Annotated[
+        str,
+        Field(
+            min_length=1,
+            max_length=100,
+            pattern=r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$",
+        ),
+    ]
     allowed_tools: list[
         Annotated[
             str,

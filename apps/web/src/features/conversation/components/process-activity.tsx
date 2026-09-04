@@ -21,6 +21,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import { GitHubLogo } from "@/components/ui/github-logo"
 import type {
   BrowserProjection,
   ProcessActivity,
@@ -38,6 +39,7 @@ import {
   processSearchCopy,
   processToolCopy,
   processSkillCopy,
+  processSkillName,
   type ProcessActivityFamily,
   type ProcessActivityItem,
 } from "@/features/conversation/process-activity-model"
@@ -126,7 +128,10 @@ const TOOL_ICON_RULES: readonly {
   { icon: Globe2Icon, prefix: "browser_" },
 ]
 
-const GROUP_ICONS: Record<ProcessActivityFamily, LucideIcon> = {
+const GROUP_ICONS: Record<
+  Exclude<ProcessActivityFamily, "github">,
+  LucideIcon
+> = {
   browser: Globe2Icon,
   commands: SquareTerminalIcon,
   "files-inspected": FileTextIcon,
@@ -146,6 +151,13 @@ const TRACE_ICONS: Record<string, LucideIcon> = {
 
 function ToolIcon({ action }: { action: string }) {
   const normalized = normalizeProcessAction(action)
+  if (normalized === "load_skill") return <SparklesIcon />
+  if (
+    normalized === "search_repositories" ||
+    normalized === "get_file_contents"
+  ) {
+    return <GitHubLogo />
+  }
   const matchingRule = TOOL_ICON_RULES.find(
     ({ actions, prefix }) =>
       actions?.includes(normalized) ||
@@ -156,6 +168,7 @@ function ToolIcon({ action }: { action: string }) {
 }
 
 function GroupIcon({ family }: { family: ProcessActivityFamily }) {
+  if (family === "github") return <GitHubLogo />
   const Icon = GROUP_ICONS[family]
   return <Icon />
 }
@@ -324,14 +337,15 @@ function ProcessActivityRow({ activity }: { activity: ProcessActivity }) {
 
   if (activity.type === "skill") {
     const copy = processSkillCopy(activity)
+    const skillName = processSkillName(activity.name)
     return (
       <ActivityRow
         icon={<SparklesIcon />}
         label={copy.label}
-        detail={<span className="font-mono text-sm">{activity.name}</span>}
+        detail={<span className="font-mono text-sm">{skillName}</span>}
         separator="space"
         active={isProcessActivityActive(activity)}
-        title={[copy.label, activity.name, activity.detail]
+        title={[copy.label, skillName, activity.detail]
           .filter(Boolean)
           .join(" · ")}
       />
