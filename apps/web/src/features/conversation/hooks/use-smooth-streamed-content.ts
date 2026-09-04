@@ -32,14 +32,13 @@ export function useSmoothStreamedContent(
     flushOnStreamEnd = false,
   }: { animateInitial?: boolean; flushOnStreamEnd?: boolean } = {}
 ) {
+  void animateInitial
   const reducedMotion = usePrefersReducedMotion()
-  const initialContent =
-    typeof window !== "undefined" &&
-    streaming &&
-    animateInitial &&
-    !reducedMotion
-      ? ""
-      : content
+  // Hydrated content is already persisted history. Establish it as the
+  // immediate baseline; only subsequent deltas belong in the pacing queue.
+  // `animateInitial` remains accepted for callers but must not replay a whole
+  // response after a reconnect or detail load.
+  const initialContent = content
   const animationEnabledRef = useRef(streaming)
   const receivedContentRef = useRef(initialContent)
   const displayedContentRef = useRef(initialContent)

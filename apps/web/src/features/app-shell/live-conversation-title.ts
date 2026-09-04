@@ -19,10 +19,7 @@ const agentEventTypes = new Set([
   "turn.completed",
   "turn.failed",
 ])
-const terminalEventTypes = new Set([
-  "turn.completed",
-  "turn.failed",
-])
+const terminalEventTypes = new Set(["turn.completed", "turn.failed"])
 const canonicalSequence = /^(0|[1-9]\d*)$/
 const maximumSequence = 9_223_372_036_854_775_807n
 

@@ -147,18 +147,43 @@ def test_load_skill_events_bracket_body_read_and_report_failures(
     skill_dir.mkdir()
     path = skill_dir / "SKILL.md"
     path.write_text("---\nname: demo\ndescription: Demo\n---\nbody", encoding="utf-8")
-    events: list[tuple[str, str]] = []
+    events: list[tuple[str, str, str]] = []
 
     async def dispatch(name: str, data: dict[str, object]) -> None:
-        events.append((name, data["skill"]["status"]))  # type: ignore[index]
+        skill = data["skill"]  # type: ignore[index]
+        events.append((name, skill["status"], skill["id"]))  # type: ignore[index]
 
     monkeypatch.setattr("my_bot_ai.features.skills.tools.adispatch_custom_event", dispatch)
     from my_bot_ai.features.skills.registry import SkillRegistry
 
     tool = build_load_skill_tool(SkillRegistry((tmp_path,)))
-    assert anyio.run(tool.ainvoke, {"skill_id": "demo"}) == "body"
-    assert events == [("skill.started", "in_progress"), ("skill.completed", "completed")]
+    result = anyio.run(
+        tool.ainvoke,
+        {
+            "name": "load_skill",
+            "args": {"skill_id": "demo"},
+            "type": "tool_call",
+            "id": "skill-call-1",
+        },
+    )
+    assert result.content == "body"
+    assert events[0] == ("skill.started", "in_progress", "skill-call-1")
+    assert events == [
+        ("skill.started", "in_progress", "skill-call-1"),
+        ("skill.completed", "completed", "skill-call-1"),
+    ]
     path.unlink()
     with pytest.raises(FileNotFoundError):
-        anyio.run(tool.ainvoke, {"skill_id": "demo"})
-    assert events[-2:] == [("skill.started", "in_progress"), ("skill.completed", "failed")]
+        anyio.run(
+            tool.ainvoke,
+            {
+                "name": "load_skill",
+                "args": {"skill_id": "demo"},
+                "type": "tool_call",
+                "id": "skill-call-2",
+            },
+        )
+    assert events[-2:] == [
+        ("skill.started", "in_progress", "skill-call-2"),
+        ("skill.completed", "failed", "skill-call-2"),
+    ]

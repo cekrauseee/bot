@@ -65,6 +65,7 @@ describe('configuration', () => {
       WEB_BASE_URL: 'https://app.example.com',
       API_BASE_URL: 'https://api.example.com',
       GOOGLE_REDIRECT_URI: 'https://api.example.com/auth/google/callback',
+      GITHUB_OAUTH_REDIRECT_URI: 'https://api.example.com/auth/github/callback',
       SESSION_SECRET: 'session-secret-that-is-at-least-32-characters-long',
       OTP_PEPPER: 'otp-pepper-that-is-at-least-32-characters-long',
       RATE_LIMIT_PEPPER: 'rate-limit-pepper-that-is-at-least-32-characters',
@@ -73,6 +74,7 @@ describe('configuration', () => {
       GOOGLE_CLIENT_SECRET: 'google-client-secret',
       RESEND_API_KEY: 're_live_valid-key',
       RESEND_FROM: 'Bot <auth@example.com>',
+      GITHUB_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('base64'),
     }
     expect(loadSettings(production)).toMatchObject({ secureCookies: true, codexHomeRoot: null, codexLoginMode: 'device' })
     expect(loadSettings({ ...production, CODEX_LOGIN_MODE: 'browser' }).codexLoginMode).toBe('browser')

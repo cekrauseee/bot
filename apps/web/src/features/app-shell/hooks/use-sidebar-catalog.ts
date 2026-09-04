@@ -258,7 +258,8 @@ export function useSidebarCatalog(enabled: boolean) {
       runMutation(
         `conversation-model:${conversationId}`,
         "Unable to save these conversation preferences. Try again.",
-        () => appShellApi.setConversationPreferences(conversationId, preferences),
+        () =>
+          appShellApi.setConversationPreferences(conversationId, preferences),
         replaceConversation,
         false
       ),

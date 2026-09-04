@@ -63,7 +63,13 @@ function expiryMessage(expiresInSeconds: number) {
   return `This code is valid for ${minutes} minute${minutes === 1 ? "" : "s"}.`
 }
 
-export function SignInCard({ googleError = false, desktopTransaction }: { googleError?: boolean; desktopTransaction?: string }) {
+export function SignInCard({
+  googleError = false,
+  desktopTransaction,
+}: {
+  googleError?: boolean
+  desktopTransaction?: string
+}) {
   const navigate = useNavigate()
   const emailInputRef = useRef<HTMLInputElement>(null)
   const otpInputRef = useRef<HTMLInputElement>(null)
@@ -141,7 +147,9 @@ export function SignInCard({ googleError = false, desktopTransaction }: { google
     try {
       await authApi.verifyOtp(challenge.challenge_id, code)
       if (desktopTransaction) {
-        window.location.assign(`/sign?desktop_transaction=${encodeURIComponent(desktopTransaction)}`)
+        window.location.assign(
+          `/sign?desktop_transaction=${encodeURIComponent(desktopTransaction)}`
+        )
       } else {
         navigate(consumeAuthDestination(), { replace: true })
       }

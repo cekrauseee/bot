@@ -23,6 +23,8 @@ export type ConversationRecord = {
   version: number
   browserFrame?: BrowserFrame
   browserProjection?: BrowserProjection | null
+  /** Highest conversation event cursor observed in an HTTP repeatable-read snapshot. */
+  eventCursor?: string
 }
 
 export const emptyConversationRecord = (): ConversationRecord => ({
@@ -38,6 +40,13 @@ export function applyBrowserFrame(
   runId: string
 ) {
   if (!current.runId || current.runId !== runId) return current
+  if (current.browserFrame) {
+    const previousAt = Date.parse(current.browserFrame.capturedAt)
+    const nextAt = Date.parse(frame.capturedAt)
+    if (Number.isFinite(previousAt) && Number.isFinite(nextAt) && nextAt < previousAt) {
+      return current
+    }
+  }
   return { ...current, browserFrame: frame, version: current.version + 1 }
 }
 
@@ -335,7 +344,10 @@ export function mapApiMessage(value: unknown): ConversationMessageData | null {
             activities,
             durationSeconds: processDuration(createdAt, updatedAt),
             startedAt: Date.parse(createdAt),
-            status: streaming && !content ? "processing" : "processed",
+            // Persisted partial assistants remain active even when their
+            // content is already non-empty. Only a terminal event (or an
+            // explicit local cancellation) closes the process.
+            status: streaming ? "processing" : "processed",
           },
         }
       : {}),
@@ -349,7 +361,8 @@ export function recordFromDetail(
     turn_id?: string
     last_event_sequence?: string | null
     browserProjection?: BrowserProjection | null
-  }
+  },
+  eventCursor?: string
 ): ConversationRecord {
   let activeAssistantId: string | undefined
   const mapped = messages.flatMap((message) => {
@@ -379,6 +392,32 @@ export function recordFromDetail(
       : {}),
     status: "ready",
     version: 0,
+    ...(eventCursor !== undefined ? { eventCursor } : {}),
+  }
+}
+
+/** Merge an HTTP snapshot without allowing a delayed request to rewind live state. */
+export function mergeConversationSnapshot(
+  current: ConversationRecord,
+  incoming: ConversationRecord,
+  incomingCursor: string,
+) {
+  try {
+    const currentCursor = BigInt(current.eventCursor ?? current.lastEventSequence ?? "0")
+    const snapshotCursor = BigInt(incomingCursor)
+    if (snapshotCursor < currentCursor) return current
+    const sameRun = current.runId !== undefined && current.runId === incoming.runId
+    return {
+      ...incoming,
+      version: current.version,
+      ...(sameRun && current.browserFrame ? { browserFrame: current.browserFrame } : {}),
+      ...(sameRun && current.browserProjection && !incoming.browserProjection
+        ? { browserProjection: current.browserProjection }
+        : {}),
+      eventCursor: incomingCursor,
+    }
+  } catch {
+    return current
   }
 }
 
@@ -484,7 +523,11 @@ function eventActivity(event: TurnStreamEvent): ProcessActivity | null {
       query: string(raw.query) ?? string(raw.label) ?? "Web search",
       ...(activityStatus(raw.status)
         ? { status: activityStatus(raw.status) }
-        : {}),
+        : event.type === "step.started"
+          ? { status: "in_progress" as const }
+          : event.type === "step.completed"
+            ? { status: "completed" as const }
+            : {}),
       ...(results?.length ? { results } : {}),
     }
   }
@@ -498,7 +541,11 @@ function eventActivity(event: TurnStreamEvent): ProcessActivity | null {
       ...(string(raw.detail) ? { detail: string(raw.detail) } : {}),
       ...(activityStatus(raw.status)
         ? { status: activityStatus(raw.status) }
-        : {}),
+        : event.type === "tool.started"
+          ? { status: "in_progress" as const }
+          : event.type === "tool.completed"
+            ? { status: "completed" as const }
+            : {}),
     }
   }
   if (key === "skill") {
@@ -524,7 +571,11 @@ function eventActivity(event: TurnStreamEvent): ProcessActivity | null {
       ...(string(raw.detail) ? { detail: string(raw.detail) } : {}),
       ...(activityStatus(raw.status)
         ? { status: activityStatus(raw.status) }
-        : {}),
+        : event.type === "child.started"
+          ? { status: "in_progress" as const }
+          : event.type === "child.completed"
+            ? { status: "completed" as const }
+            : {}),
     }
   }
   return null
@@ -536,10 +587,8 @@ export function applyTurnEvent(
   at: number
 ): ConversationRecord {
   try {
-    if (
-      current.lastEventSequence !== undefined &&
-      BigInt(event.sequence) <= BigInt(current.lastEventSequence)
-    ) {
+    const currentCursor = current.eventCursor ?? current.lastEventSequence
+    if (currentCursor !== undefined && BigInt(event.sequence) <= BigInt(currentCursor)) {
       return current
     }
   } catch {
@@ -553,7 +602,26 @@ export function applyTurnEvent(
   if (event.type === "turn.started") {
     const user = mapApiMessage(event.data.user_message)
     const assistant = mapApiMessage(event.data.assistant_message)
-    if (!user || !assistant) return next
+    // Checkpoint-only starts are emitted when a durable LangGraph run is
+    // resumed. They advance the cursor/version but must not replace the
+    // already hydrated message list.
+    if (!user || !assistant) {
+      if (
+        current.runId &&
+        (current.runId !== event.run_id ||
+          (current.turnId && current.turnId !== event.turn_id))
+      ) {
+        return current
+      }
+      return {
+        ...current,
+        error: "",
+        status: "ready",
+        lastEventSequence: event.sequence,
+        eventCursor: event.sequence,
+        version: current.version + 1,
+      }
+    }
     const startedAt = Date.parse(assistant.createdAt ?? "")
     const processStartedAt = Number.isFinite(startedAt) ? startedAt : at
     assistant.process = {
@@ -580,7 +648,7 @@ export function applyTurnEvent(
     (next.runId !== event.run_id ||
       (next.turnId && next.turnId !== event.turn_id))
   )
-    return next
+    return current
 
   const terminalEvent =
     event.type === "turn.completed" || event.type === "turn.failed"
@@ -588,6 +656,7 @@ export function applyTurnEvent(
     return {
       ...next,
       lastEventSequence: event.sequence,
+      eventCursor: event.sequence,
       version: next.version + 1,
     }
   }
@@ -604,7 +673,19 @@ export function applyTurnEvent(
       }
       const activities = [...process.activities]
       const last = activities.at(-1)
-      if (
+      const activityId = string(event.data.activity_id)
+      const stableIndex = activityId
+        ? activities.findIndex((activity) => activity.id === activityId)
+        : -1
+      if (stableIndex >= 0 && activities[stableIndex]?.type === "text") {
+        const existing = activities[stableIndex]
+        activities[stableIndex] = {
+          ...existing,
+          content: existing.content + delta,
+          lastSequence: event.sequence,
+        }
+      } else if (
+        !activityId &&
         last?.type === "text" &&
         last.lastSequence !== undefined &&
         BigInt(last.lastSequence) + 1n === BigInt(event.sequence)
@@ -616,7 +697,9 @@ export function applyTurnEvent(
         }
       } else {
         activities.push({
-          id: `${assistant.id}-reasoning-${event.sequence}`,
+          id:
+            string(event.data.activity_id) ??
+            `reasoning-${event.sequence}`,
           type: "text",
           content: delta,
           lastSequence: event.sequence,
@@ -679,7 +762,7 @@ export function applyTurnEvent(
           ? {
               ...assistant.process,
               durationSeconds: elapsed(next, at),
-              status: "processed",
+              status: "processing",
             }
           : undefined,
       }))
@@ -719,6 +802,7 @@ export function applyTurnEvent(
   return {
     ...next,
     lastEventSequence: event.sequence,
+    eventCursor: event.sequence,
     version: next.version + 1,
   }
 }

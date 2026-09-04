@@ -18,7 +18,11 @@ type HandoffState =
   | { status: "ready"; callbackUrl: string }
   | { status: "error" }
 
-export function DesktopBrowserHandoff({ transactionId }: { transactionId: string }) {
+export function DesktopBrowserHandoff({
+  transactionId,
+}: {
+  transactionId: string
+}) {
   const [state, setState] = useState<HandoffState>({ status: "finishing" })
 
   useEffect(() => {
@@ -31,7 +35,10 @@ export function DesktopBrowserHandoff({ transactionId }: { transactionId: string
         const callbackUrl = desktopCallbackUrl(callback_url, transactionId)
         if (!active) return
         setState({ status: "ready", callbackUrl })
-        redirect = window.setTimeout(() => window.location.assign(callbackUrl), 0)
+        redirect = window.setTimeout(
+          () => window.location.assign(callbackUrl),
+          0
+        )
       })
       .catch(() => {
         if (active) setState({ status: "error" })
@@ -47,7 +54,9 @@ export function DesktopBrowserHandoff({ transactionId }: { transactionId: string
     return (
       <Card className="w-full max-w-sm" size="sm">
         <CardHeader role="alert">
-          <CardTitle><h1>Unable to finish sign-in</h1></CardTitle>
+          <CardTitle>
+            <h1>Unable to finish sign-in</h1>
+          </CardTitle>
           <CardDescription>Return to Bot and try again.</CardDescription>
         </CardHeader>
       </Card>
@@ -57,14 +66,25 @@ export function DesktopBrowserHandoff({ transactionId }: { transactionId: string
   return (
     <Card className="w-full max-w-sm" size="sm">
       <CardHeader>
-        <CardTitle><h1>{state.status === "ready" ? "You’re signed in" : "Finishing sign-in"}</h1></CardTitle>
+        <CardTitle>
+          <h1>
+            {state.status === "ready"
+              ? "You’re signed in"
+              : "Finishing sign-in"}
+          </h1>
+        </CardTitle>
         <CardDescription>
-          {state.status === "ready" ? "Bot should open automatically." : "This will only take a moment."}
+          {state.status === "ready"
+            ? "Bot should open automatically."
+            : "This will only take a moment."}
         </CardDescription>
       </CardHeader>
       <CardContent>
         {state.status === "ready" ? (
-          <a className={cn(buttonVariants(), "w-full")} href={state.callbackUrl}>
+          <a
+            className={cn(buttonVariants(), "w-full")}
+            href={state.callbackUrl}
+          >
             Open Bot
           </a>
         ) : (

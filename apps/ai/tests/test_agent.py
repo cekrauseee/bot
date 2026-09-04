@@ -220,6 +220,83 @@ class GithubMcpGraph:
         yield {"event": "on_chat_model_end", "data": {"output": GithubMcpChunk()}}
 
 
+class CumulativeReasoningGraph:
+    async def astream_events(self, _input, version, **_kwargs):
+        assert version == "v2"
+        for summary in ("Planning", "Planning carefully", "Planning carefully"):
+            yield {
+                "event": "on_chat_model_stream",
+                "data": {"chunk": SimpleNamespace(content_blocks=[
+                    {"type": "reasoning", "summary": summary},
+                ])},
+            }
+
+
+class InterleavedReasoningGraph:
+    async def astream_events(self, _input, version, **_kwargs):
+        assert version == "v2"
+        yield {
+            "event": "on_chat_model_stream",
+            "run_id": "model-run-1",
+            "data": {"chunk": SimpleNamespace(content_blocks=[
+                {"type": "reasoning", "summary": "Before tool"},
+            ])},
+        }
+        yield {
+            "event": "on_tool_start",
+            "run_id": "tool-run-1",
+            "name": "filesystem_read",
+            "data": {"input": {"path": "/workspace/README.md"}},
+        }
+        yield {
+            "event": "on_chat_model_stream",
+            "run_id": "model-run-2",
+            "data": {"chunk": SimpleNamespace(content_blocks=[
+                {"type": "reasoning", "summary": "After tool"},
+            ])},
+            }
+
+
+class IncompleteLifecycleGraph:
+    async def astream_events(self, _input, version, **_kwargs):
+        assert version == "v2"
+        yield {
+            "event": "on_chat_model_stream",
+            "data": {"chunk": SimpleNamespace(content_blocks=[
+                {
+                    "type": "server_tool_call",
+                    "name": "web_search",
+                    "id": "search-open",
+                    "args": {"query": "unfinished search"},
+                },
+                {
+                    "type": "server_tool_call",
+                    "name": "remote_mcp",
+                    "id": "github-open",
+                    "extras": {"server_label": "github", "tool_name": "search_repositories"},
+                    "args": {"query": "org:acme"},
+                },
+            ])},
+        }
+
+
+class ProviderErrorAfterActivityGraph:
+    async def astream_events(self, _input, version, **_kwargs):
+        assert version == "v2"
+        yield {
+            "event": "on_chat_model_stream",
+            "data": {"chunk": SimpleNamespace(content_blocks=[
+                {
+                    "type": "server_tool_call",
+                    "name": "remote_mcp",
+                    "id": "github-error",
+                    "extras": {"server_label": "github", "tool_name": "search_repositories"},
+                },
+            ])},
+        }
+        raise RuntimeError("provider stream broke")
+
+
 class ActivityStream:
     async def astream_events(self, _input, version, **_kwargs):
         assert version == "v2"
@@ -414,23 +491,81 @@ def test_stream_normalizes_hosted_github_mcp_calls_as_tool_activity() -> None:
     ]
 
 
-def test_stream_normalizes_responses_api_mcp_call_without_exposing_output() -> None:
-    events = collect(stream_model(GithubMcpGraph(), []))
+def test_stream_reasoning_is_additive_and_has_a_stable_activity_id() -> None:
+    events = collect(
+        stream_model(
+            CumulativeReasoningGraph(), [], config={"configurable": {"thread_id": "run-1"}}
+        )
+    )
 
     assert events == [
         {
-            "type": "tool.completed",
-            "data": {
-                "tool": {
-                    "id": "mcp-github-1",
-                    "name": "get_file_contents",
-                    "label": "Read from GitHub",
-                    "status": "completed",
-                    "target": "acme/atlas/README.md @ refs/heads/main",
-                }
-            },
-        }
+            "type": "reasoning.delta",
+            "data": {"delta": "Planning", "activity_id": "reasoning:run-1"},
+        },
+        {
+            "type": "reasoning.delta",
+            "data": {"delta": " carefully", "activity_id": "reasoning:run-1"},
+        },
     ]
+
+
+def test_stream_keeps_reasoning_activities_distinct_across_model_invocations() -> None:
+    events = collect(stream_model(InterleavedReasoningGraph(), []))
+
+    assert [event["type"] for event in events] == [
+        "reasoning.delta",
+        "tool.started",
+        "reasoning.delta",
+    ]
+    assert events[0]["data"]["activity_id"] == "reasoning:model-run-1"
+    assert events[2]["data"]["activity_id"] == "reasoning:model-run-2"
+
+
+def test_stream_closes_incomplete_provider_activities_on_normal_return() -> None:
+    events = collect(stream_model(IncompleteLifecycleGraph(), []))
+
+    assert [event["type"] for event in events] == [
+        "step.started",
+        "tool.started",
+        "step.completed",
+        "tool.completed",
+    ]
+    assert events[2]["data"]["step"]["status"] == "completed"
+    assert events[3]["data"]["tool"]["status"] == "completed"
+
+
+def test_stream_closes_incomplete_provider_activities_before_reraising_error() -> None:
+    async def run() -> list[dict[str, object]]:
+        yielded: list[dict[str, object]] = []
+        with pytest.raises(RuntimeError, match="provider stream broke"):
+            async for event in stream_model(ProviderErrorAfterActivityGraph(), []):
+                yielded.append(event)
+        return yielded
+
+    events = anyio.run(run)
+    assert events[-1]["type"] == "tool.completed"
+    assert events[-1]["data"]["tool"]["status"] == "failed"  # type: ignore[index]
+
+
+def test_stream_normalizes_responses_api_mcp_call_without_exposing_output() -> None:
+    events = collect(stream_model(GithubMcpGraph(), []))
+
+    assert [event["type"] for event in events] == ["tool.started", "tool.completed"]
+    assert events[0]["data"]["tool"] == {
+        "id": "mcp-github-1",
+        "name": "get_file_contents",
+        "label": "Reading from GitHub",
+        "status": "in_progress",
+        "target": "acme/atlas/README.md @ refs/heads/main",
+    }
+    assert events[1]["data"]["tool"] == {
+        "id": "mcp-github-1",
+        "name": "get_file_contents",
+        "label": "Read from GitHub",
+        "status": "completed",
+        "target": "acme/atlas/README.md @ refs/heads/main",
+    }
     assert "private repository contents" not in json.dumps(events)
 
 

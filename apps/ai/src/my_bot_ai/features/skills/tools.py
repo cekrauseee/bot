@@ -2,7 +2,7 @@
 from typing import Annotated
 
 from langchain_core.callbacks.manager import adispatch_custom_event
-from langchain_core.tools import StructuredTool
+from langchain_core.tools import InjectedToolCallId, StructuredTool
 from pydantic import BaseModel, Field
 
 from my_bot_ai.features.skills.contracts import SkillMetadata
@@ -11,16 +11,20 @@ from my_bot_ai.features.skills.registry import SkillRegistry
 
 class LoadSkillInput(BaseModel):
     skill_id: str = Field(min_length=1, max_length=100)
+    tool_call_id: Annotated[str, InjectedToolCallId]
 
 
-async def _dispatch_skill_event(name: str, metadata: SkillMetadata, status: str) -> None:
+async def _dispatch_skill_event(
+    name: str, metadata: SkillMetadata, status: str, call_id: str
+) -> None:
     """Best-effort telemetry; loading must not fail because a callback is absent."""
     try:
         await adispatch_custom_event(
             name,
             {
                 "skill": {
-                    "id": metadata.id,
+                    "id": call_id,
+                    "skill_id": metadata.id,
                     "name": metadata.name,
                     "status": status,
                 }
@@ -34,9 +38,13 @@ async def _dispatch_skill_event(name: str, metadata: SkillMetadata, status: str)
 
 
 def build_load_skill_tool(registry: SkillRegistry) -> StructuredTool:
-    async def load_skill(skill_id: Annotated[str, "Registered skill ID"] = "") -> str:
+    async def load_skill(
+        skill_id: Annotated[str, "Registered skill ID"] = "",
+        tool_call_id: Annotated[str, InjectedToolCallId] = "",
+    ) -> str:
         metadata = registry.get(skill_id)
-        await _dispatch_skill_event("skill.started", metadata, "in_progress")
+        call_id = tool_call_id or f"skill:{metadata.id}"
+        await _dispatch_skill_event("skill.started", metadata, "in_progress", call_id)
         status = "completed"
         try:
             skill = registry.get(skill_id, load=True)
@@ -45,7 +53,7 @@ def build_load_skill_tool(registry: SkillRegistry) -> StructuredTool:
             status = "failed"
             raise
         finally:
-            await _dispatch_skill_event("skill.completed", metadata, status)
+            await _dispatch_skill_event("skill.completed", metadata, status, call_id)
 
     return StructuredTool.from_function(
         coroutine=load_skill,

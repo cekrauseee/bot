@@ -291,10 +291,10 @@ def _server_tool_arguments(block: dict[str, Any]) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _hosted_tool_event(
+def _hosted_tool_events(
     block: dict[str, Any],
     hosted_tools: dict[str, dict[str, Any]],
-) -> dict[str, Any] | None:
+) -> list[dict[str, Any]]:
     block_type = block.get("type")
     block_id = str(block.get("id") or block.get("tool_call_id") or "")
     existing_tool = hosted_tools.get(block_id)
@@ -306,9 +306,9 @@ def _hosted_tool_event(
         raw_name = str(extras.get("tool_name", "")).lower()
     tool_name = raw_name or str((existing_tool or {}).get("name", ""))
     if server_label not in {None, "github"}:
-        return None
+        return []
     if tool_name not in GITHUB_TOOL_NAMES:
-        return None
+        return []
 
     tool_id = block_id or f"github-tool-{len(hosted_tools) + 1}"
     existing_tool = hosted_tools.get(tool_id)
@@ -319,6 +319,14 @@ def _hosted_tool_event(
             status = "failed"
         elif result_status in {"completed", "success"}:
             status = "completed"
+
+    if (
+        existing_tool
+        and existing_tool.get("status") in {"completed", "failed"}
+        and status == "in_progress"
+    ):
+        # A late provider chunk cannot reopen a terminal lifecycle.
+        return []
 
     target = _tool_target(tool_name, {"input": _server_tool_arguments(block)})
     tool = {
@@ -334,8 +342,22 @@ def _hosted_tool_event(
         tool["detail"] = "GitHub could not complete this action."
 
     if existing_tool == tool:
-        return None
+        # A streamed chunk is itself a lifecycle observation even when its
+        # public projection has not changed yet. Keep the update visible so a
+        # consumer can distinguish started → updated → completed.
+        if block_type == "server_tool_call_chunk":
+            return [{"type": "tool.updated", "data": {"tool": tool}}]
+        return []
     hosted_tools[tool_id] = tool
+    # Responses API can deliver the first observation only after the hosted
+    # call has finished. Preserve the same lifecycle contract as a streamed
+    # observation by synthesizing the missing start before the terminal event.
+    if status in {"completed", "failed"} and not existing_tool:
+        started = {**tool, "label": _tool_label(tool_name, "in_progress"), "status": "in_progress"}
+        return [
+            {"type": "tool.started", "data": {"tool": started}},
+            {"type": "tool.completed", "data": {"tool": tool}},
+        ]
     event_type = (
         "tool.completed"
         if status in {"completed", "failed"}
@@ -343,7 +365,7 @@ def _hosted_tool_event(
         if existing_tool
         else "tool.started"
     )
-    return {"type": event_type, "data": {"tool": tool}}
+    return [{"type": event_type, "data": {"tool": tool}}]
 
 
 def _tool_failure(output: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -568,7 +590,7 @@ def _tool_event(event: dict[str, Any]) -> NormalizedEvent | None:
             data={
                 "skill": {
                     key: skill[key]
-                    for key in ("id", "name", "detail", "status")
+                    for key in ("id", "skill_id", "name", "detail", "status")
                     if key in skill
                 }
             },
@@ -741,6 +763,33 @@ async def stream_model(
     hosted_tools: dict[str, dict[str, Any]] = {}
     pending_sources: list[dict[str, str]] = []
     emitted_text: list[str] = []
+    reasoning_activity_fallback = "reasoning"
+    if config is not None:
+        configurable = config.get("configurable")
+        if isinstance(configurable, dict) and isinstance(configurable.get("thread_id"), str):
+            reasoning_activity_fallback = f"reasoning:{configurable['thread_id']}"
+    previous_reasoning_summaries: dict[str, str] = {}
+
+    def close_active_activities(status: Literal["completed", "failed"]):
+        """Close provider activities that never delivered their terminal block."""
+
+        for search in list(searches.values()):
+            if search.get("status") != "in_progress":
+                continue
+            search["status"] = status
+            if status == "failed":
+                search["detail"] = "The web search could not complete."
+            yield {"type": "step.completed", "data": {"step": search}}
+
+        for tool in list(hosted_tools.values()):
+            if tool.get("status") != "in_progress":
+                continue
+            tool["status"] = status
+            tool["label"] = _tool_label(str(tool.get("name", "tool")), status)
+            if status == "failed":
+                tool["detail"] = "The hosted tool could not complete."
+            yield {"type": "tool.completed", "data": {"tool": tool}}
+
     stream_kwargs: dict[str, Any] = {"version": "v2", "durability": "sync"}
     if config is not None:
         stream_kwargs["config"] = config
@@ -779,7 +828,34 @@ async def stream_model(
                         yield {"type": "text.delta", "data": {"delta": plain_text}}
 
                 for summary in _reasoning_summaries(chunk, provider):
-                    yield {"type": "reasoning.delta", "data": {"delta": summary}}
+                    provider_run_id = event.get("run_id")
+                    reasoning_activity_id = (
+                        f"reasoning:{provider_run_id}"
+                        if isinstance(provider_run_id, str) and provider_run_id
+                        else reasoning_activity_fallback
+                    )
+                    previous_reasoning_summary = previous_reasoning_summaries.get(
+                        reasoning_activity_id, ""
+                    )
+                    # Some providers resend a cumulative summary on every
+                    # chunk. Emit only its new suffix so durable and live
+                    # projections cannot duplicate the same explanation.
+                    if summary == previous_reasoning_summary or (
+                        previous_reasoning_summary and
+                        previous_reasoning_summary.startswith(summary)
+                    ):
+                        continue
+                    delta = summary
+                    if previous_reasoning_summary and summary.startswith(
+                        previous_reasoning_summary
+                    ):
+                        delta = summary[len(previous_reasoning_summary):]
+                    previous_reasoning_summaries[reasoning_activity_id] = summary
+                    if delta:
+                        yield {
+                            "type": "reasoning.delta",
+                            "data": {"delta": delta, "activity_id": reasoning_activity_id},
+                        }
 
                 for block in blocks:
                     block_type = block.get("type")
@@ -794,9 +870,10 @@ async def stream_model(
                     name = str(block.get("name", "")).lower()
                     is_web_search = "web_search" in name or block_id in searches
                     if not is_web_search:
-                        hosted_event = _hosted_tool_event(block, hosted_tools)
+                        hosted_event = _hosted_tool_events(block, hosted_tools)
                         if hosted_event is not None:
-                            yield hosted_event
+                            for normalized in hosted_event:
+                                yield normalized
                         continue
                     search_id = block_id or "web-search"
                     existing = searches.get(search_id)
@@ -828,13 +905,16 @@ async def stream_model(
                 for block in _raw_blocks(data.get("output")):
                     if block.get("type") != "mcp_call":
                         continue
-                    hosted_event = _hosted_tool_event(block, hosted_tools)
+                    hosted_event = _hosted_tool_events(block, hosted_tools)
                     if hosted_event is not None:
-                        yield hosted_event
+                        for normalized in hosted_event:
+                            yield normalized
 
             normalized_tool = _tool_event(event)
             if normalized_tool is not None:
                 yield normalized_tool.model_dump(mode="json")
+        for normalized in close_active_activities("completed"):
+            yield normalized
     except GraphRecursionError:
         # Recursion is an execution boundary, not an upstream provider failure.
         # Read the durable checkpoint and finish with whatever answer was saved.
@@ -843,6 +923,9 @@ async def stream_model(
             with suppress(Exception):
                 partial = _checkpoint_content(await graph.aget_state(config))
         already_emitted = "".join(emitted_text)
+        close_status = "completed" if partial or already_emitted else "failed"
+        for normalized in close_active_activities(close_status):
+            yield normalized
         if partial and partial.startswith(already_emitted) and len(partial) > len(already_emitted):
             yield {"type": "text.delta", "data": {"delta": partial[len(already_emitted):]}}
         if partial or already_emitted:
@@ -871,6 +954,17 @@ async def stream_model(
                 },
             }
         return
+    except asyncio.CancelledError:
+        raise
+    except GeneratorExit:
+        raise
+    except Exception:
+        # Preserve the original provider exception for router classification,
+        # but do not leave a visible tool/search row active in the terminal
+        # projection.
+        for normalized in close_active_activities("failed"):
+            yield normalized
+        raise
 def _result_text(result: Any) -> str:
     messages = result.get("messages", []) if isinstance(result, dict) else []
     if not messages:

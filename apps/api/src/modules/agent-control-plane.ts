@@ -393,16 +393,23 @@ const appendReasoningActivity = (
   activities: Array<Record<string, unknown>>,
   delta: string,
   sequence: number,
+  activityId?: string,
 ) => {
-  const last = activities.at(-1)
-  if (last?.type === 'text' && last.lastSequence === sequence - 1 &&
-    typeof last.content === 'string') {
-    last.content += delta
-    last.lastSequence = sequence
+  const id = activityId && activityId.length <= 200
+    ? activityId
+    : `reasoning-${sequence}`
+  const existingIndex = activities.findIndex((activity) => activity.id === id)
+  const existing = existingIndex >= 0 ? activities[existingIndex] : undefined
+  if (existing?.type === 'text' && typeof existing.content === 'string') {
+    // The activity ID is stable across title events and reconnects. Sequence
+    // ordering is still retained for diagnostics, but must not be required
+    // for additive reasoning updates.
+    existing.content += delta
+    existing.lastSequence = sequence
     return
   }
   activities.push({
-    id: `reasoning-${sequence}`,
+    id,
     type: 'text',
     content: delta,
     lastSequence: sequence,
@@ -780,7 +787,12 @@ export class AgentRunExecutor {
         } else if (event.type === 'reasoning.delta') {
           if (typeof data.delta !== 'string') throw new Error('invalid_provider_event')
           reasoning += data.delta
-          appendReasoningActivity(activities, data.delta, event.sequence)
+          appendReasoningActivity(
+            activities,
+            data.delta,
+            event.sequence,
+            typeof data.activity_id === 'string' ? data.activity_id : undefined,
+          )
         }
         upsertActivity(activities, event.type, data)
 

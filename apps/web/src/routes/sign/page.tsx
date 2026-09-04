@@ -41,8 +41,13 @@ export default function SignPage() {
     <main className="flex min-h-svh items-center justify-center p-4">
       {session.status === "loading" ? (
         <Spinner aria-label="Checking session" />
+      ) : window.myBotDesktop ? (
+        <DesktopSignIn />
       ) : (
-        window.myBotDesktop ? <DesktopSignIn /> : <SignInCard googleError={searchParams.get("error") === "google"} desktopTransaction={desktopHandoff ?? undefined} />
+        <SignInCard
+          googleError={searchParams.get("error") === "google"}
+          desktopTransaction={desktopHandoff ?? undefined}
+        />
       )}
     </main>
   )

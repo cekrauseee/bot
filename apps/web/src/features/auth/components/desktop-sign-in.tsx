@@ -1,7 +1,13 @@
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 
 type DesktopState = "idle" | "opening" | "waiting" | "error"
 
@@ -33,15 +39,29 @@ export function DesktopSignIn() {
   return (
     <Card className="w-full max-w-sm" size="sm">
       <CardHeader>
-        <CardTitle><h1>Sign in to Bot</h1></CardTitle>
+        <CardTitle>
+          <h1>Sign in to Bot</h1>
+        </CardTitle>
         <CardDescription>Use your browser to sign in.</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        <Button className="w-full" onClick={continueInBrowser} disabled={state === "opening"}>
-          {state === "opening" ? "Opening browser…" : state === "waiting" ? "Open browser again" : "Continue in browser"}
+        <Button
+          className="w-full"
+          onClick={continueInBrowser}
+          disabled={state === "opening"}
+        >
+          {state === "opening"
+            ? "Opening browser…"
+            : state === "waiting"
+              ? "Open browser again"
+              : "Continue in browser"}
         </Button>
         {statusMessage && (
-          <p className="text-muted-foreground text-center text-xs" role="status" aria-live="polite">
+          <p
+            className="text-center text-xs text-muted-foreground"
+            role="status"
+            aria-live="polite"
+          >
             {statusMessage}
           </p>
         )}

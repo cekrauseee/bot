@@ -65,6 +65,8 @@ import {
 } from './logger.js'
 
 const DESKTOP_RENDERER_ORIGIN = 'app://mybot'
+export const AGENT_RUN_SOCKET_RECONCILE_INTERVAL_MS = 1_000
+export const ACTIVE_RUN_DISCOVERY_RECONCILE_INTERVAL_MS = 5_000
 
 export type Services = {
   database: Database
@@ -1422,11 +1424,12 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       const conversation = await new ConversationRepository(db).get(user.id, params.conversationId)
       if (!conversation) return undefined
       const runs = new AgentRunRepository(db)
-      const [activeRun, plan] = await Promise.all([
+      const [activeRun, plan, eventCursor] = await Promise.all([
         runs.activeForConversation(conversation.id),
         runs.taskPlanFor(user.id, conversation.id),
+        runs.eventCursorForConversation(conversation.id),
       ])
-      return { conversation, activeRun, plan }
+      return { conversation, activeRun, plan, eventCursor }
     }, { isolationLevel: 'repeatable read' })
     if (!result) {
       set.status = 404
@@ -1437,6 +1440,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       messages: result.conversation.messages.map(publicMessage),
       plan: result.plan,
       active_run: result.activeRun ? activeRunProjection(result.activeRun) : null,
+      event_cursor: result.eventCursor.toString(),
     }
   }, { params: conversationParams })
 
@@ -1792,6 +1796,9 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   // Key by socket object instead of provider-assigned ids so a recycled id
   // cannot overwrite another connection's cleanup callback.
   const socketSubscriptions = new WeakMap<object, () => void>()
+  // Reconciliation is deliberately short: fanout is only a wake hint, so an
+  // open browser socket repairs a missed Redis message without waiting for a
+  // reconnect.
   type ActiveRunDiscoveryMessage = {
     version: 2
     type: 'active_run.discovered'
@@ -1814,12 +1821,14 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       const request = (socket.data as unknown as { request: Request }).request
       const user = await sessionUser(request)
       let closed = false
-      const discovered = new Set<string>()
+      const discovered = new Map<string, string>()
       let replaying = true
       const buffered: AgentRun[] = []
       const send = (run: AgentRun) => {
-        if (closed || discovered.has(run.id)) return
-        discovered.add(run.id)
+        if (closed) return
+        const fingerprint = `${run.lastEventSequence?.toString() ?? '0'}:${run.status}`
+        if (discovered.get(run.id) === fingerprint) return
+        discovered.set(run.id, fingerprint)
         socket.send(JSON.stringify(activeRunDiscovery(run)))
       }
       const receive = (event: ReturnType<typeof publicAgentEvent>) => {
@@ -1833,17 +1842,26 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
         }).catch(() => undefined)
       }
       const unsubscribe = agentExecutor.hub.subscribeAll(receive)
+      let reconcileTimer: ReturnType<typeof setInterval> | undefined
       socketSubscriptions.set(socket, () => {
         closed = true
         unsubscribe()
+        if (reconcileTimer) clearInterval(reconcileTimer)
       })
-      const entries = await services.database.transaction((db) =>
-        new AgentRunRepository(db).activeForUser(user.id))
-      for (const { run } of entries) send(run)
+      const reconcile = async () => {
+        const entries = await services.database.transaction((db) =>
+          new AgentRunRepository(db).activeForUser(user.id))
+        if (closed) return
+        for (const { run } of entries) send(run)
+      }
+      await reconcile()
       // Events received while the snapshot was being read are emitted after it,
       // with run-id deduplication preserving exactly one discovery per run.
       replaying = false
       for (const run of buffered) send(run)
+      if (!closed) {
+        reconcileTimer = setInterval(() => void reconcile().catch(() => undefined), ACTIVE_RUN_DISCOVERY_RECONCILE_INTERVAL_MS)
+      }
     },
     close: (socket) => {
       socketSubscriptions.get(socket)?.()
@@ -1872,40 +1890,60 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       const afterValue = socket.data.query.after ?? '0'
       const after = BigInt(afterValue)
       let cursor = after
-      let replaying = true
-      const buffered: ReturnType<typeof publicAgentEvent>[] = []
+      let pumping = false
+      let reconcileTimer: ReturnType<typeof setInterval> | undefined
+      let closed = false
       const send = (event: ReturnType<typeof publicAgentEvent>) => {
         const sequence = BigInt(event.sequence)
         if (sequence <= cursor) return
-        cursor = sequence
         socket.send(JSON.stringify(event))
+        cursor = sequence
+        if (event.type === 'turn.completed' || event.type === 'turn.failed') {
+          closed = true
+          socketSubscriptions.get(socket)?.()
+          socket.close()
+        }
       }
-      const receive = (event: ReturnType<typeof publicAgentEvent>) => {
-        if (replaying) buffered.push(event)
-        else send(event)
+      const pump = async () => {
+        if (closed || pumping) return
+        pumping = true
+        try {
+          while (!closed) {
+            const page = await services.database.transaction(async (db) => {
+              const repository = new AgentRunRepository(db)
+              const run = await repository.get(runId)
+              if (!run) return undefined
+              const highWater = await repository.replayHighWater(runId)
+              return { highWater, page: await repository.replayPage(runId, cursor, highWater) }
+            })
+            if (!page || closed) break
+            for (const event of page.page.events) {
+              if (closed) break
+              send(publicAgentEvent(event))
+            }
+            if (!page.page.hasMore) break
+          }
+        } catch {
+          // The next fanout wake or reconciliation interval retries the tail.
+        } finally {
+          pumping = false
+        }
       }
+      const receive = () => { void pump() }
       const unsubscribeEvents = agentExecutor.hub.subscribe(runId, receive)
       const unsubscribeFrames = agentExecutor.hub.subscribeFrames(runId, (frame) => {
-        socket.send(JSON.stringify({ version: 2, run_id: runId, type: 'browser.frame', data: frame }))
+        if (!closed) socket.send(JSON.stringify({ version: 2, run_id: runId, type: 'browser.frame', data: frame }))
       })
       socketSubscriptions.set(socket, () => {
+        closed = true
         unsubscribeEvents()
         unsubscribeFrames()
+        if (reconcileTimer) clearInterval(reconcileTimer)
       })
-      const highWater = await services.database.transaction((db) =>
-        new AgentRunRepository(db).replayHighWater(runId))
-      while (cursor < highWater) {
-        const page = await services.database.transaction((db) =>
-          new AgentRunRepository(db).replayPage(runId, cursor, highWater))
-        for (const event of page.events) send(publicAgentEvent(event))
-        if (!page.hasMore) break
+      await pump()
+      if (!closed) {
+        reconcileTimer = setInterval(() => void pump(), AGENT_RUN_SOCKET_RECONCILE_INTERVAL_MS)
       }
-      while (buffered.length) {
-        const batch = buffered.splice(0).sort((left, right) =>
-          BigInt(left.sequence) < BigInt(right.sequence) ? -1 : 1)
-        for (const event of batch) send(event)
-      }
-      replaying = false
     },
     close: (socket) => {
       socketSubscriptions.get(socket)?.()

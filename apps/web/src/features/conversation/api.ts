@@ -15,6 +15,7 @@ export type ApiConversationMessage = {
 
 export type ConversationDetail = ConversationSummary & {
   active_run?: unknown
+  event_cursor?: string
   messages: unknown[]
   plan?: unknown[]
 }

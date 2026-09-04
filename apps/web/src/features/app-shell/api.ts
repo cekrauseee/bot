@@ -91,17 +91,14 @@ export const appShellApi = {
     conversationId: string,
     preferences: { model: string; reasoningEffort: string; fastMode: boolean }
   ) =>
-    apiRequest<ConversationSummary>(
-      `/conversations/${conversationId}/model`,
-      {
-        method: "PATCH",
-        body: JSON.stringify({
-          model: preferences.model,
-          reasoning_effort: preferences.reasoningEffort,
-          speed: preferences.fastMode ? "fast" : "standard",
-        }),
-      }
-    ),
+    apiRequest<ConversationSummary>(`/conversations/${conversationId}/model`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        model: preferences.model,
+        reasoning_effort: preferences.reasoningEffort,
+        speed: preferences.fastMode ? "fast" : "standard",
+      }),
+    }),
   renameProject: (projectId: string, name: string) =>
     apiRequest<ProjectSummary>(`/projects/${projectId}`, {
       method: "PATCH",

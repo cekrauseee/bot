@@ -7,6 +7,7 @@ import {
   consumeTurnSpacerAnchor,
   emptyConversationRecord,
   markRunStopRequested,
+  mergeConversationSnapshot,
   recordFromDetail,
   type ConversationRecord,
 } from "@/features/conversation/conversation-state"
@@ -30,14 +31,14 @@ export function useConversations(
   const [records, setRecords] = useState<Record<string, ConversationRecord>>({})
   const recordsRef = useRef(records)
   const requests = useRef(new Map<string, AbortController>())
-  const subscriptions = useRef(new Map<string, () => void>())
+  const subscriptions = useRef(new Map<string, { runId: string; stop: () => void }>())
   recordsRef.current = records
 
   useEffect(
     () => () => {
       for (const controller of requests.current.values()) controller.abort()
       requests.current.clear()
-      for (const stop of subscriptions.current.values()) stop()
+      for (const { stop } of subscriptions.current.values()) stop()
       subscriptions.current.clear()
     },
     []
@@ -80,16 +81,21 @@ export function useConversations(
           const latest = state[conversationId] ?? emptyConversationRecord()
           if (!options?.force && latest.version !== expectedVersion)
             return state
-          return {
-            ...state,
-            [conversationId]: {
-              ...recordFromDetail(
-                detail.messages,
-                parseActiveRun(detail.active_run) ?? undefined
-              ),
-              version: latest.version,
-            },
-          }
+          const incomingCursor = detail.event_cursor ??
+            (parseActiveRun(detail.active_run)?.last_event_sequence ?? "0")
+          const incoming = recordFromDetail(
+            detail.messages,
+            parseActiveRun(detail.active_run) ?? undefined,
+            incomingCursor
+          )
+          const merged = mergeConversationSnapshot(
+            latest,
+            incoming,
+            incomingCursor
+          )
+          return merged === latest
+            ? state
+            : { ...state, [conversationId]: merged }
         })
       } catch (error) {
         if (controller.signal.aborted) return
@@ -135,7 +141,13 @@ export function useConversations(
   useEffect(() => {
     for (const [conversationId, record] of Object.entries(records)) {
       if (!record.runId) continue
-      if (subscriptions.current.has(conversationId)) continue
+      const existing = subscriptions.current.get(conversationId)
+      if (existing?.runId === record.runId) continue
+      if (existing) {
+        existing.stop()
+        subscriptions.current.delete(conversationId)
+      }
+      if (!record.runId) continue
       const stop = subscribeToRun({
         after: record.lastEventSequence ?? "0",
         runId: record.runId,
@@ -159,19 +171,23 @@ export function useConversations(
           })
         },
         onTerminal: () => {
-          subscriptions.current.delete(conversationId)
+          if (subscriptions.current.get(conversationId)?.runId === record.runId) {
+            subscriptions.current.delete(conversationId)
+          }
           void loadConversation(conversationId, { force: true })
         },
         onResync: () => {
-          subscriptions.current.delete(conversationId)
+          if (subscriptions.current.get(conversationId)?.runId === record.runId) {
+            subscriptions.current.delete(conversationId)
+          }
           void loadConversation(conversationId, { force: true })
         },
       })
-      subscriptions.current.set(conversationId, stop)
+      subscriptions.current.set(conversationId, { runId: record.runId, stop })
     }
-    for (const [conversationId, stop] of subscriptions.current) {
+    for (const [conversationId, subscription] of subscriptions.current) {
       if (!records[conversationId]?.runId) {
-        stop()
+        subscription.stop()
         subscriptions.current.delete(conversationId)
       }
     }

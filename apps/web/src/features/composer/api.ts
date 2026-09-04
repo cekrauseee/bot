@@ -24,10 +24,7 @@ export type TurnStreamEvent = {
   version: 2
 }
 
-const terminalEventTypes = new Set([
-  "turn.completed",
-  "turn.failed",
-])
+const terminalEventTypes = new Set(["turn.completed", "turn.failed"])
 const canonicalSequence = /^(0|[1-9]\d*)$/
 
 function record(value: unknown): Record<string, unknown> | null {

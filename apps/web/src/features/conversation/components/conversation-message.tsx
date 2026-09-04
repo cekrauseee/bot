@@ -27,7 +27,10 @@ function AssistantMessage({
   streaming: boolean
 }) {
   const { animateFromOffset, animationEnabled, displayedContent } =
-    useSmoothStreamedContent(content, streaming, { animateInitial: true })
+    useSmoothStreamedContent(content, streaming, {
+      animateInitial: true,
+      flushOnStreamEnd: true,
+    })
   const rehypePlugins = useMemo<
     NonNullable<ComponentProps<typeof ReactMarkdown>["rehypePlugins"]>
   >(

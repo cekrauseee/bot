@@ -697,6 +697,15 @@ export class AgentRunRepository {
       )).orderBy(agentRuns.createdAt, agentRuns.id)
   }
 
+  /** Highest durable event visible for a conversation. PostgreSQL is the authority. */
+  async eventCursorForConversation(conversationId: string) {
+    const [row] = await this.db.select({
+      sequence: sql<string | null>`max(${agentEvents.sequence})`,
+    }).from(agentEvents).innerJoin(agentRuns, eq(agentRuns.id, agentEvents.runId))
+      .where(eq(agentRuns.conversationId, conversationId))
+    return row?.sequence == null ? 0n : BigInt(row.sequence)
+  }
+
   async claim(id: string, leaseMilliseconds = 60_000) {
     const now = new Date()
     const [run] = await this.db.update(agentRuns).set({
