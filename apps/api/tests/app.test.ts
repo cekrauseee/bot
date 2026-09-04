@@ -83,6 +83,9 @@ describe('HTTP contract', () => {
       AI_SERVICE_TOKEN: 'ai-service-token-that-is-at-least-32-characters',
       GOOGLE_CLIENT_ID: 'client.apps.googleusercontent.com',
       GOOGLE_CLIENT_SECRET: 'google-client-secret',
+      GITHUB_OAUTH_CLIENT_ID: '',
+      GITHUB_OAUTH_CLIENT_SECRET: '',
+      GITHUB_TOKEN_ENCRYPTION_KEY: '',
       RESEND_API_KEY: 're_live_valid-key',
     })
     const app = createApp(productionSettings, services)
@@ -303,6 +306,55 @@ describe('HTTP contract', () => {
     expect(response.headers.get('set-cookie')).toContain('mybot_oauth_state=;')
   })
 
+  it('returns a successful Google desktop sign-in directly to the app', async () => {
+    const transactionId = 't'.repeat(32)
+    const desktopServices = {
+      ...services,
+      database: {
+        transaction: vi.fn().mockResolvedValue({
+          userId: 'user_123',
+          session: { token: 'session-token' },
+        }),
+      },
+      google: {
+        ...services.google,
+        callback: vi.fn().mockResolvedValue({
+          subject: 'google-subject',
+          email: 'person@example.com',
+          firstName: 'Person',
+          lastName: null,
+          avatarUrl: null,
+        }),
+      },
+      desktopAuth: {
+        complete: vi.fn().mockResolvedValue({
+          callbackUrl: `mybot://auth/callback?transaction_id=${transactionId}`,
+        }),
+      },
+    }
+    const app = createApp(settings, desktopServices as any)
+    const response = await app.handle(new Request(
+      'http://localhost/auth/google/callback?state=state&code=code',
+      {
+        headers: {
+          cookie: [
+            `mybot_oauth_state=${encodeURIComponent(signValue('state', settings.sessionSecret))}`,
+            `mybot_desktop_transaction=${transactionId}`,
+          ].join('; '),
+        },
+      },
+    ))
+
+    expect(response.status).toBe(303)
+    expect(response.headers.get('location')).toBe(
+      `mybot://auth/callback?transaction_id=${transactionId}`,
+    )
+    expect(desktopServices.desktopAuth.complete).toHaveBeenCalledWith(
+      transactionId,
+      'user_123',
+    )
+  })
+
   it('emits both Google callback cookies through the Node listener', async () => {
     services.google.callback.mockResolvedValue({
       subject: 'google-subject',
@@ -311,7 +363,10 @@ describe('HTTP contract', () => {
       lastName: null,
       avatarUrl: null,
     })
-    services.database.transaction = vi.fn().mockResolvedValue({ token: 'session-token' })
+    services.database.transaction = vi.fn().mockResolvedValue({
+      userId: 'user_123',
+      session: { token: 'session-token' },
+    })
     services.sessions.cookie.mockReturnValue('mybot_session=session-token')
     const app = createApp(settings, services)
     const server = await new Promise<any>((resolve) => app.listen({ port: 0, hostname: '127.0.0.1' }, resolve))

@@ -815,7 +815,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     const state = verifySignedValue(cookieValue(request, oauthStateCookieName), settings.sessionSecret)
     try {
       const profile = await services.google.callback(query, state)
-      const issued = await services.database.transaction(async (db) => {
+      const authenticated = await services.database.transaction(async (db) => {
         const repository = new AuthRepository(db)
         const user = await repository.getOrCreateGoogleUser({
           providerSubject: profile.subject,
@@ -825,14 +825,21 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
           avatarUrl: profile.avatarUrl,
           providerEmail: profile.email,
         })
-        return services.sessions.issue(repository, user.id)
+        return {
+          userId: user.id,
+          session: await services.sessions.issue(repository, user.id),
+        }
       })
       const transactionId = cookieValue(request, desktopTransactionCookieName)
+      const desktopCompletion = transactionId
+        ? await services.desktopAuth?.complete(transactionId, authenticated.userId)
+        : undefined
+      if (transactionId && !desktopCompletion) {
+        throw new AuthError('desktop_auth_unavailable', 'Desktop sign-in is unavailable.', 503)
+      }
       set.status = 303
-      set.headers.Location = transactionId
-        ? `${settings.webOrigin}/sign?desktop_transaction=${encodeURIComponent(transactionId)}`
-        : `${settings.webOrigin}/`
-      set.headers['set-cookie'] = [services.sessions.cookie(issued.token), clearOauthStateCookie(), `${desktopTransactionCookieName}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax`] as any
+      set.headers.Location = desktopCompletion?.callbackUrl ?? `${settings.webOrigin}/`
+      set.headers['set-cookie'] = [services.sessions.cookie(authenticated.session.token), clearOauthStateCookie(), `${desktopTransactionCookieName}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax`] as any
       return undefined
     } catch {
       set.status = 303
@@ -850,19 +857,29 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     const url = new URL(request.url)
     const query = Object.fromEntries(url.searchParams.entries())
     const signed = cookieValue(request, githubOauthStateCookieName)
+    let callbackTarget: 'web' | 'desktop' = 'web'
+    let callbackStatus: 'connected' | 'error' = 'connected'
     try {
       const state = verifySignedValue(signed, settings.sessionSecret)
       const hasSession = Boolean(
         request.headers.get('authorization') || cookieValue(request, settings.sessionCookieName),
       )
       const expectedUserId = hasSession ? (await sessionUser(request)).id : undefined
-      await services.github.completeCallback(query, state, expectedUserId)
-      set.status = 303
-      set.headers.Location = `${settings.webOrigin}/?github=connected`
-    } catch {
-      set.status = 303
-      set.headers.Location = `${settings.webOrigin}/?github=error`
+      const completion = await services.github.completeCallback(query, state, expectedUserId)
+      callbackTarget = completion.callbackTarget
+    } catch (error) {
+      callbackStatus = 'error'
+      if (
+        error &&
+        typeof error === 'object' &&
+        'callbackTarget' in error &&
+        error.callbackTarget === 'desktop'
+      ) callbackTarget = 'desktop'
     }
+    set.status = 303
+    set.headers.Location = callbackTarget === 'desktop'
+      ? `${settings.webOrigin}/connections/github/callback?status=${callbackStatus}&target=desktop`
+      : `${settings.webOrigin}/connections/github/callback?status=${callbackStatus}`
     set.headers['set-cookie'] = clearGithubOauthStateCookie()
     return undefined
   }, { response: { 303: t.Void(), 503: detailSchema } })
@@ -991,6 +1008,9 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
     }
     return registration.adapter
   }
+  const providerConnectionContext = (request: Request) => ({
+    callbackTarget: bearerValue(request) ? 'desktop' as const : 'web' as const,
+  })
   const providerConnectionCall = async <T>(operation: () => Promise<T>) => {
     try {
       return await operation()
@@ -1004,6 +1024,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
   const resolvedProviderConnection = async (
     userId: string,
     registration: ProviderConnectionRegistry[string],
+    request: Request,
   ) => {
     if (!registration.adapter) {
       return publicProviderConnection({
@@ -1014,7 +1035,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       }, false)
     }
     const connection = await providerConnectionCall(() =>
-      registration.adapter!.connection(userId))
+      registration.adapter!.connection(userId, providerConnectionContext(request)))
     const active = connection.status === 'connected'
       ? await services.providerConnectionSettings?.isActive(userId, registration.provider) ?? true
       : false
@@ -1106,7 +1127,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       const connections = await Promise.all(registrations.map(async ([connectionId, registration]) => ({
         connection_id: connectionId,
         provider: registration.provider,
-        ...await resolvedProviderConnection(user.id, registration),
+        ...await resolvedProviderConnection(user.id, registration, request),
       })))
       return { connections }
     },
@@ -1124,7 +1145,7 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       set.headers['cache-control'] = 'no-store'
       const user = await sessionUser(request)
       const registration = providerConnectionRegistration(params.connectionId)
-      return resolvedProviderConnection(user.id, registration)
+      return resolvedProviderConnection(user.id, registration, request)
     },
     {
       params: connectionParams,
@@ -1138,7 +1159,8 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       browserOrigin(request)
       const user = await sessionUser(request)
       const adapter = providerConnectionAdapter(params.connectionId)
-      const login = await providerConnectionCall(() => adapter.startLogin(user.id))
+      const login = await providerConnectionCall(() =>
+        adapter.startLogin(user.id, providerConnectionContext(request)))
       set.status = 202
       set.headers['cache-control'] = 'no-store'
       if (login.type === 'browser' && login.state) set.headers['set-cookie'] = githubOauthStateCookie(login.state)
@@ -1246,7 +1268,8 @@ export function createApp(settings: Settings, services: Services, peerResolver: 
       const user = await sessionUser(request)
       const registration = providerConnectionRegistration(params.connectionId)
       const adapter = providerConnectionAdapter(params.connectionId)
-      const connection = await providerConnectionCall(() => adapter.connection(user.id))
+      const connection = await providerConnectionCall(() =>
+        adapter.connection(user.id, providerConnectionContext(request)))
       if (connection.status !== 'connected') {
         throw new AuthError(
           'provider_not_connected',

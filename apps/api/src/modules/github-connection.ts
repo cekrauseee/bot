@@ -8,6 +8,7 @@ import {
   type ProviderConnection,
   type ProviderConnectionAdapter,
   type ProviderLogin,
+  type ProviderConnectionContext,
   type ProviderLoginStatus,
 } from './provider-connections.js'
 
@@ -20,17 +21,18 @@ const USER_URL = 'https://api.github.com/user'
 export const GITHUB_OAUTH_SCOPE = 'repo'
 const jsonHeaders = { accept: 'application/json', 'user-agent': 'Bot' }
 
-type PendingLogin = { userId: string; loginId: string; verifier: string; state?: string; phase?: 'pending' | 'completing' }
+type CallbackTarget = ProviderConnectionContext['callbackTarget']
+type PendingLogin = { userId: string; loginId: string; verifier: string; state?: string; callbackTarget?: CallbackTarget; phase?: 'pending' | 'completing' }
 type TokenEnvelope = { v: 1; iv: string; tag: string; data: string }
 
 export class GithubConnectionError extends ProviderConnectionError {
-  constructor(readonly code: 'github_unavailable' | 'github_already_connected' | 'github_login_not_found' | 'github_auth_failed', message: string, status: number) {
+  constructor(readonly code: 'github_unavailable' | 'github_already_connected' | 'github_login_not_found' | 'github_auth_failed', message: string, status: number, readonly callbackTarget?: CallbackTarget) {
     super(code, message, status)
     this.name = 'GithubConnectionError'
   }
 }
 
-const safeFailure = () => new GithubConnectionError('github_auth_failed', 'Unable to connect GitHub. Try again.', 400)
+const safeFailure = (callbackTarget?: CallbackTarget) => new GithubConnectionError('github_auth_failed', 'Unable to connect GitHub. Try again.', 400, callbackTarget)
 
 export function encryptGithubToken(value: string, key: Buffer): string {
   const iv = randomBytes(12)
@@ -63,14 +65,14 @@ export class GithubConnectionService implements ProviderConnectionAdapter {
     return { status: 'connected', loginMode: 'browser', account: { email: row.email, planType: row.login }, limits: null }
   }
 
-  async startLogin(userId: string): Promise<ProviderLogin> {
+  async startLogin(userId: string, context?: ProviderConnectionContext): Promise<ProviderLogin> {
     if (!this.configured) throw new GithubConnectionError('github_unavailable', 'GitHub connection is not configured.', 503)
     if ((await this.connection(userId)).status === 'connected') throw new GithubConnectionError('github_already_connected', 'A GitHub account is already connected.', 409)
     const loginId = randomBytes(24).toString('base64url')
     const state = randomBytes(32).toString('base64url')
     const verifier = randomBytes(32).toString('base64url')
     const challenge = createHash('sha256').update(verifier).digest('base64url')
-    const pending = { userId, loginId, verifier, state }
+    const pending = { userId, loginId, verifier, state, callbackTarget: context?.callbackTarget ?? 'web' }
     await this.redis.set(`auth:github:state:${state}`, JSON.stringify(pending), 'EX', STATE_TTL)
     await this.redis.set(`auth:github:login:${loginId}`, JSON.stringify(pending), 'EX', STATE_TTL)
     const url = new URL(AUTHORIZATION_URL)
@@ -78,17 +80,22 @@ export class GithubConnectionService implements ProviderConnectionAdapter {
     return { type: 'browser', loginId, authUrl: url.toString(), state }
   }
 
-  async completeCallback(query: Record<string, string | undefined>, cookieState?: string, expectedUserId?: string) {
+  async completeCallback(
+    query: Record<string, string | undefined>,
+    cookieState?: string,
+    expectedUserId?: string,
+  ): Promise<{ loginId: string; callbackTarget: CallbackTarget }> {
     if (!this.configured || !query.state || (cookieState && query.state !== cookieState)) throw safeFailure()
     const raw = await this.redis.getdel(`auth:github:state:${query.state}`)
     if (!raw) throw safeFailure()
     let pending: PendingLogin
     try { pending = JSON.parse(raw) as PendingLogin } catch { throw safeFailure() }
     if (!pending.userId || !pending.loginId || !pending.verifier) throw safeFailure()
+    const callbackTarget = pending.callbackTarget === 'desktop' ? 'desktop' : 'web'
     if (expectedUserId && pending.userId !== expectedUserId) {
       await this.redis.del(`auth:github:login:${pending.loginId}`)
       await this.redis.set(`auth:github:failed:${pending.loginId}`, '1', 'EX', STATE_TTL)
-      throw safeFailure()
+      throw safeFailure(callbackTarget)
     }
     const completing = { ...pending, phase: 'completing' as const }
     await this.redis.set(`auth:github:login:${pending.loginId}`, JSON.stringify(completing), 'EX', STATE_TTL)
@@ -113,11 +120,13 @@ export class GithubConnectionService implements ProviderConnectionAdapter {
         scopes: typeof token.scope === 'string' ? token.scope : '',
       }))
       await this.redis.del(`auth:github:login:${pending.loginId}`)
-      return pending.loginId
+      return { loginId: pending.loginId, callbackTarget }
     } catch (error) {
       await this.redis.del(`auth:github:login:${pending.loginId}`)
       await this.redis.set(`auth:github:failed:${pending.loginId}`, '1', 'EX', STATE_TTL)
-      throw error instanceof GithubConnectionError ? error : safeFailure()
+      throw error instanceof GithubConnectionError
+        ? new GithubConnectionError(error.code, error.message, error.status, error.callbackTarget ?? callbackTarget)
+        : safeFailure(callbackTarget)
     }
   }
 

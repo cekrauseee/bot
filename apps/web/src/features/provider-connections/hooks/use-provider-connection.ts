@@ -12,28 +12,38 @@ type ProviderConnectionState = {
   error: string | null
   loading: boolean
   login: LoginStart | null
+  connectionSucceeded: boolean
   cancel: () => Promise<void>
   connect: () => Promise<void>
+  dismissConnectionSuccess: () => void
   disconnect: () => Promise<void>
   setActive: (active: boolean) => Promise<void>
 }
 
 type UseProviderConnectionOptions = {
   api: ProviderConnectionApi
+  providerId: string
   providerName: string
 }
 
 export function useProviderConnection({
   api,
+  providerId,
   providerName,
 }: UseProviderConnectionOptions): ProviderConnectionState {
   const [connection, setConnection] = useState<ProviderConnection | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [login, setLogin] = useState<LoginStart | null>(null)
+  const [connectionSucceeded, setConnectionSucceeded] = useState(false)
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const activeLoginId = useRef<string | null>(null)
   const loginMode = connection?.login_mode
+
+  const presentConnectionSuccess = useCallback(() => {
+    setConnectionSucceeded(true)
+    void window.myBotDesktop?.focusDesktopApp()
+  }, [])
 
   const loadConnection = useCallback(async () => {
     try {
@@ -63,6 +73,27 @@ export function useProviderConnection({
     }
   }, [loadConnection])
 
+  useEffect(
+    () =>
+      window.myBotDesktop?.onProviderConnectionCallback((result) => {
+        if (result.provider !== providerId) return
+        if (pollTimer.current) clearTimeout(pollTimer.current)
+        activeLoginId.current = null
+        setLogin(null)
+        setLoading(false)
+        if (result.status === "connected") {
+          setError(null)
+          presentConnectionSuccess()
+          void loadConnection().then(() => {
+            window.dispatchEvent(new Event("provider-connections:changed"))
+          })
+        } else {
+          setError(`Unable to connect ${providerName}. Try again.`)
+        }
+      }),
+    [loadConnection, presentConnectionSuccess, providerId, providerName]
+  )
+
   const pollLogin = useCallback(
     async (loginId: string) => {
       async function poll() {
@@ -74,6 +105,7 @@ export function useProviderConnection({
           } else if (result.status === "connected") {
             activeLoginId.current = null
             setConnection(result.connection ?? (await api.get()))
+            presentConnectionSuccess()
             window.dispatchEvent(new Event("provider-connections:changed"))
             setLogin(null)
             setLoading(false)
@@ -121,7 +153,7 @@ export function useProviderConnection({
 
       await poll()
     },
-    [api, providerName]
+    [api, presentConnectionSuccess, providerName]
   )
 
   const connect = useCallback(async () => {
@@ -129,9 +161,13 @@ export function useProviderConnection({
     // A regular browser needs a synchronously opened popup to survive popup
     // blocking. The desktop shell opens the API-returned URL through its
     // validated main-process bridge instead.
-    const popup = mode === "browser" && !window.myBotDesktop ? window.open("", "_blank") : null
+    const popup =
+      mode === "browser" && !window.myBotDesktop
+        ? window.open("", "_blank")
+        : null
     setLoading(true)
     setError(null)
+    setConnectionSucceeded(false)
 
     try {
       const result = await api.startLogin()
@@ -237,11 +273,13 @@ export function useProviderConnection({
 
   return {
     connection,
+    connectionSucceeded,
     error,
     loading,
     login,
     cancel,
     connect,
+    dismissConnectionSuccess: () => setConnectionSucceeded(false),
     disconnect,
     setActive,
   }

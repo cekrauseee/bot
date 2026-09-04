@@ -29,7 +29,8 @@ const APP_ORIGIN = 'app://mybot'
 const RENDERER_ORIGIN = app.isPackaged ? APP_ORIGIN : WEB_ORIGIN
 const WS_RENDERER_ORIGIN = WEB_ORIGIN.replace(/^http/, 'ws')
 const DEEP_LINK_SCHEME = 'mybot'
-const DEEP_LINK_PREFIX = `${DEEP_LINK_SCHEME}://auth/callback`
+const AUTH_DEEP_LINK_PREFIX = `${DEEP_LINK_SCHEME}://auth/callback`
+const GITHUB_DEEP_LINK_PREFIX = `${DEEP_LINK_SCHEME}://connections/github/callback`
 const SESSION_FILE = 'desktop-session.bin'
 const PENDING_AUTH_FILE = 'desktop-auth-pending.bin'
 
@@ -81,13 +82,35 @@ function desktopCallbackTransactionId(value: string) {
   } catch { return undefined }
 }
 
+function githubCallbackStatus(value: string) {
+  try {
+    const url = new URL(value)
+    const keys = [...url.searchParams.keys()]
+    if (
+      url.protocol !== `${DEEP_LINK_SCHEME}:` ||
+      url.hostname !== 'connections' ||
+      url.pathname !== '/github/callback' ||
+      url.username ||
+      url.password ||
+      url.hash ||
+      keys.length !== 1 ||
+      keys[0] !== 'status'
+    ) return undefined
+    const status = url.searchParams.get('status')
+    return status === 'connected' || status === 'error' ? status : undefined
+  } catch { return undefined }
+}
+
 function deepLinksFromArguments(arguments_: string[]) {
-  return arguments_.filter((value) => value.startsWith(DEEP_LINK_PREFIX))
+  return arguments_.filter((value) =>
+    value.startsWith(AUTH_DEEP_LINK_PREFIX) || value.startsWith(GITHUB_DEEP_LINK_PREFIX))
 }
 
 function focusMainWindow() {
   if (!mainWindow) return
   if (mainWindow.isMinimized()) mainWindow.restore()
+  if (process.platform === 'darwin') app.focus({ steal: true })
+  else app.focus()
   mainWindow.show()
   mainWindow.focus()
 }
@@ -220,7 +243,25 @@ async function handleDesktopCallback(value: string) {
   }
 }
 
+async function handleGithubCallback(status: 'connected' | 'error') {
+  if (!mainWindow) await createWindow()
+  focusMainWindow()
+  mainWindow?.webContents.send('desktop:provider-connection-callback', {
+    provider: 'github',
+    status,
+  })
+}
+
 function dispatchDeepLink(value: string) {
+  const githubStatus = githubCallbackStatus(value)
+  if (githubStatus) {
+    if (!app.isReady()) {
+      queuedDeepLinks.push(value)
+      return
+    }
+    void handleGithubCallback(githubStatus)
+    return
+  }
   if (!desktopCallbackTransactionId(value)) return
   if (!app.isReady()) {
     queuedDeepLinks.push(value)
@@ -333,6 +374,10 @@ if (!hasSingleInstanceLock) {
       if (typeof value !== 'string' || !validExternalUrl(value)) throw new Error('External URL is not allowed')
       await shell.openExternal(value)
     })
+    ipcMain.handle('desktop:focus-app', async (event) => {
+      if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error('Invalid IPC sender')
+      focusMainWindow()
+    })
     await createWindow()
 
     const initialDeepLinks = [
@@ -340,7 +385,7 @@ if (!hasSingleInstanceLock) {
       ...deepLinksFromArguments(process.argv),
     ]
     queuedDeepLinks = []
-    for (const deepLink of initialDeepLinks) await handleDesktopCallback(deepLink)
+    for (const deepLink of initialDeepLinks) dispatchDeepLink(deepLink)
   })
 
   app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })

@@ -47,7 +47,10 @@ describe('GitHub connection security', () => {
         githubTokenEncryptionKey: Buffer.alloc(32),
       } as never,
     )
-    const login = await service.startLogin('00000000-0000-0000-0000-000000000001')
+    const login = await service.startLogin(
+      '00000000-0000-0000-0000-000000000001',
+      { callbackTarget: 'desktop' },
+    )
     expect(new URL(login.authUrl).searchParams.get('scope')).toBe('repo')
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response(JSON.stringify({ access_token: 'github-access' }), { status: 200 }),
@@ -56,7 +59,7 @@ describe('GitHub connection security', () => {
     )
     try {
       await expect(service.completeCallback({ state: login.type === 'browser' ? login.state : undefined, code: 'oauth-code' }))
-        .resolves.toBe('' + login.loginId)
+        .resolves.toEqual({ loginId: login.loginId, callbackTarget: 'desktop' })
       expect(fetchMock).toHaveBeenCalledTimes(2)
     } finally {
       fetchMock.mockRestore()
